@@ -1,0 +1,66 @@
+[
+  {
+    "tax_type": "ANNEX_V",
+    "valid_from": "2018-01-01",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 180000,
+        "nominal_rate": 15.5,
+        "pis_allocation": 3.05,
+        "cofins_allocation": 14.1,
+        "iss_allocation": 14,
+        "cpp_allocation": 28.85
+      },
+      {
+        "min_value": 180000.01,
+        "max_value": 360000,
+        "nominal_rate": 18,
+        "deduction": 4500,
+        "pis_allocation": 3.05,
+        "cofins_allocation": 14.1,
+        "iss_allocation": 17,
+        "cpp_allocation": 27.85
+      },
+      {
+        "min_value": 360000.01,
+        "max_value": 720000,
+        "nominal_rate": 19.5,
+        "deduction": 9900,
+        "pis_allocation": 3.23,
+        "cofins_allocation": 14.92,
+        "iss_allocation": 19,
+        "cpp_allocation": 23.85
+      },
+      {
+        "min_value": 720000.01,
+        "max_value": 1800000,
+        "nominal_rate": 20.5,
+        "deduction": 17100,
+        "pis_allocation": 3.41,
+        "cofins_allocation": 15.74,
+        "iss_allocation": 21,
+        "cpp_allocation": 23.85
+      },
+      {
+        "min_value": 1800000.01,
+        "max_value": 3600000,
+        "nominal_rate": 23,
+        "deduction": 62100,
+        "pis_allocation": 3.05,
+        "cofins_allocation": 14.1,
+        "iss_allocation": 23.5,
+        "cpp_allocation": 23.85
+      },
+      {
+        "min_value": 3600000.01,
+        "max_value": 4800000,
+        "nominal_rate": 30.5,
+        "deduction": 540000,
+        "pis_allocation": 3.56,
+        "cofins_allocation": 16.44,
+        "cpp_allocation": 29.5
+      }
+    ]
+  }
+]

@@ -1,0 +1,163 @@
+[
+  {
+    "tax_type": "INSS",
+    "valid_from": "2026-01-01",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 1621,
+        "nominal_rate": 7.5
+      },
+      {
+        "min_value": 1621.01,
+        "max_value": 2902.84,
+        "nominal_rate": 9
+      },
+      {
+        "min_value": 2902.85,
+        "max_value": 4354.27,
+        "nominal_rate": 12
+      },
+      {
+        "min_value": 4354.28,
+        "max_value": 8475.55,
+        "nominal_rate": 14
+      }
+    ]
+  },
+  {
+    "tax_type": "INSS",
+    "valid_from": "2025-01-01",
+    "valid_to": "2025-12-31",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 1518,
+        "nominal_rate": 7.5
+      },
+      {
+        "min_value": 1518.01,
+        "max_value": 2793.88,
+        "nominal_rate": 9
+      },
+      {
+        "min_value": 2793.89,
+        "max_value": 4190.83,
+        "nominal_rate": 12
+      },
+      {
+        "min_value": 4190.84,
+        "max_value": 8157.41,
+        "nominal_rate": 14
+      }
+    ]
+  },
+  {
+    "tax_type": "INSS",
+    "valid_from": "2024-01-01",
+    "valid_to": "2024-12-31",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 1412,
+        "nominal_rate": 7.5
+      },
+      {
+        "min_value": 1412.01,
+        "max_value": 2666.68,
+        "nominal_rate": 9
+      },
+      {
+        "min_value": 2666.69,
+        "max_value": 4000.03,
+        "nominal_rate": 12
+      },
+      {
+        "min_value": 4000.04,
+        "max_value": 7786.02,
+        "nominal_rate": 14
+      }
+    ]
+  },
+  {
+    "tax_type": "INSS",
+    "valid_from": "2023-05-01",
+    "valid_to": "2023-12-31",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 1320,
+        "nominal_rate": 7.5
+      },
+      {
+        "min_value": 1320.01,
+        "max_value": 2571.29,
+        "nominal_rate": 9
+      },
+      {
+        "min_value": 2571.3,
+        "max_value": 3856.94,
+        "nominal_rate": 12
+      },
+      {
+        "min_value": 3856.95,
+        "max_value": 7507.49,
+        "nominal_rate": 14
+      }
+    ]
+  },
+  {
+    "tax_type": "INSS",
+    "valid_from": "2023-01-01",
+    "valid_to": "2023-04-30",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 1302,
+        "nominal_rate": 7.5
+      },
+      {
+        "min_value": 1302.01,
+        "max_value": 2571.29,
+        "nominal_rate": 9
+      },
+      {
+        "min_value": 2571.3,
+        "max_value": 3856.94,
+        "nominal_rate": 12
+      },
+      {
+        "min_value": 3856.95,
+        "max_value": 7507.49,
+        "nominal_rate": 14
+      }
+    ]
+  },
+  {
+    "tax_type": "INSS",
+    "valid_from": "2022-01-01",
+    "valid_to": "2022-12-31",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 1212,
+        "nominal_rate": 7.5
+      },
+      {
+        "min_value": 1212.01,
+        "max_value": 2427.35,
+        "nominal_rate": 9
+      },
+      {
+        "min_value": 2427.36,
+        "max_value": 3641.03,
+        "nominal_rate": 12
+      },
+      {
+        "min_value": 3641.04,
+        "max_value": 7087.22,
+        "nominal_rate": 14
+      }
+    ]
+  }
+]

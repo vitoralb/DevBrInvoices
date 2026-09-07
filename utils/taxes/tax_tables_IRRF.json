@@ -1,0 +1,106 @@
+[
+  {
+    "tax_type": "IRRF",
+    "valid_from": "2024-02-01",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 2259.2
+      },
+      {
+        "min_value": 2259.21,
+        "max_value": 2826.65,
+        "nominal_rate": 7.5,
+        "deduction": 169.44
+      },
+      {
+        "min_value": 2826.66,
+        "max_value": 3751.05,
+        "nominal_rate": 15,
+        "deduction": 381.44
+      },
+      {
+        "min_value": 3751.06,
+        "max_value": 4664.68,
+        "nominal_rate": 22.5,
+        "deduction": 662.77
+      },
+      {
+        "min_value": 4664.69,
+        "max_value": null,
+        "nominal_rate": 27.5,
+        "deduction": 896
+      }
+    ]
+  },
+  {
+    "tax_type": "IRRF",
+    "valid_from": "2023-05-01",
+    "valid_to": "2024-01-31",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 2112
+      },
+      {
+        "min_value": 2112.01,
+        "max_value": 2826.65,
+        "nominal_rate": 7.5,
+        "deduction": 158.4
+      },
+      {
+        "min_value": 2826.66,
+        "max_value": 3751.05,
+        "nominal_rate": 15,
+        "deduction": 370.4
+      },
+      {
+        "min_value": 3751.06,
+        "max_value": 4664.68,
+        "nominal_rate": 22.5,
+        "deduction": 651.73
+      },
+      {
+        "min_value": 4664.69,
+        "max_value": null,
+        "nominal_rate": 27.5,
+        "deduction": 884.96
+      }
+    ]
+  },
+  {
+    "tax_type": "IRRF",
+    "valid_from": "2016-01-01",
+    "valid_to": "2023-04-30",
+    "brackets": [
+      {
+        "min_value": 0,
+        "max_value": 1903.98
+      },
+      {
+        "min_value": 1903.99,
+        "max_value": 2826.65,
+        "nominal_rate": 7.5,
+        "deduction": 142.8
+      },
+      {
+        "min_value": 2826.66,
+        "max_value": 3751.05,
+        "nominal_rate": 15,
+        "deduction": 354.8
+      },
+      {
+        "min_value": 3751.06,
+        "max_value": 4664.68,
+        "nominal_rate": 22.5,
+        "deduction": 636.13
+      },
+      {
+        "min_value": 4664.68,
+        "max_value": null,
+        "nominal_rate": 27.5,
+        "deduction": 869.36
+      }
+    ]
+  }
+]
