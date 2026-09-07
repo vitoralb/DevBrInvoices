@@ -1,0 +1,18 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-6">
+        <div class="card shadow-sm">
+            <div class="card-header bg-danger text-white"><h5>Excluir Invoice Template</h5></div>
+            <div class="card-body">
+                <p>Tem certeza que deseja excluir o template "{{ template.name }}"?</p>
+                <form method="POST">
+                    {% csrf_token %}
+                    <button type="submit" class="btn btn-danger w-100">Sim, excluir</button>
+                    <a href="{% url 'invoice_template_list' %}" class="btn btn-secondary w-100 mt-2">Cancelar</a>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

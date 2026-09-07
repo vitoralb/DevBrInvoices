@@ -1,0 +1,211 @@
+{% extends 'core/base.html' %}
+{% load humanize %}
+{% block title %}Invoice {{ invoice.invoice_number }} - {{ PROJECT_NAME }}{% endblock %}
+
+{% block content %}
+<div class="row" id="invoice-details-row">
+    <div class="col-md-4">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <div class="d-flex align-items-center">
+                    {% if invoice.status == 'DRAFT' %}
+                    <h5 class="mb-0" id="invoice-number-display" style="cursor: pointer; text-decoration: underline dotted;" onclick="document.getElementById('invoice-number-form').classList.remove('d-none'); this.classList.add('d-none');" title="Clique para editar">Invoice {{ invoice.invoice_number }}</h5>
+                    <form id="invoice-number-form" class="d-none m-0" hx-post="{% url 'htmx_update_invoice_number' invoice.id %}" hx-swap="none" hx-on::after-request="if(event.detail.successful) { this.classList.add('d-none'); document.getElementById('invoice-number-display').classList.remove('d-none'); document.getElementById('invoice-number-display').innerText = 'Invoice ' + event.detail.xhr.responseText; } else { alert(event.detail.xhr.responseText); }">
+                        {% csrf_token %}
+                        <div class="input-group input-group-sm" style="width: 200px;">
+                            <input type="text" name="invoice_number" class="form-control" value="{{ invoice.invoice_number }}" required>
+                            <button class="btn btn-primary" type="submit">OK</button>
+                            <button class="btn btn-secondary" type="button" onclick="document.getElementById('invoice-number-form').classList.add('d-none'); document.getElementById('invoice-number-display').classList.remove('d-none');">X</button>
+                        </div>
+                    </form>
+                    {% else %}
+                    <h5 class="mb-0">Invoice {{ invoice.invoice_number }}</h5>
+                    {% endif %}
+                </div>
+                <div>
+                    <form method="POST" action="{% url 'clone_invoice' invoice.id %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-light" onclick="return confirm('Clonar para uma nova invoice em rascunho?');">Clonar</button>
+                    </form>
+                    
+                    {% if invoice.status == 'FINALIZED' and not invoice.nota_fiscal %}
+                    <form method="POST" action="{% url 'revert_invoice_to_draft' invoice.id %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Deseja voltar esta invoice para rascunho?');">Voltar a Rascunho</button>
+                    </form>
+                    {% endif %}
+                    
+                    {% if invoice.status == 'DRAFT' %}
+                    <form method="POST" action="{% url 'invoice_delete' invoice.id %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Tem certeza que deseja excluir esta invoice?');">Excluir</button>
+                    </form>
+                    {% endif %}
+                    
+                    {% if invoice.status == 'FINALIZED' %}
+                    <button type="button" class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#emailModal">E-mail</button>
+                    {% if invoice.nota_fiscal %}
+                    <form method="POST" action="{% url 'cancel_invoice' invoice.id %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Tem certeza que deseja cancelar esta invoice e sua respectiva NFS-e, se houver?');">Cancelar Invoice</button>
+                    </form>
+                    {% endif %}
+                    {% endif %}
+                    <a href="{% url 'generate_invoice_pdf' invoice.id %}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-light">PDF da Invoice</a>
+                </div>
+            </div>
+            <div class="card-body">
+                <p><strong>Cliente:</strong> {{ invoice.client.name }}</p>
+                <p><strong>Data:</strong> {{ invoice.issue_date }}</p>
+                <p><strong>Moeda:</strong> {{ invoice.currency }}</p>
+                <p><strong>Status:</strong> <span class="badge bg-secondary">{{ invoice.get_status_display }}</span></p>
+                
+                {% if invoice.status == 'PROCESSING' %}
+                <hr>
+                <div class="text-center p-3" hx-get="{% url 'invoice_detail' invoice.id %}" hx-trigger="every 2s" hx-target="#invoice-details-row" hx-select="#invoice-details-row" hx-swap="outerHTML">
+                    <div class="spinner-border text-primary mb-2" role="status">
+                        <span class="visually-hidden">Carregando...</span>
+                    </div>
+                    <h6>Processando...</h6>
+                    <p class="text-muted small">Esta página será atualizada automaticamente assim que a tarefa em segundo plano for concluída.</p>
+                </div>
+                {% elif invoice.status == 'DRAFT' %}
+                <hr>
+                <h6>Finalizar Invoice</h6>
+                <form method="POST" action="{% url 'finalize_invoice' invoice.id %}">
+                    {% csrf_token %}
+                    <div class="mb-3 form-check">
+                        <input class="form-check-input" type="checkbox" id="send_to_client_finalize" name="send_to_client" checked>
+                        <label class="form-check-label" for="send_to_client_finalize">
+                            Enviar Invoice para o Cliente
+                        </label>
+                    </div>
+                    <div class="mb-3 form-check">
+                        <input class="form-check-input" type="checkbox" id="send_to_company_finalize" name="send_to_company" checked>
+                        <label class="form-check-label" for="send_to_company_finalize">
+                            Enviar Invoice para a Empresa
+                        </label>
+                    </div>
+                    <button type="submit" class="btn btn-primary w-100" onclick="return confirm('Tem certeza que deseja finalizar esta invoice?');">Finalizar Invoice</button>
+                </form>
+                {% elif invoice.status == 'FINALIZED' %}
+                <hr>
+                {% if not invoice.nota_fiscal %}
+                <h6>Emitir NFS-e</h6>
+                <form method="POST" action="{% url 'issue_nfse' invoice.id %}">
+                    {% csrf_token %}
+                    <div class="mb-2">
+                        <label for="conversion_date_input" class="form-label text-muted small">Data de Conversão</label>
+                        <input type="date" id="conversion_date_input" name="conversion_date" class="form-control" value="{{ invoice.issue_date|date:'Y-m-d' }}" 
+                               hx-get="{% url 'htmx_fetch_exchange_rate' %}?currency={{ invoice.currency }}" 
+                               hx-target="#exchange_rate_container">
+                    </div>
+                    <div class="mb-2" id="exchange_rate_container">
+                        {% include 'core/partials/exchange_rate_input.html' with currency=invoice.currency rate=suggested_exchange_rate %}
+                    </div>
+
+                    <div class="mb-3 form-check">
+                        <input class="form-check-input" type="checkbox" id="send_to_company" name="send_to_company" checked>
+                        <label class="form-check-label" for="send_to_company">
+                            Enviar NFS-e para a Empresa por e-mail após verificação
+                        </label>
+                    </div>
+                    <button type="submit" class="btn btn-success w-100">Emitir NFS-e</button>
+                </form>
+                {% if latest_nfse_log and latest_nfse_log.erro_mensagem %}
+                <div class="alert alert-danger mt-3 mb-0" role="alert">
+                    <strong class="d-block mb-1">Último erro na emissão da NFS-e:</strong>
+                    <div style="white-space: pre-wrap; font-size: 0.85em; max-height: 150px; overflow-y: auto;">{{ latest_nfse_log.erro_mensagem }}</div>
+                    <small class="text-muted d-block mt-1">{{ latest_nfse_log.created_at|date:"d/m/Y H:i" }} ({{ latest_nfse_log.origem }})</small>
+                </div>
+                {% endif %}
+                {% endif %}
+                
+                {% if invoice.nota_fiscal %}
+                <div class="bg-body-tertiary p-3 rounded position-relative mt-4">
+                    <h6>Detalhes da NFS-e</h6>
+                    <ul class="list-unstyled small mb-2">
+                        <li><strong>Número da NFS-e:</strong> {{ invoice.nota_fiscal.nf_number }}</li>
+                        {% if invoice.nota_fiscal.chave_acesso_nacional %}
+                        <li><strong>Chave de Acesso:</strong> <span class="text-break">{{ invoice.nota_fiscal.chave_acesso_nacional }}</span></li>
+                        {% endif %}
+                        <li>
+                            {% if invoice.nota_fiscal.verification_code %}
+                            <strong>Código de Verificação:</strong> {{ invoice.nota_fiscal.verification_code }}
+                            {% endif %}
+                            <a href="{% url 'download_nfse_pdf' invoice.id %}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-primary ms-2">Baixar PDF da NFS-e</a>
+                        </li>
+                        <li><strong>Taxa de Câmbio:</strong> R$ {{ invoice.exchange_rate_to_brl|floatformat:4 }}</li>
+                        <li><strong>Valor (BRL):</strong> R$ {{ invoice.nota_fiscal.amount_brl|floatformat:2|intcomma }}</li>
+                    </ul>
+                    <div class="small">
+                        <strong>Descrição enviada para a NFS-e:</strong>
+                        <div class="text-muted mt-1" style="white-space: pre-wrap; font-size: 0.9em; max-height: 200px; overflow-y: auto;">{{ invoice.nota_fiscal.description }}</div>
+                    </div>
+                </div>
+                {% endif %}
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="col-md-8">
+        <div class="card shadow-sm">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Itens da Invoice</h5>
+            </div>
+            <div class="card-body" id="invoice-items-container">
+                {% include 'core/partials/invoice_item_list.html' %}
+            </div>
+            {% if invoice.status == 'DRAFT' %}
+            <div class="card-footer bg-transparent">
+                <form hx-post="{% url 'htmx_add_invoice_item' invoice.id %}" hx-target="#invoice-items-container" hx-on::after-request="if(event.detail.successful) this.reset()" class="row g-2 align-items-end">
+                    <div class="col-md-6">{{ item_form.description.label_tag }}{{ item_form.description }}</div>
+                    <div class="col-md-2">{{ item_form.quantity.label_tag }}{{ item_form.quantity }}</div>
+                    <div class="col-md-3">{{ item_form.unit_price_foreign.label_tag }}{{ item_form.unit_price_foreign }}</div>
+                    <div class="col-md-1"><button type="submit" class="btn btn-primary" aria-label="Adicionar item">+</button></div>
+                </form>
+            </div>
+            {% endif %}
+        </div>
+    </div>
+</div>
+<div class="modal fade" id="emailModal" tabindex="-1" aria-labelledby="emailModalLabel" aria-hidden="true">
+  <div class="modal-dialog">
+    <div class="modal-content">
+      <form method="POST" action="{% url 'email_invoice' invoice.id %}">
+        {% csrf_token %}
+        <div class="modal-header">
+          <h5 class="modal-title" id="emailModalLabel">Enviar Invoice / NFS-e por E-mail</h5>
+          <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+        </div>
+        <div class="modal-body">
+          <div class="form-check mb-2">
+            <input class="form-check-input" type="checkbox" id="modal_send_to_company" name="send_to_company" checked>
+            <label class="form-check-label" for="modal_send_to_company">
+              Enviar para E-mail da Empresa
+            </label>
+          </div>
+          <div class="form-check">
+            <input class="form-check-input" type="checkbox" id="modal_send_to_client" name="send_to_client" checked>
+            <label class="form-check-label" for="modal_send_to_client">
+              Enviar para E-mail do Cliente ({{ invoice.client.email|default:"Nenhum e-mail configurado" }})
+            </label>
+          </div>
+          {% if invoice.nota_fiscal %}
+          <div class="form-check mt-2">
+            <input class="form-check-input" type="checkbox" id="include_nfse" name="include_nfse" checked>
+            <label class="form-check-label" for="include_nfse">
+              Incluir PDF da NFS-e (apenas para a empresa)
+            </label>
+          </div>
+          {% endif %}
+        </div>
+        <div class="modal-footer">
+          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary">Enviar E-mail</button>
+        </div>
+      </form>
+    </div>
+  </div>
+</div>
+{% endblock %}

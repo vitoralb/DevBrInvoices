@@ -1,0 +1,31 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Email Templates</h2>
+</div>
+
+<div class="row">
+    <div class="col-md-12 mb-4">
+        <div class="card shadow-sm">
+            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">Email Templates</h5>
+            </div>
+            <div class="card-body">
+                <ul class="list-group list-group-flush">
+                    {% for email in email_templates %}
+                    <li class="list-group-item d-flex justify-content-between align-items-center">
+                        {{ email.name }} ({{ email.template_type }})
+                        <span>
+                            <a href="{% url 'email_template_update' email.pk %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
+                        </span>
+                    </li>
+                    {% empty %}
+                    <li class="list-group-item text-muted">Nenhum template de email configurado.</li>
+                    {% endfor %}
+                </ul>
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

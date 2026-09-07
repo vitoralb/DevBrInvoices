@@ -1,0 +1,102 @@
+{% extends 'core/base.html' %}
+{% block title %}Detalhes NFS-e {{ nf.nf_number }} - {{ PROJECT_NAME }}{% endblock %}
+
+{% block content %}
+<div class="mb-4">
+    <a href="{% url 'nfse_list' %}" class="btn btn-outline-secondary">&larr; Voltar para NFS-es</a>
+</div>
+
+<div class="row">
+    <div class="col-md-8">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header d-flex justify-content-between align-items-center">
+                <h5 class="mb-0">NFS-e #{{ nf.nf_number }}
+                    {% if nf.is_canceled %}
+                    <span class="badge bg-danger ms-2">CANCELADA</span>
+                    {% endif %}
+                </h5>
+                <span class="badge bg-info text-dark">{{ nf.provider_type }}</span>
+            </div>
+            <div class="card-body">
+                <div class="row mb-3">
+                    <div class="col-sm-4 text-muted">Data de Emissão:</div>
+                    <div class="col-sm-8">{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4 text-muted">Valor Total:</div>
+                    <div class="col-sm-8"><strong>R$ {{ nf.amount_brl }}</strong></div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4 text-muted">Código Verificação:</div>
+                    <div class="col-sm-8">{{ nf.verification_code|default:"N/A" }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4 text-muted">Chave Nacional:</div>
+                    <div class="col-sm-8">{{ nf.chave_acesso_nacional|default:"N/A" }}</div>
+                </div>
+                <div class="row mb-3">
+                    <div class="col-sm-4 text-muted">Descrição:</div>
+                    <div class="col-sm-8">
+                        <pre class="bg-body-tertiary p-2 border rounded" style="white-space: pre-wrap; font-family: inherit;">{{ nf.description }}</pre>
+                    </div>
+                </div>
+                
+                <hr>
+                
+                <h6 class="mt-4 mb-3">Arquivos</h6>
+                <div class="d-flex gap-2">
+                    <a href="{% url 'nfse_download_pdf' nf.id %}" target="_blank" class="btn btn-outline-primary">
+                        <i class="bi bi-file-earmark-pdf"></i> Baixar PDF
+                    </a>
+                    
+                    {% if nf.xml_autorizacao %}
+                    <a href="{{ nf.xml_autorizacao.url }}" target="_blank" class="btn btn-outline-secondary">
+                        <i class="bi bi-filetype-xml"></i> Baixar XML
+                    </a>
+                    {% endif %}
+                    
+                    {% if not nf.is_canceled %}
+                    <form method="POST" action="{% url 'nfse_cancel' nf.id %}" onsubmit="return confirm('Tem certeza que deseja CANCELAR esta NFS-e na prefeitura? Isso não pode ser desfeito.');" class="ms-auto">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-danger">
+                            <i class="bi bi-x-circle"></i> Cancelar NFS-e
+                        </button>
+                    </form>
+                    {% endif %}
+                </div>
+            </div>
+        </div>
+    </div>
+    
+    <div class="col-md-4">
+        <div class="card shadow-sm mb-4">
+            <div class="card-header">
+                <h5 class="mb-0">Vínculos</h5>
+            </div>
+            <div class="card-body">
+                <h6>Invoice</h6>
+                {% if nf.invoice %}
+                    <p class="mb-1 fw-bold">Invoice #{{ nf.invoice.invoice_number }}</p>
+                    <a href="{% url 'invoice_detail' nf.invoice.id %}" class="btn btn-sm btn-outline-primary mt-2">Ver Invoice</a>
+                {% else %}
+                    <p class="text-warning mb-3">Nenhuma invoice associada.</p>
+                    
+                    <form method="POST" action="{% url 'nfse_link_invoice' nf.id %}" class="mb-3">
+                        {% csrf_token %}
+                        <div class="input-group">
+                            <select class="form-select" name="invoice_id" required>
+                                <option value="">Vincular invoice existente...</option>
+                                {% for inv in invoices %}
+                                <option value="{{ inv.id }}">Invoice #{{ inv.invoice_number }} - {{ inv.client.name }}</option>
+                                {% endfor %}
+                            </select>
+                            <button type="submit" class="btn btn-primary">Vincular</button>
+                        </div>
+                    </form>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}
+

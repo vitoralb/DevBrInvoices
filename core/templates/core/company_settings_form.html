@@ -1,0 +1,405 @@
+{% extends "core/base.html" %}
+
+{% block content %}
+<div class="container mt-4">
+    <h2>Sua Empresa</h2>
+    <style>
+    ul.errorlist {
+        color: #dc3545;
+        list-style-type: none;
+        padding-left: 0;
+        font-size: 0.875em;
+        margin-top: 0.25rem;
+    }
+</style>
+        <form id="remove-cert-form" method="post" action="{% url 'remove_certificate' %}">
+        {% csrf_token %}
+    </form>
+    <form method="post" id="company-form" enctype="multipart/form-data">
+        {% if form.non_field_errors %}
+        <div class="alert alert-danger">
+            {{ form.non_field_errors }}
+        </div>
+        {% endif %}
+        {% csrf_token %}
+
+        {# Section 1: Dados Básicos #}
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                {{ form.cnpj.label_tag }}
+                {{ form.cnpj }}
+                {% if form.cnpj.help_text %}<small class="form-text text-muted">{{ form.cnpj.help_text }}</small>{% endif %}
+                {{ form.cnpj.errors }}
+            </div>
+            <div class="col-md-5">
+                {{ form.company_name.label_tag }}
+                {{ form.company_name }}
+                {% if form.company_name.help_text %}<small class="form-text text-muted">{{ form.company_name.help_text }}</small>{% endif %}
+                {{ form.company_name.errors }}
+            </div>
+            <div class="col-md-4">
+                {{ form.inscricao_municipal.label_tag }}
+                {{ form.inscricao_municipal }}
+                {% if form.inscricao_municipal.help_text %}<small class="form-text text-muted">{{ form.inscricao_municipal.help_text }}</small>{% endif %}
+                {{ form.inscricao_municipal.errors }}
+            </div>
+            <div class="col-md-3">
+                {{ form.opening_date.label_tag }}
+                {{ form.opening_date }}
+                {% if form.opening_date.help_text %}<small class="form-text text-muted">{{ form.opening_date.help_text }}</small>{% endif %}
+                {{ form.opening_date.errors }}
+            </div>
+            <div class="col-md-5">
+                {{ form.email.label_tag }}
+                {{ form.email }}
+                {% if form.email.help_text %}<small class="form-text text-muted">{{ form.email.help_text }}</small>{% endif %}
+                {{ form.email.errors }}
+            </div>
+            <div class="col-md-4">
+                {{ form.nfse_provider.label_tag }}
+                {{ form.nfse_provider }}
+                {% if form.nfse_provider.help_text %}<small class="form-text text-muted">{{ form.nfse_provider.help_text }}</small>{% endif %}
+                {{ form.nfse_provider.errors }}
+            </div>
+            <div class="col-md-4">
+                {{ form.next_document_number.label_tag }}
+                {{ form.next_document_number }}
+                {% if form.next_document_number.help_text %}<small class="form-text text-muted">{{ form.next_document_number.help_text }}</small>{% endif %}
+                {{ form.next_document_number.errors }}
+            </div>
+            <div class="col-md-4">
+                {{ form.document_series.label_tag }}
+                {{ form.document_series }}
+                {% if form.document_series.help_text %}<small class="form-text text-muted">{{ form.document_series.help_text }}</small>{% endif %}
+                {{ form.document_series.errors }}
+            </div>
+            {{ form.address_city_ibge }}
+            <div class="col-12">
+                {{ form.bank_details_raw.label_tag }}
+                {{ form.bank_details_raw }}
+                {% if form.bank_details_raw.help_text %}<small class="form-text text-muted">{{ form.bank_details_raw.help_text }}</small>{% endif %}
+                {{ form.bank_details_raw.errors }}
+            </div>
+        </div>
+
+        {# Section 2: Endereço #}
+        <h4>Endereço</h4>
+        <div class="row g-3 mb-4">
+            <div class="col-md-3">
+                {{ form.address_cep.label_tag }}
+                {{ form.address_cep }}
+                {% if form.address_cep.help_text %}<small class="form-text text-muted">{{ form.address_cep.help_text }}</small>{% endif %}
+                {{ form.address_cep.errors }}
+            </div>
+            <div class="col-md-3">
+                {{ form.address_tipo_logradouro.label_tag }}
+                {{ form.address_tipo_logradouro }}
+                {% if form.address_tipo_logradouro.help_text %}<small class="form-text text-muted">{{ form.address_tipo_logradouro.help_text }}</small>{% endif %}
+                {{ form.address_tipo_logradouro.errors }}
+            </div>
+            <div class="col-md-6">
+                {{ form.address_line1.label_tag }}
+                {{ form.address_line1 }}
+                {% if form.address_line1.help_text %}<small class="form-text text-muted">{{ form.address_line1.help_text }}</small>{% endif %}
+                {{ form.address_line1.errors }}
+            </div>
+            <div class="col-md-3">
+                {{ form.address_number.label_tag }}
+                {{ form.address_number }}
+                {% if form.address_number.help_text %}<small class="form-text text-muted">{{ form.address_number.help_text }}</small>{% endif %}
+                {{ form.address_number.errors }}
+            </div>
+            <div class="col-md-3">
+                {{ form.address_line2.label_tag }}
+                {{ form.address_line2 }}
+                {% if form.address_line2.help_text %}<small class="form-text text-muted">{{ form.address_line2.help_text }}</small>{% endif %}
+                {{ form.address_line2.errors }}
+            </div>
+            <div class="col-md-3">
+                {{ form.address_neighborhood.label_tag }}
+                {{ form.address_neighborhood }}
+                {% if form.address_neighborhood.help_text %}<small class="form-text text-muted">{{ form.address_neighborhood.help_text }}</small>{% endif %}
+                {{ form.address_neighborhood.errors }}
+            </div>
+            <div class="col-md-1">
+                {{ form.address_uf.label_tag }}
+                {{ form.address_uf }}
+                {% if form.address_uf.help_text %}<small class="form-text text-muted">{{ form.address_uf.help_text }}</small>{% endif %}
+                {{ form.address_uf.errors }}
+            </div>
+            <div class="col-md-2">
+                {{ form.address_city.label_tag }}
+                {{ form.address_city }}
+                {% if form.address_city.help_text %}<small class="form-text text-muted">{{ form.address_city.help_text }}</small>{% endif %}
+                {{ form.address_city.errors }}
+            </div>
+            {{ form.address_city_ibge }}
+        </div>
+
+        {# Section 3: Códigos Fiscais #}
+        <h4>Códigos Fiscais</h4>
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                {{ form.default_codigo_tributacao_nacional.label_tag }}
+                {{ form.default_codigo_tributacao_nacional }}
+                {% if form.default_codigo_tributacao_nacional.help_text %}<small class="form-text text-muted">{{ form.default_codigo_tributacao_nacional.help_text }}</small>{% endif %}
+                {{ form.default_codigo_tributacao_nacional.errors }}
+            </div>
+            <div class="col-md-6">
+                {{ form.default_codigo_nbs.label_tag }}
+                {{ form.default_codigo_nbs }}
+                {% if form.default_codigo_nbs.help_text %}<small class="form-text text-muted">{{ form.default_codigo_nbs.help_text }}</small>{% endif %}
+                {{ form.default_codigo_nbs.errors }}
+            </div>
+        </div>
+
+        {# Section 4: Extras #}
+        <h4>Extras</h4>
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                {{ form.debug_email.label_tag }}
+                {{ form.debug_email }}
+                {% if form.debug_email.help_text %}<small class="form-text text-muted">{{ form.debug_email.help_text }}</small>{% endif %}
+                {{ form.debug_email.errors }}
+            </div>
+            <div class="col-md-6">
+                {{ form.auto_invoice_hour.label_tag }}
+                {{ form.auto_invoice_hour }}
+                {% if form.auto_invoice_hour.help_text %}<small class="form-text text-muted">{{ form.auto_invoice_hour.help_text }}</small>{% endif %}
+                {{ form.auto_invoice_hour.errors }}
+            </div>
+            <div class="col-md-6">
+                <div class="form-check mt-4">
+                    {{ form.auto_finalize_invoices }}
+                    {{ form.auto_finalize_invoices.label_tag }}
+                    {% if form.auto_finalize_invoices.help_text %}<small class="form-text text-muted d-block">{{ form.auto_finalize_invoices.help_text }}</small>{% endif %}
+                    {{ form.auto_finalize_invoices.errors }}
+                </div>
+            </div>
+            <div class="col-md-6">
+                <div class="form-check mt-4">
+                    {{ form.auto_send_emails }}
+                    {{ form.auto_send_emails.label_tag }}
+                    {% if form.auto_send_emails.help_text %}<small class="form-text text-muted d-block">{{ form.auto_send_emails.help_text }}</small>{% endif %}
+                    {{ form.auto_send_emails.errors }}
+                </div>
+            </div>
+        </div>
+
+        
+        <hr class="my-4">
+        <h4>Certificado Digital</h4>
+        {% if form.instance.pfx_cert_pem %}
+            <div class="alert alert-info d-flex justify-content-between align-items-center">
+                <div>
+                    <strong>Status do Certificado:</strong> Cadastrado<br>
+                    {% if form.instance.certificate_valid_until %}
+                        <strong>Válido até:</strong> {{ form.instance.certificate_valid_until|date:"d/m/Y H:i" }}<br>
+                    {% endif %}
+                </div>
+                <button type="button" class="btn btn-sm btn-danger" onclick="if(confirm('Tem certeza que deseja remover o certificado digital atual?')) document.getElementById('remove-cert-form').submit();">Remover Certificado</button>
+            </div>
+        {% else %}
+            <div class="alert alert-warning">
+                <strong>Status do Certificado:</strong> Nenhum certificado cadastrado.
+            </div>
+        {% endif %}
+
+        <div class="row g-3 mb-4">
+            <div class="col-md-6">
+                <label class="form-label">{{ form.pfx_file.label }}</label>
+                {{ form.pfx_file }}
+                {% if form.pfx_file.help_text %}
+                <small class="form-text text-muted">{{ form.pfx_file.help_text }}</small>
+                {% endif %}
+                {{ form.pfx_file.errors }}
+            </div>
+            <div class="col-md-6">
+                <label class="form-label">{{ form.pfx_password_input.label }}</label>
+                {{ form.pfx_password_input }}
+                {% if form.pfx_password_input.help_text %}
+                <small class="form-text text-muted">{{ form.pfx_password_input.help_text }}</small>
+                {% endif %}
+                {{ form.pfx_password_input.errors }}
+            </div>
+        </div>
+
+        <button type="submit" class="btn btn-primary" id="save-btn">Salvar</button>
+    </form>
+</div>
+
+<script>
+document.addEventListener("DOMContentLoaded", function() {
+    const cnpjInput = document.getElementById("id_cnpj");
+    const cepInput = document.getElementById("id_address_cep");
+    const saveBtn = document.getElementById("save-btn");
+    
+    // Mask CNPJ
+    cnpjInput.addEventListener("input", function(e) {
+        let v = e.target.value.replace(/[^0-9a-zA-Z]/g, "");
+        if (v.length > 14) v = v.substring(0,14);
+        
+        if (v.length > 12) {
+            v = v.replace(/^(.{2})(.{3})(.{3})(.{4})(.{2}).*/, "$1.$2.$3/$4-$5");
+        } else if (v.length > 8) {
+            v = v.replace(/^(.{2})(.{3})(.{3})(.{4}).*/, "$1.$2.$3/$4-");
+        } else if (v.length > 5) {
+            v = v.replace(/^(.{2})(.{3})(.{3}).*/, "$1.$2.$3/");
+        } else if (v.length > 2) {
+            v = v.replace(/^(.{2})(.{3}).*/, "$1.$2.");
+        }
+        e.target.value = v.toUpperCase();
+        
+        // When CNPJ length reaches 14 alphanumerics, fetch from API
+        if (v.replace(/[^0-9a-zA-Z]/g, "").length === 14) {
+            let rawCnpj = v.replace(/[^0-9a-zA-Z]/g, "");
+            fetch(`/api/cnpj/${rawCnpj}/`)
+                .then(response => {
+                    if (response.ok) return response.json();
+                    throw new Error("CNPJ inválido");
+                })
+                .then(data => {
+                    if (data.razao_social) {
+                        document.getElementById("id_company_name").value = data.razao_social;
+                    }
+                    if (data.data_inicio_atividade) {
+                        // date format from minhareceita is YYYY-MM-DD
+                        let parts = data.data_inicio_atividade.split("-");
+                        if (parts.length === 3) {
+                            document.getElementById("id_opening_date").value = `${parts[2]}/${parts[1]}/${parts[0]}`;
+                        } else {
+                            document.getElementById("id_opening_date").value = data.data_inicio_atividade;
+                        }
+                    }
+                    
+                    if (data.cep) {
+                        cepInput.value = data.cep.replace(/\D/g, "");
+                        if (data.descricao_tipo_de_logradouro) document.getElementById("id_address_tipo_logradouro").value = data.descricao_tipo_de_logradouro;
+                        if (data.logradouro) document.getElementById("id_address_line1").value = data.logradouro;
+                        if (data.numero != null) document.getElementById("id_address_number").value = data.numero;
+                        if (data.complemento != null) document.getElementById("id_address_line2").value = data.complemento;
+                        if (data.bairro) document.getElementById("id_address_neighborhood").value = data.bairro;
+                        if (data.uf) document.getElementById("id_address_uf").value = data.uf;
+                        if (data.municipio) document.getElementById("id_address_city").value = data.municipio;
+                        
+                        saveBtn.disabled = false;
+                    }
+                    
+                    if (data.codigo_municipio_ibge) {
+                        document.getElementById("id_address_city_ibge").value = data.codigo_municipio_ibge;
+                        
+                        const ibge = String(data.codigo_municipio_ibge);
+                        const allowed = ibge === "3550308" ? ["PAULISTANA", "NACIONAL"] : ["NACIONAL"];
+                        const providerSelect = document.getElementById("id_nfse_provider");
+                        if (providerSelect) {
+                            const currentVal = providerSelect.value;
+                            Array.from(providerSelect.options).forEach(opt => {
+                                if (!allowed.includes(opt.value)) {
+                                    opt.style.display = "none";
+                                    opt.disabled = true;
+                                } else {
+                                    opt.style.display = "";
+                                    opt.disabled = false;
+                                }
+                            });
+                            if (!allowed.includes(currentVal)) {
+                                providerSelect.value = "NACIONAL";
+                            }
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.error("CNPJ API error:", err);
+                });
+        }
+    });
+    
+    // Format on load
+    if (cnpjInput.value) {
+        let v = cnpjInput.value.replace(/[^0-9a-zA-Z]/g, "");
+        if (v.length === 14) {
+            cnpjInput.value = v.replace(/^(.{2})(.{3})(.{3})(.{4})(.{2}).*/, "$1.$2.$3/$4-$5").toUpperCase();
+        }
+    }
+
+    // Fetch CEP
+    cepInput.addEventListener("blur", function() {
+        const cep = cepInput.value.replace(/\D/g, "");
+        if (cep.length === 8) {
+            fetch(`/api/cep/${cep}/`)
+                .then(response => {
+                    if (!response.ok) {
+                        saveBtn.disabled = true;
+                        alert("CEP não encontrado ou inválido.");
+                        throw new Error("CEP invalido");
+                    }
+                    saveBtn.disabled = false;
+                    return response.json();
+                })
+                .then(data => {
+                    if (data.error) {
+                        saveBtn.disabled = true;
+                        return;
+                    }
+                    saveBtn.disabled = false;
+                    
+                    let address_name = data.address_name || data.address || "";
+                    let num = "";
+                    if (address_name.includes(",")) {
+                        let parts = address_name.split(",");
+                        address_name = parts[0].trim();
+                        num = parts[1].trim();
+                    }
+                    
+                    if (data.address_type) document.getElementById("id_address_tipo_logradouro").value = data.address_type;
+                    document.getElementById("id_address_line1").value = address_name;
+                    
+                    if (typeof window.cnpjNumero !== "undefined") {
+                        document.getElementById("id_address_number").value = window.cnpjNumero;
+                    } else if (num) {
+                        document.getElementById("id_address_number").value = num;
+                    }
+                    
+                    if (typeof window.cnpjComplemento !== "undefined") {
+                        document.getElementById("id_address_line2").value = window.cnpjComplemento;
+                    }
+                    
+                    if (data.district) document.getElementById("id_address_neighborhood").value = data.district;
+                    if (data.state) document.getElementById("id_address_uf").value = data.state;
+                    if (data.city) document.getElementById("id_address_city").value = data.city;
+                    if (data.city_ibge) {
+                        document.getElementById("id_address_city_ibge").value = data.city_ibge;
+                    }
+                    if (data.codigo_municipio_ibge || data.city_ibge) {
+                        const ibge = String(data.codigo_municipio_ibge || data.city_ibge);
+                        const allowed = ibge === "3550308" ? ["PAULISTANA", "NACIONAL"] : ["NACIONAL"];
+                        const providerSelect = document.getElementById("id_nfse_provider");
+                        if (providerSelect) {
+                            const currentVal = providerSelect.value;
+                            Array.from(providerSelect.options).forEach(opt => {
+                                if (!allowed.includes(opt.value)) {
+                                    opt.style.display = "none";
+                                    opt.disabled = true;
+                                } else {
+                                    opt.style.display = "";
+                                    opt.disabled = false;
+                                }
+                            });
+                            if (!allowed.includes(currentVal)) {
+                                providerSelect.value = "NACIONAL";
+                            }
+                        }
+                    }
+                })
+                .catch(err => {
+                    console.error(err);
+                });
+        } else if (cep.length > 0) {
+            saveBtn.disabled = true;
+        } else {
+            saveBtn.disabled = false;
+        }
+    });
+});
+</script>
+{% endblock %}

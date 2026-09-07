@@ -1,0 +1,117 @@
+{% extends 'core/base.html' %}
+{% block title %}NFS-es - {{ PROJECT_NAME }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-column flex-sm-row gap-2">
+    <h2>Notas Fiscais de Serviço Eletrônica (NFS-e)</h2>
+    <div>
+        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
+            Importar NFS-e
+        </button>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Número NF / Chave</th>
+                        <th scope="col">Data Emissão</th>
+                        <th scope="col">Valor BRL</th>
+                        <th scope="col">Provedor</th>
+                        <th scope="col">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for nf in notas %}
+                    <tr>
+                        <td>{{ nf.nf_number }}{% if nf.chave_acesso_nacional %}<br><small class="text-muted">{{ nf.chave_acesso_nacional }}</small>{% endif %}</td>
+                        <td>{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</td>
+                        <td>R$ {{ nf.amount_brl }}</td>
+                        <td>
+                            <span class="badge bg-info text-dark mb-1 d-block">
+                                {{ nf.provider_type }}
+                            </span>
+                            {% if nf.is_canceled %}
+                            <span class="badge bg-danger">Cancelada</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            <a href="{% url 'nfse_detail' nf.id %}" class="btn btn-sm btn-outline-primary">Detalhes</a>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center py-4 text-muted">Nenhuma NFS-e encontrada.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Import Modal -->
+<div class="modal fade" id="importModal" tabindex="-1" aria-labelledby="importModalLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content" id="importModalContent">
+            <div class="modal-header">
+                <h5 class="modal-title" id="importModalLabel">Importar NFS-e</h5>
+                <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+            </div>
+            <form hx-post="{% url 'nfse_import' %}" hx-target="#importModalContent" hx-swap="outerHTML">
+                {% csrf_token %}
+                <div class="modal-body">
+                    <div class="mb-3">
+                        <label for="provider" class="form-label">Provedor</label>
+                        <select class="form-select" id="provider" name="provider" onchange="toggleProviderInputs()">
+                            {% if 'PAULISTANA' in company.allowed_providers %}
+                            <option value="PAULISTANA">Paulistana (São Paulo)</option>
+                            {% endif %}
+                            <option value="NACIONAL">Sefin Nacional</option>
+                        </select>
+                    </div>
+
+                    <div id="paulistanaInputs">
+                        <div class="mb-3">
+                            <label for="start_date" class="form-label">Data Início</label>
+                            <input type="date" class="form-control" id="start_date" name="start_date" min="{{ opening_date }}" max="{{ today }}" value="{{ today }}">
+                        </div>
+                        <div class="mb-3">
+                            <label for="end_date" class="form-label">Data Fim</label>
+                            <input type="date" class="form-control" id="end_date" name="end_date" min="{{ opening_date }}" max="{{ today }}" value="{{ today }}">
+                        </div>
+                    </div>
+
+                    <div id="nacionalInputs" style="display: none;">
+                        <div class="mb-3">
+                            <label for="chave_acesso" class="form-label">Chave de Acesso Nacional</label>
+                            <input type="text" class="form-control" id="chave_acesso" name="chave_acesso" placeholder="Ex: 35231012345678000199...">
+                        </div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary">Iniciar Importação</button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>
+
+<script>
+function toggleProviderInputs() {
+    var provider = document.getElementById('provider').value;
+    if (provider === 'PAULISTANA') {
+        document.getElementById('paulistanaInputs').style.display = 'block';
+        document.getElementById('nacionalInputs').style.display = 'none';
+    } else {
+        document.getElementById('paulistanaInputs').style.display = 'none';
+        document.getElementById('nacionalInputs').style.display = 'block';
+    }
+}
+</script>
+{% endblock %}
+

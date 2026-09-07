@@ -1,0 +1,234 @@
+{% load core_tags %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <title>Invoice {{ invoice.invoice_number }}</title>
+    <style>
+        @page {
+            size: A4;
+            margin: 1.5cm;
+        }
+        body {
+            font-family: Arial, Helvetica, sans-serif;
+            color: #000;
+            font-size: 10pt;
+            margin: 0;
+            padding: 0;
+        }
+        .black-bar {
+            background-color: #000;
+            height: 14px;
+            width: 100%;
+        }
+        .header {
+            margin-top: 20px;
+        }
+        .company-name {
+            font-weight: bold;
+            font-size: 12pt;
+            margin-bottom: 3px;
+        }
+        .company-details {
+            line-height: 1.3;
+        }
+        .title {
+            font-size: 32pt;
+            font-weight: bold;
+            margin-top: 30px;
+            margin-bottom: 5px;
+        }
+        .submitted-on {
+            font-weight: bold;
+            margin-bottom: 40px;
+        }
+        .info-grid {
+            display: table;
+            width: 100%;
+            margin-bottom: 30px;
+            table-layout: fixed;
+        }
+        .info-col {
+            display: table-cell;
+            width: 50%;
+            vertical-align: top;
+            line-height: 1.3;
+        }
+        .info-label {
+            font-weight: bold;
+            margin-bottom: 5px;
+        }
+        .table {
+            width: 100%;
+            border-collapse: collapse;
+            margin-bottom: 5px;
+        }
+        .table th {
+            border-bottom: 2px solid #000;
+            text-align: right;
+            padding: 8px 4px;
+            font-weight: bold;
+        }
+        .table th.text-left {
+            text-align: left;
+        }
+        .table td {
+            padding: 10px 4px;
+            text-align: right;
+            vertical-align: top;
+        }
+        .table td.text-left {
+            text-align: left;
+        }
+        .table tbody tr:nth-child(odd) {
+            background-color: #e6e8eb;
+        }
+        .table tbody tr:nth-child(even) {
+            background-color: #fff;
+        }
+        .desc-text {
+            font-family: "Courier New", Courier, monospace;
+            white-space: pre-wrap;
+            font-size: 9pt;
+        }
+        .subtotal-container {
+            width: 100%;
+            text-align: right;
+            border-top: 2px solid #000;
+            border-bottom: 2px solid #000;
+            padding: 8px 0;
+            margin-bottom: 30px;
+        }
+        .subtotal-container span {
+            display: inline-block;
+            font-weight: bold;
+        }
+        .subtotal-label {
+            margin-right: 30px;
+        }
+        .footer-grid {
+            display: table;
+            width: 100%;
+            margin-top: 30px;
+        }
+        .footer-col-left {
+            display: table-cell;
+            width: 60%;
+            vertical-align: top;
+        }
+        .footer-col-right {
+            display: table-cell;
+            width: 40%;
+            vertical-align: bottom;
+            text-align: right;
+        }
+        .notes-heading {
+            font-size: 9pt;
+            font-weight: bold;
+            margin-bottom: 2px;
+            text-decoration: underline;
+        }
+        .notes-box {
+            border: 1px solid #000;
+            padding: 8px 10px;
+            font-size: 9.5pt;
+            line-height: 1.3;
+        }
+        .notes-box strong {
+            display: block;
+            margin-top: 8px;
+        }
+        .notes-box strong:first-child {
+            margin-top: 0;
+        }
+        .total-amount {
+            font-size: 20pt;
+            font-weight: bold;
+        }
+        .bottom-bar-container {
+            position: absolute;
+            bottom: 0;
+            width: 100%;
+        }
+    </style>
+</head>
+<body>
+
+    <div class="black-bar"></div>
+
+    <div class="header">
+        <div class="company-name">{{ company.company_name|smart_title }}</div>
+        <div class="company-details">
+            <div>{{ company.address_tipo_logradouro|logradouro_type_abbr|default_if_none:"" }} {{ company.address_line1|smart_title }}, {{ company.address_number|default_if_none:"S/N" }}, {{ company.address_line2|smart_title|default_if_none:"" }}</div>
+            <div>{{ company.address_neighborhood|smart_title|default_if_none:"" }}</div>
+            <div>{{ company.address_city|smart_title }} - {{ company.address_uf }}, Brazil</div>
+            <div>{{ company.address_cep|cep_format|default_if_none:"" }}</div>
+            {% if company.email %}<div>{{ company.email }}</div>{% endif %}
+        </div>
+    </div>
+
+    <div class="title">Invoice</div>
+    <div class="submitted-on">Submitted on {{ invoice.issue_date|date:"Y-m-d" }}</div>
+
+    <div class="info-grid">
+        <div class="info-col">
+            <div class="info-label">Invoice for</div>
+            <div>{{ invoice.client.name }}</div>
+            <div>{{ invoice.client.address_number|default_if_none:"" }} {{ invoice.client.address_line1 }}, {{ invoice.client.address_line2|default_if_none:"" }}</div>
+            <div>{{ invoice.client.address_city }} - {{ invoice.client.state_province }}, {{ invoice.client.country }}</div>
+            <div>{{ invoice.client.address_postal_code|default_if_none:"" }}</div>
+            {% if invoice.client.email %}<div>{{ invoice.client.email }}</div>{% endif %}
+        </div>
+        <div class="info-col" style="padding-left: 20px;">
+            <div class="info-label">Invoice #</div>
+            <div>{{ invoice.invoice_number }}</div>
+        </div>
+    </div>
+
+    <table class="table">
+        <thead>
+            <tr>
+                <th scope="col" class="text-left">Description</th>
+                <th scope="col" style="width: 5%;">Qty</th>
+                <th scope="col" style="width: 20%;">Unit price ({{ invoice.currency }})</th>
+                <th scope="col" style="width: 20%;">Total price ({{ invoice.currency }})</th>
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in items %}
+            <tr>
+                <td class="text-left"><div class="desc-text">{{ item.description }}</div></td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.unit_price }}</td>
+                <td>{{ item.total_price }}</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+
+    <div class="subtotal-container">
+        <span class="subtotal-label">Subtotal</span>
+        <span style="min-width: 100px; text-align: right;">{{ subtotal }}</span>
+    </div>
+
+    <div class="footer-grid">
+        <div class="footer-col-left">
+            <div class="notes-heading">Notes:</div>
+            <div class="notes-box">
+                <strong>Payment is due 30 days from the invoice date.</strong>
+                
+                <strong>Payment instructions:</strong>
+                {% if company.bank_details_raw %}{{ company.bank_details_raw|linebreaksbr }}{% else %}N/A{% endif %}
+            </div>
+        </div>
+        <div class="footer-col-right">
+            <div class="total-amount">{{ invoice.currency }} {{ subtotal }}</div>
+        </div>
+    </div>
+
+    <div class="bottom-bar-container">
+        <div class="black-bar"></div>
+    </div>
+
+</body>
+</html>

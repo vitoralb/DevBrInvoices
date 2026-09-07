@@ -1,0 +1,162 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <div class="card shadow-sm">
+            <div class="card-header bg-dark text-white"><h5>{% if form.instance.pk %}Editar{% else %}Novo{% endif %} Invoice Template</h5></div>
+            <div class="card-body">
+                <div class="accordion mb-3" id="macroAccordion">
+                    <div class="accordion-item">
+                        <h2 class="accordion-header" id="headingMacros">
+                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseMacros" aria-expanded="false" aria-controls="collapseMacros">
+                                Ver Macros Disponíveis
+                            </button>
+                        </h2>
+                        <div id="collapseMacros" class="accordion-collapse collapse" aria-labelledby="headingMacros" data-bs-parent="#macroAccordion">
+                            <div class="accordion-body">
+                                <p>As seguintes macros podem ser usadas nas descrições dos itens:</p>
+                                <ul>
+                                    <li><code>&#123;&#123; invoice_date &#125;&#125;</code> - Data de Emissão</li>
+                                    <li><code>&#123;&#123; prev_month_start &#125;&#125;</code> - Primeiro dia do mês anterior</li>
+                                    <li><code>&#123;&#123; prev_month_end &#125;&#125;</code> - Último dia do mês anterior</li>
+                                    <li><code>&#123;&#123; prev_month_name &#125;&#125;</code> - Nome do mês anterior (em inglês)</li>
+                                    <li><code>&#123;&#123; prev_month_year &#125;&#125;</code> - Ano do mês anterior</li>
+                                    <li><code>&#123;&#123; invoice_number &#125;&#125;</code> - Número da Invoice</li>
+                                    <li><code>&#123;&#123; currency &#125;&#125;</code> - Moeda</li>
+                                    <li><code>&#123;&#123; client_name &#125;&#125;</code> - Nome do Cliente</li>
+                                    <li><code>&#123;&#123; value_original &#125;&#125;</code> - Valor Total Original</li>
+                                    <li><code>&#123;&#123; value_brl &#125;&#125;</code> - Valor Total BRL</li>
+                                    <li><code>{start_date}</code> - Primeiro dia do mês anterior</li>
+                                    <li><code>{end_date}</code> - Último dia do mês anterior</li>
+                                </ul>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+                <form method="POST">
+                    {% csrf_token %}
+                    {{ form.as_p }}
+                    <hr>
+                    <h6>Items</h6>
+                    {{ formset.management_form }}
+                    
+                    <div id="empty-form-template" class="d-none">
+                        <div class="row formset-row mb-3 align-items-center">
+                            {{ formset.empty_form.id }}
+                            <div class="col-md-5">
+                                {{ formset.empty_form.description.label_tag }}
+                                {{ formset.empty_form.description }}
+                            </div>
+                            <div class="col-md-2">
+                                {{ formset.empty_form.quantity.label_tag }}
+                                {{ formset.empty_form.quantity }}
+                            </div>
+                            <div class="col-md-3">
+                                {{ formset.empty_form.unit_price_foreign.label_tag }}
+                                {{ formset.empty_form.unit_price_foreign }}
+                            </div>
+                            <div class="col-md-2 text-center">
+                                <div class="d-none">
+                                    {{ formset.empty_form.DELETE }}
+                                </div>
+                                <button type="button" class="btn btn-sm btn-outline-danger delete-row-btn" title="Excluir Item">
+                                    <i class="bi bi-trash"></i>
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+
+                    <div id="formset-container">
+                        {% for item_form in formset %}
+                            <div class="row formset-row mb-3 align-items-center">
+                                {{ item_form.id }}
+                                <div class="col-md-5">
+                                    {{ item_form.description.label_tag }}
+                                    {{ item_form.description }}
+                                </div>
+                                <div class="col-md-2">
+                                    {{ item_form.quantity.label_tag }}
+                                    {{ item_form.quantity }}
+                                </div>
+                                <div class="col-md-3">
+                                    {{ item_form.unit_price_foreign.label_tag }}
+                                    {{ item_form.unit_price_foreign }}
+                                </div>
+                                <div class="col-md-2 text-center">
+                                    <div class="d-none">
+                                        {{ item_form.DELETE }}
+                                    </div>
+                                    <button type="button" class="btn btn-sm btn-outline-danger delete-row-btn" title="Excluir Item">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="add-item-btn">Add Item</button>
+                    <div class="d-flex justify-content-between gap-2 mt-3">
+                        <a href="{% url 'invoice_template_list' %}" class="btn btn-outline-secondary w-50">Cancelar</a>
+                        <button type="submit" class="btn btn-primary w-50">Salvar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+<script>
+    document.addEventListener('DOMContentLoaded', function() {
+        const addItemBtn = document.getElementById('add-item-btn');
+        const formsetContainer = document.getElementById('formset-container');
+        const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+        
+        if(addItemBtn) {
+            addItemBtn.addEventListener('click', function() {
+                const totalForms = parseInt(totalFormsInput.value);
+                const template = document.getElementById('empty-form-template').firstElementChild.cloneNode(true);
+                
+                template.innerHTML = template.innerHTML.replace(/__prefix__/g, totalForms);
+                
+                formsetContainer.appendChild(template);
+                totalFormsInput.value = totalForms + 1;
+            });
+        }
+
+        // Handle delete row buttons
+        formsetContainer.addEventListener('click', function(e) {
+            const btn = e.target.closest('.delete-row-btn');
+            if (btn) {
+                const row = btn.closest('.formset-row');
+                // Find the hidden DELETE checkbox in this row
+                const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+                if (deleteCheckbox) {
+                    // Mark it for deletion
+                    deleteCheckbox.checked = true;
+                    // Hide the row visually
+                    row.style.display = 'none';
+                } else {
+                    // If there's no delete checkbox, it's a newly added row not yet in DB, just remove it
+                    row.remove();
+                    
+                    // Update the TOTAL_FORMS count
+                    const totalForms = parseInt(totalFormsInput.value);
+                    totalFormsInput.value = totalForms - 1;
+                    
+                    // Re-index remaining forms
+                    const rows = formsetContainer.querySelectorAll('.formset-row');
+                    rows.forEach((r, index) => {
+                        const inputs = r.querySelectorAll('input, textarea, select');
+                        inputs.forEach(input => {
+                            if (input.name) {
+                                input.name = input.name.replace(/items-\d+-/, `items-${index}-`);
+                            }
+                            if (input.id) {
+                                input.id = input.id.replace(/id_items-\d+-/, `id_items-${index}-`);
+                            }
+                        });
+                    });
+                }
+            }
+        });
+    });
+</script>
+{% endblock %}

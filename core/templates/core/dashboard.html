@@ -1,0 +1,204 @@
+{% extends 'core/base.html' %}
+{% load humanize %}
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4">
+    <h2>Painel Financeiro Mensal</h2>
+    <div class="d-flex gap-2">
+        <form method="POST" action="{% url 'run_audit' %}" class="mb-0">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-outline-secondary fw-bold">
+                🔍 Executar Auditoria
+            </button>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <form method="GET" class="row gx-3 gy-2 align-items-end" id="filter_form">
+            <div class="col-sm-3">
+                <label class="form-label text-muted small mb-1" for="quick_filter">Filtros Rápidos</label>
+                <select class="form-select" id="quick_filter" name="quick_filter">
+                    <option value="">Todos</option>
+                    <option value="custom" class="d-none" {% if quick_filter == 'custom' %}selected{% endif %}>Data Personalizada</option>
+                    <option value="past_6_months" {% if quick_filter == 'past_6_months' %}selected{% endif %}>Últimos 6 Meses</option>
+                    <option value="past_12_months" {% if quick_filter == 'past_12_months' %}selected{% endif %}>Últimos 12 Meses</option>
+                    <optgroup label="Por Ano">
+                        {% for y in available_years %}
+                        <option value="{{ y }}" {% if quick_filter == y|stringformat:"s" %}selected{% endif %}>{{ y }}</option>
+                        {% endfor %}
+                    </optgroup>
+                </select>
+            </div>
+            <div class="col-sm-3">
+                <label class="form-label text-muted small mb-1" for="start_date">Data Inicial</label>
+                <input type="date" class="form-control" id="start_date" name="start_date" value="{{ start_date }}">
+            </div>
+            <div class="col-sm-3">
+                <label class="form-label text-muted small mb-1" for="end_date">Data Final</label>
+                <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
+            </div>
+            <div class="col-sm-3">
+                <button type="submit" class="btn btn-primary w-100">Filtrar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="row mb-4">
+    <div class="col-md-3">
+        <div class="card shadow-sm text-center">
+            <div class="card-body">
+                <h6 class="card-title text-muted">Receita Total</h6>
+                <h4 class="card-text">R$ {{ total_revenue|floatformat:2|intcomma }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm text-center">
+            <div class="card-body">
+                <h6 class="card-title text-muted">Total de Impostos (DAS+INSS+IRRF)</h6>
+                <h4 class="card-text text-danger">R$ {{ total_tax|floatformat:2|intcomma }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm text-center">
+            <div class="card-body">
+                <h6 class="card-title text-muted">Pró-labore Total</h6>
+                <h4 class="card-text text-info">R$ {{ total_pl|floatformat:2|intcomma }}</h4>
+            </div>
+        </div>
+    </div>
+    <div class="col-md-3">
+        <div class="card shadow-sm text-center">
+            <div class="card-body">
+                <h6 class="card-title text-muted">Lucro Líquido</h6>
+                <h4 class="card-text text-success">R$ {{ net_profit|floatformat:2|intcomma }}</h4>
+            </div>
+        </div>
+    </div>
+</div>
+
+{% if audit_findings %}
+<div class="alert {% if audit_findings.total_fixed > 0 %}alert-warning{% else %}alert-success{% endif %} mb-4 shadow-sm">
+    <h6 class="alert-heading mb-2">🔍 Resultados da Auditoria</h6>
+    {% if audit_findings.total_fixed == 0 %}
+        <p class="mb-0">✅ Nenhuma inconsistência encontrada. Todos os meses estão consolidados e atualizados.</p>
+    {% else %}
+        <p class="mb-1"><strong>{{ audit_findings.total_fixed }}</strong> problema{{ audit_findings.total_fixed|pluralize:'s' }} corrigido{{ audit_findings.total_fixed|pluralize:'s' }}:</p>
+        <ul class="mb-0">
+            {% if audit_findings.missing_months %}
+            <li class="mb-1"><strong>{{ audit_findings.missing_months|length }}</strong> consolidaç{{ audit_findings.missing_months|length|pluralize:'ão,ões' }} ausente{{ audit_findings.missing_months|length|pluralize:'s' }} criada{{ audit_findings.missing_months|length|pluralize:'s' }}:
+                {% for m in audit_findings.missing_months %}{{ m|date:"M Y" }}{% if not forloop.last %}, {% endif %}{% endfor %}
+            </li>
+            {% endif %}
+            
+            {% if audit_findings.differences %}
+            <li class="mb-1"><strong>{{ audit_findings.differences|length }}</strong> m{{ audit_findings.differences|length|pluralize:'ês,eses' }} existente{{ audit_findings.differences|length|pluralize:'s' }} recalculado{{ audit_findings.differences|length|pluralize:'s' }} e corrigido{{ audit_findings.differences|length|pluralize:'s' }}:
+                <ul class="mt-1 small">
+                {% for diff in audit_findings.differences %}
+                    <li class="mb-1"><strong>{{ diff.month|date:"M Y" }}</strong>:
+                        <ul class="mb-0">
+                        {% for change in diff.changes %}
+                            <li>{{ change }}</li>
+                        {% endfor %}
+                        </ul>
+                    </li>
+                {% endfor %}
+                </ul>
+            </li>
+            {% endif %}
+        </ul>
+    {% endif %}
+</div>
+{% endif %}
+
+
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Mês</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Invoicemento</th>
+                        <th scope="col">Fator R Proj.</th>
+                        <th scope="col">Impostos (DAS + INSS + IRRF)</th>
+                        <th scope="col">Pró-labore Ideal</th>
+                        <th scope="col">Pró-labore Real</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for consolidation in consolidations %}
+                        {% include 'core/partials/consolidation_row.html' %}
+                    {% empty %}
+                        <tr><td colspan="7" class="text-center py-4 text-muted">Nenhum registro encontrado. Adicione NFs e execute uma auditoria para começar.</td></tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+<script>
+    document.addEventListener("DOMContentLoaded", function() {
+        const quickFilter = document.getElementById("quick_filter");
+        const startDate = document.getElementById("start_date");
+        const endDate = document.getElementById("end_date");
+        
+        function getPastMonthsDate(months) {
+            let d = new Date();
+            d.setDate(1);
+            d.setMonth(d.getMonth() - months);
+            let year = d.getFullYear();
+            let month = String(d.getMonth() + 1).padStart(2, '0');
+            return `${year}-${month}-01`;
+        }
+
+        function getEndOfCurrentMonth() {
+            let d = new Date();
+            let nextMonth = new Date(d.getFullYear(), d.getMonth() + 1, 0);
+            let year = nextMonth.getFullYear();
+            let month = String(nextMonth.getMonth() + 1).padStart(2, '0');
+            let day = String(nextMonth.getDate()).padStart(2, '0');
+            return `${year}-${month}-${day}`;
+        }
+
+        quickFilter.addEventListener("change", function() {
+            const val = this.value;
+            let start = "";
+            let end = "";
+
+            if (val === "past_6_months") {
+                start = getPastMonthsDate(6);
+                end = getEndOfCurrentMonth();
+            } else if (val === "past_12_months") {
+                start = getPastMonthsDate(12);
+                end = getEndOfCurrentMonth();
+            } else if (val !== "" && val !== "custom" && !isNaN(val)) {
+                start = `${val}-01-01`;
+                end = `${val}-12-31`;
+            }
+
+            if (startDate._flatpickr) {
+                startDate._flatpickr.setDate(start, true);
+            } else {
+                startDate.value = start;
+            }
+            if (endDate._flatpickr) {
+                endDate._flatpickr.setDate(end, true);
+            } else {
+                endDate.value = end;
+            }
+        });
+
+        function handleDateChange() {
+            quickFilter.value = "custom";
+        }
+
+        startDate.addEventListener("change", handleDateChange);
+        endDate.addEventListener("change", handleDateChange);
+    });
+</script>
+{% endblock %}

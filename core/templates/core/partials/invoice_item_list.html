@@ -1,0 +1,39 @@
+{% load humanize %}
+<div class="table-responsive">
+    <table class="table table-sm">
+        <thead>
+            <tr>
+                <th scope="col">Descrição</th>
+                <th scope="col">Qtd</th>
+                <th scope="col">Preço Unitário ({{ invoice.currency }})</th>
+                <th scope="col" class="text-end">Total ({{ invoice.currency }})</th>
+                {% if invoice.status == 'DRAFT' %}
+                <th scope="col"></th>
+                {% endif %}
+            </tr>
+        </thead>
+        <tbody>
+            {% for item in invoice.items.all %}
+            <tr>
+                <td>{{ item.description }}</td>
+                <td>{{ item.quantity }}</td>
+                <td>{{ item.unit_price_foreign|floatformat:2|intcomma }}</td>
+                <td class="text-end fw-bold">{{ item.total_price_foreign|floatformat:2|intcomma }}</td>
+                {% if invoice.status == 'DRAFT' %}
+                <td class="text-end">
+                    <button class="btn btn-sm btn-outline-danger" 
+                            hx-post="{% url 'htmx_delete_invoice_item' item.id %}" 
+                            hx-target="#invoice-items-container"
+                            hx-confirm="Tem certeza de que deseja excluir este item?"
+                            aria-label="Excluir item: {{ item.description }}">
+                        &times;
+                    </button>
+                </td>
+                {% endif %}
+            </tr>
+            {% empty %}
+            <tr><td colspan="{% if invoice.status == 'DRAFT' %}5{% else %}4{% endif %}" class="text-center text-muted">Nenhum item adicionado ainda.</td></tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>

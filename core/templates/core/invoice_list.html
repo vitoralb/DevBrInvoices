@@ -1,0 +1,98 @@
+{% extends 'core/base.html' %}
+{% block title %}Invoices - {{ PROJECT_NAME }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-column flex-sm-row gap-2">
+    <h2>Invoices</h2>
+    <div>
+        {% if user.is_staff %}
+        <form method="POST" action="{% url 'force_process_daily_invoices' %}" class="d-inline">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-warning me-2" onclick="return confirm('Isso forçará a execução da tarefa diária agora mesmo. Confirmar?');">Forçar Tarefa Diária</button>
+        </form>
+        {% endif %}
+        <a href="{% url 'invoice_create' %}" class="btn btn-success">Criar Nova Invoice</a>
+    </div>
+</div>
+
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <form method="GET" class="row gx-3 gy-2 align-items-center">
+            <div class="col-sm-3">
+                <select class="form-select" name="client_id" aria-label="Filtrar por Cliente">
+                    <option value="">Todos os Clientes</option>
+                    {% for client in clients %}
+                    <option value="{{ client.id }}" {% if selected_client == client.id|stringformat:"s" %}selected{% endif %}>{{ client.name }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-sm-3">
+                <select class="form-select" name="status" aria-label="Filtrar por Status">
+                    <option value="">Todos os Status</option>
+                    <option value="DRAFT" {% if selected_status == 'DRAFT' %}selected{% endif %}>Rascunho</option>
+                    <option value="PROCESSING" {% if selected_status == 'PROCESSING' %}selected{% endif %}>Processando</option>
+                    <option value="FINALIZED" {% if selected_status == 'FINALIZED' %}selected{% endif %}>Finalizado</option>
+                </select>
+            </div>
+            <div class="col-sm-3">
+                <select class="form-select" name="year" aria-label="Filtrar por Ano">
+                    <option value="">Todos os Anos</option>
+                    {% for y in available_years %}
+                    <option value="{{ y }}" {% if selected_year == y|stringformat:"s" %}selected{% endif %}>{{ y }}</option>
+                    {% endfor %}
+                </select>
+            </div>
+            <div class="col-sm-3">
+                <button type="submit" class="btn btn-primary w-100">Filtrar</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="card shadow-sm">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead>
+                    <tr>
+                        <th scope="col">Invoice #</th>
+                        <th scope="col">Data</th>
+                        <th scope="col">Cliente</th>
+                        <th scope="col">Moeda</th>
+                        <th scope="col">Status</th>
+                        <th scope="col">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for invoice in invoices %}
+                    <tr>
+                        <td>{{ invoice.invoice_number }}</td>
+                        <td>{{ invoice.issue_date|date:"SHORT_DATE_FORMAT" }}</td>
+                        <td>{{ invoice.client.name }}</td>
+                        <td>{{ invoice.currency }}</td>
+                        <td>
+                            <span class="badge {% if invoice.status == 'FINALIZED' %}bg-success{% elif invoice.status == 'PROCESSING' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                                {{ invoice.get_status_display }}
+                            </span>
+                        </td>
+                        <td>
+                            <a href="{% url 'invoice_detail' invoice.id %}" class="btn btn-sm btn-outline-primary">Gerenciar</a>
+                            {% if invoice.status == 'DRAFT' %}
+                            <form method="POST" action="{% url 'invoice_delete' invoice.id %}" class="d-inline" onsubmit="return confirm('Tem certeza que deseja excluir esta invoice?');">
+                                {% csrf_token %}
+                                <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Excluir invoice {{ invoice.invoice_number }}">Excluir</button>
+                            </form>
+                            {% endif %}
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="6" class="text-center py-4 text-muted">Nenhuma invoice encontrada.</td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

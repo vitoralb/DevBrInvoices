@@ -1,0 +1,173 @@
+{% extends 'core/base.html' %}
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-md-10">
+        <div class="card shadow-sm">
+            <div class="card-header bg-dark text-white"><h5>Nova Invoice</h5></div>
+            <div class="card-body">
+                {% if invoice_templates %}
+                <div class="mb-4">
+                    <label class="form-label"><strong>Carregar de Template</strong></label>
+                    <select id="template-selector" class="form-select">
+                        <option value="">-- Selecione um template --</option>
+                        {% for t in invoice_templates %}
+                        <option value="{{ t.id }}">{{ t.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <hr>
+                {% endif %}
+                <form method="POST" id="invoice-form">
+                    {% csrf_token %}
+                    <div class="row">
+                        {% for field in form %}
+                        <div class="col-md-6 mb-3">
+                            {{ field.label_tag }}
+                            {{ field }}
+                            {{ field.errors }}
+                        </div>
+                        {% endfor %}
+                    </div>
+                    
+                    <hr>
+                    <h6>Itens da Invoice</h6>
+                    {{ formset.management_form }}
+                    <div id="formset-container">
+                        {% for item_form in formset %}
+                            <div class="row formset-row mb-3 align-items-center">
+                                {{ item_form.id }}
+                                <div class="col-md-5">
+                                    {{ item_form.description.label_tag }}
+                                    {{ item_form.description }}
+                                </div>
+                                <div class="col-md-2">
+                                    {{ item_form.quantity.label_tag }}
+                                    {{ item_form.quantity }}
+                                </div>
+                                <div class="col-md-3">
+                                    {{ item_form.unit_price_foreign.label_tag }}
+                                    {{ item_form.unit_price_foreign }}
+                                </div>
+                                <div class="col-md-2 text-center">
+                                    {% if item_form.instance.pk %}{{ item_form.DELETE }}{% endif %}
+                                </div>
+                            </div>
+                        {% endfor %}
+                    </div>
+                    <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="add-item-btn">Adicionar Item</button>
+
+                    <button type="submit" class="btn btn-primary w-100 mt-3">Salvar Rascunho</button>
+                </form>
+            </div>
+        </div>
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const templateSelector = document.getElementById('template-selector');
+    const formsetContainer = document.getElementById('formset-container');
+    const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
+    const addItemBtn = document.getElementById('add-item-btn');
+    
+    // Create an empty row template for adding new rows dynamically
+    let emptyRowHtml = '';
+    
+    function createEmptyRowTemplate() {
+        if (!formsetContainer.querySelector('.formset-row')) {
+            // Need a fallback if there are absolutely no rows
+            emptyRowHtml = `
+                <div class="row formset-row mb-3 align-items-center">
+                    <input type="hidden" name="items-__prefix__-id" id="id_items-__prefix__-id">
+                    <div class="col-md-5">
+                        <label for="id_items-__prefix__-description">Descrição:</label>
+                        <textarea name="items-__prefix__-description" cols="40" rows="2" class="form-control" placeholder="Descrição do serviço prestado..." id="id_items-__prefix__-description"></textarea>
+                    </div>
+                    <div class="col-md-2">
+                        <label for="id_items-__prefix__-quantity">Quantidade:</label>
+                        <input type="number" name="items-__prefix__-quantity" value="1.00" min="0.01" step="0.01" class="form-control" id="id_items-__prefix__-quantity">
+                    </div>
+                    <div class="col-md-3">
+                        <label for="id_items-__prefix__-unit_price_foreign">Preço Unitário:</label>
+                        <input type="number" name="items-__prefix__-unit_price_foreign" min="0.00" step="0.01" class="form-control" id="id_items-__prefix__-unit_price_foreign">
+                    </div>
+                    <div class="col-md-2 text-center">
+                    </div>
+                </div>`;
+        } else {
+            const row = formsetContainer.querySelector('.formset-row').cloneNode(true);
+            row.innerHTML = row.innerHTML.replace(/items-(\d+)-/g, 'items-__prefix__-').replace(/id_items-(\d+)-/g, 'id_items-__prefix__-');
+            emptyRowHtml = row.outerHTML;
+        }
+    }
+    createEmptyRowTemplate();
+
+    function addRow(data = null) {
+        const totalForms = parseInt(totalFormsInput.value);
+        const newRowHtml = emptyRowHtml.replace(/__prefix__/g, totalForms);
+        
+        const tempDiv = document.createElement('div');
+        tempDiv.innerHTML = newRowHtml;
+        const newRow = tempDiv.firstElementChild;
+        
+        if (data) {
+            const desc = newRow.querySelector('[name$="-description"]');
+            if(desc) desc.value = data.description || '';
+            const qty = newRow.querySelector('[name$="-quantity"]');
+            if(qty) qty.value = data.quantity || '1.00';
+            const price = newRow.querySelector('[name$="-unit_price_foreign"]');
+            if(price) price.value = data.unit_price_foreign || '';
+        } else {
+            const inputs = newRow.querySelectorAll('input, textarea, select');
+            inputs.forEach(input => {
+                if (input.type !== 'hidden' || input.name.endsWith('-DELETE')) {
+                    if(input.name.endsWith('-quantity')) {
+                        input.value = '1.00';
+                    } else {
+                        input.value = '';
+                    }
+                }
+            });
+        }
+        
+        formsetContainer.appendChild(newRow);
+        totalFormsInput.value = totalForms + 1;
+    }
+
+    if (addItemBtn) {
+        addItemBtn.addEventListener('click', () => addRow());
+    }
+
+    if (templateSelector) {
+        templateSelector.addEventListener('change', function() {
+            const templateId = this.value;
+            if (!templateId) return;
+
+            fetch('/htmx/template-details/' + templateId + '/')
+                .then(response => response.json())
+                .then(data => {
+                    // Update currency if needed
+                    const currencyInput = document.querySelector('[name="currency"]');
+                    if (currencyInput && data.currency) {
+                        currencyInput.value = data.currency;
+                    }
+                    
+                    // Clear existing formset rows
+                    formsetContainer.innerHTML = '';
+                    totalFormsInput.value = '0';
+                    
+                    // Add items from template
+                    if (data.items && data.items.length > 0) {
+                        data.items.forEach(item => {
+                            addRow(item);
+                        });
+                    } else {
+                        addRow(); // add at least one empty row
+                    }
+                })
+                .catch(err => console.error('Error fetching template details:', err));
+        });
+    }
+});
+</script>
+{% endblock %}
