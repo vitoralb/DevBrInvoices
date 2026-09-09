@@ -22,8 +22,6 @@ VALID_INVOICE_MACROS = {
     "{{ client_name }}",
     "{{ value_original }}",
     "{{ value_brl }}",
-    "{start_date}",
-    "{end_date}",
     "{{ company_cnpj }}",
 }
 

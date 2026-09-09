@@ -85,10 +85,6 @@ def apply_invoice_macros(text, invoice, language="en"):
     for k, v in replacements.items():
         text = text.replace(k, str(v))
 
-    # Also support single braces for backwards compatibility
-    text = text.replace("{start_date}", prev_month_start_str)
-    text = text.replace("{end_date}", prev_month_end_str)
-
     return text
 
 

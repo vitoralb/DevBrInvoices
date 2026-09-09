@@ -113,13 +113,8 @@ def _prepare_nf_data(invoice):
         s = f"{val:,.{decimals}f}"
         return s.replace(",", "X").replace(".", ",").replace("X", ".")
 
-    raw_client_desc = "Serviços de desenvolvimento de software. Referente ao período de {start_date} a {end_date}."
-    client_desc = raw_client_desc.replace(
-        "{start_date}", start_date.strftime("%d/%m/%Y")
-    ).replace("{end_date}", end_date.strftime("%d/%m/%Y"))
-
     description = (
-        f"{client_desc}\n"
+        f"Serviços de desenvolvimento de software. Referente ao período de {start_date.strftime('%d/%m/%Y')} a {end_date.strftime('%d/%m/%Y')}.\n"
         f"Serviço prestado exclusivamente para o exterior, não será usado no Brasil.\n\n"
         f"Valor em moeda estrangeira: {invoice.currency} {fmt_br(total_foreign)}\n"
         f"Taxa de conversão: {fmt_br(invoice.exchange_rate_to_brl, 4)}\n"
