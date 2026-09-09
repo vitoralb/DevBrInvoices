@@ -408,6 +408,25 @@ def htmx_update_invoice_number(request, pk):
 
 @login_required
 @require_POST
+def htmx_update_bank_details(request, pk):
+    from django.http import HttpResponseBadRequest
+
+    invoice = get_object_or_404(Invoice, pk=pk)
+    if invoice.status == "DRAFT":
+        invoice.bank_details = request.POST.get("bank_details", "").strip()
+        invoice.save(update_fields=["bank_details", "updated_at"])
+        return render(
+            request,
+            "core/partials/invoice_bank_details.html",
+            {"invoice": invoice},
+        )
+    return HttpResponseBadRequest(
+        "Apenas invoices em rascunho podem ter dados bancários alterados."
+    )
+
+
+@login_required
+@require_POST
 def finalize_invoice(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
 
@@ -581,6 +600,7 @@ def clone_invoice(request, pk):
         invoice_number=f"CLONE-{uuid.uuid4().hex[:6]}",
         issue_date=date.today(),
         currency=original.currency,
+        bank_details=original.bank_details,
     )
     for item in original.items.all():
         InvoiceItem.objects.create(
@@ -1012,7 +1032,13 @@ def htmx_get_invoice_template(request, pk):
     for item in items:
         item["quantity"] = str(item["quantity"])
         item["unit_price_foreign"] = str(item["unit_price_foreign"])
-    return JsonResponse({"currency": template.currency, "items": items})
+    return JsonResponse(
+        {
+            "currency": template.currency,
+            "bank_details": template.bank_details,
+            "items": items,
+        }
+    )
 
 
 @login_required

@@ -21,9 +21,10 @@
                     {% csrf_token %}
                     <div class="row">
                         {% for field in form %}
-                        <div class="col-md-6 mb-3">
+                        <div class="{% if field.name == 'bank_details' %}col-12{% else %}col-md-6{% endif %} mb-3">
                             {{ field.label_tag }}
                             {{ field }}
+                            {% if field.help_text %}<small class="form-text text-muted">{{ field.help_text }}</small>{% endif %}
                             {{ field.errors }}
                         </div>
                         {% endfor %}
@@ -150,6 +151,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     const currencyInput = document.querySelector('[name="currency"]');
                     if (currencyInput && data.currency) {
                         currencyInput.value = data.currency;
+                    }
+
+                    // Update bank details if provided
+                    const bankDetailsInput = document.querySelector('[name="bank_details"]');
+                    if (bankDetailsInput && data.bank_details !== undefined) {
+                        bankDetailsInput.value = data.bank_details;
                     }
                     
                     // Clear existing formset rows

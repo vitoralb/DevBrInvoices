@@ -82,8 +82,6 @@ class CompanySettings(models.Model):
         blank=True, null=True, help_text="Data de validade do certificado"
     )
 
-    bank_details_raw = models.TextField(blank=True, default="")
-
     debug_email = models.EmailField(
         blank=True,
         null=True,
@@ -231,6 +229,11 @@ class Invoice(models.Model):
         default="",
         help_text="Protocol returned when batch is sent to prefeitura",
     )
+    bank_details = models.TextField(
+        blank=True,
+        default="",
+        help_text="Dados bancários / instruções de pagamento (suporta Markdown).",
+    )
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -280,6 +283,14 @@ class Invoice(models.Model):
             return self.nota_fiscal.provider_type
         company = CompanySettings.objects.first()
         return company.nfse_provider if company else "PAULISTANA"
+
+    @property
+    def bank_details_html(self):
+        if not self.bank_details:
+            return ""
+        from core.templatetags.core_tags import render_markdown_text
+
+        return render_markdown_text(self.bank_details)
 
     def __str__(self):
         return f"Invoice {self.invoice_number} - {self.client.name}"
@@ -582,6 +593,11 @@ class InvoiceTemplate(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255, unique=True)
     currency = models.CharField(max_length=10, default="CAD")
+    bank_details = models.TextField(
+        blank=True,
+        default="",
+        help_text="Dados bancários / instruções de pagamento (suporta Markdown).",
+    )
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, null=True)
 
@@ -589,6 +605,14 @@ class InvoiceTemplate(models.Model):
         verbose_name = "Template de Fatura"
         verbose_name_plural = "Templates de Fatura"
         ordering = ["name"]
+
+    @property
+    def bank_details_html(self):
+        if not self.bank_details:
+            return ""
+        from core.templatetags.core_tags import render_markdown_text
+
+        return render_markdown_text(self.bank_details)
 
     def __str__(self):
         return self.name

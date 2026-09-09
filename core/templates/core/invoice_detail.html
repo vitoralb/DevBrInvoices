@@ -59,6 +59,7 @@
                 <p><strong>Data:</strong> {{ invoice.issue_date }}</p>
                 <p><strong>Moeda:</strong> {{ invoice.currency }}</p>
                 <p><strong>Status:</strong> <span class="badge bg-secondary">{{ invoice.get_status_display }}</span></p>
+                {% include 'core/partials/invoice_bank_details.html' %}
                 
                 {% if invoice.status == 'PROCESSING' %}
                 <hr>

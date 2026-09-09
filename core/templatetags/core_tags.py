@@ -116,3 +116,33 @@ def logradouro_type_abbr(value):
         "jardim": "Jd.",
     }
     return abbr_map.get(lower_value, value)
+
+
+import re
+import markdown as md_lib
+from django.utils.safestring import mark_safe
+
+
+def render_markdown_text(text):
+    if not text:
+        return ""
+    cleaned = str(text).strip()
+    # Normalize line endings
+    cleaned = cleaned.replace("\r\n", "\n").replace("\r", "\n")
+    # Clean whitespace-only lines to empty lines
+    cleaned = re.sub(r"(?<=\n)[ \t]+(?=\n)", "", cleaned)
+
+    # Preserve extra blank lines (sequences of 3 or more newlines)
+    def repl(match):
+        count = len(match.group(0))
+        extra = count - 2
+        return "\n\n" + ("&nbsp;\n\n" * extra)
+
+    cleaned = re.sub(r"\n{3,}", repl, cleaned)
+    html = md_lib.markdown(cleaned, extensions=["extra", "nl2br"])
+    return mark_safe(html)
+
+
+@register.filter(name="render_markdown")
+def render_markdown(value):
+    return render_markdown_text(value)

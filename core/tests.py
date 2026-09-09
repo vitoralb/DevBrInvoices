@@ -15,6 +15,8 @@ from core.models import (
     CompanySettings,
     Invoice,
     InvoiceItem,
+    InvoiceTemplate,
+    InvoiceTemplateItem,
     MonthlyConsolidation,
     NotaFiscal,
 )
@@ -185,7 +187,6 @@ class NFSeProviderAbstractionTests(TestCase):
             nfse_provider="PAULISTANA",
             address_line1="Av Paulista",
             address_number="1000",
-            bank_details_raw="Test Beneficiary\n12345\n001\n0001",
             debug_mode=True,
         )
         self.client_obj = Client.objects.create(
@@ -203,6 +204,7 @@ class NFSeProviderAbstractionTests(TestCase):
             issue_date=date(2026, 9, 1),
             currency="CAD",
             exchange_rate_to_brl=Decimal("4.20"),
+            bank_details="Test Beneficiary\n12345\n001\n0001",
         )
         InvoiceItem.objects.create(
             invoice=self.invoice,
@@ -1019,3 +1021,188 @@ class NFSeProviderAbstractionTests(TestCase):
                     "Falha na emissão da NFS-e: 1205 - Tomador com CNPJ inválido",
                     str(ctx.exception),
                 )
+
+
+class InvoiceBankDetailsTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
+        self.company = CompanySettings.objects.create(
+            company_name="Test Company",
+            cnpj="12.345.678/0001-90",
+            inscricao_municipal="12345678",
+            opening_date=date(2024, 1, 1),
+            email="test@test.com",
+            next_document_number=1,
+            document_series="1",
+            nfse_provider="PAULISTANA",
+            address_line1="Av Paulista",
+            address_number="1000",
+            debug_mode=True,
+        )
+        self.client_obj = Client.objects.create(
+            name="Canadian Tech Inc",
+            address_neighborhood="Centre-Ville",
+            address_country_code="CA",
+            address_city="Toronto",
+            address_postal_code="M5H 2N2",
+            address_state_province="ON",
+            email="accounting@canadiantech.ca",
+        )
+        self.user = User.objects.create_user(
+            username="bank_tester", password="password123"
+        )
+        self.client.login(username="bank_tester", password="password123")
+
+    def test_invoice_bank_details_markdown_rendering(self):
+        markdown_text = (
+            "**Bank Name:** Royal Bank\n\n"
+            "- **Account:** 123456\n"
+            "- **Transit:** 001\n"
+            "- **SWIFT:** ROYCCAT2"
+        )
+        invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-2026-B1",
+            issue_date=date(2026, 9, 1),
+            currency="CAD",
+            bank_details=markdown_text,
+        )
+        html = invoice.bank_details_html
+        self.assertIn("<strong>Bank Name:</strong> Royal Bank", html)
+        self.assertIn("<ul>", html)
+        self.assertIn("<li><strong>Account:</strong> 123456</li>", html)
+        self.assertIn("<li><strong>SWIFT:</strong> ROYCCAT2</li>", html)
+
+    def test_invoice_bank_details_empty_linebreaks_preserved(self):
+        markdown_text = "Line 1\n\n" "Line 2\n\n\n" "Line 3"
+        invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-2026-LINES",
+            issue_date=date(2026, 9, 1),
+            currency="CAD",
+            bank_details=markdown_text,
+        )
+        html = invoice.bank_details_html
+        self.assertIn("<p>Line 1</p>", html)
+        self.assertIn("<p>Line 2</p>", html)
+        self.assertIn("<p>&nbsp;</p>", html)
+        self.assertIn("<p>Line 3</p>", html)
+
+    def test_invoice_template_bank_details_and_htmx_endpoint(self):
+        template = InvoiceTemplate.objects.create(
+            name="Canadian Client Template",
+            currency="CAD",
+            bank_details="**Bank:** RBC\nTransit: 123",
+        )
+        InvoiceTemplateItem.objects.create(
+            template=template,
+            description="Consulting Service",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("1000.00"),
+        )
+        self.assertIn("<strong>Bank:</strong> RBC", template.bank_details_html)
+
+        response = self.client.get(f"/htmx/template-details/{template.id}/")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["currency"], "CAD")
+        self.assertEqual(data["bank_details"], "**Bank:** RBC\nTransit: 123")
+        self.assertEqual(len(data["items"]), 1)
+
+    def test_clone_invoice_preserves_bank_details(self):
+        original = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-ORIG-01",
+            issue_date=date(2026, 9, 1),
+            currency="CAD",
+            bank_details="**Beneficiary:** My Company Ltd\nAccount: 778899",
+        )
+        InvoiceItem.objects.create(
+            invoice=original,
+            description="Dev Service",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("500.00"),
+        )
+        response = self.client.post(f"/invoices/{original.id}/clone/")
+        self.assertEqual(response.status_code, 302)
+
+        cloned = (
+            Invoice.objects.filter(client=self.client_obj)
+            .exclude(id=original.id)
+            .first()
+        )
+        self.assertIsNotNone(cloned)
+        self.assertEqual(cloned.bank_details, original.bank_details)
+
+    def test_htmx_update_bank_details_on_draft_and_finalized(self):
+        invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-DRAFT-01",
+            issue_date=date(2026, 9, 1),
+            currency="CAD",
+            bank_details="Initial Details",
+            status="DRAFT",
+        )
+        # Update draft
+        response = self.client.post(
+            f"/invoices/{invoice.id}/update-bank-details/",
+            {"bank_details": "**Updated:** Bank Info"},
+        )
+        self.assertEqual(response.status_code, 200)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.bank_details, "**Updated:** Bank Info")
+        self.assertIn("<strong>Updated:</strong> Bank Info", response.content.decode())
+
+        # Finalized invoice cannot update bank details
+        invoice.status = "FINALIZED"
+        invoice.save()
+        bad_response = self.client.post(
+            f"/invoices/{invoice.id}/update-bank-details/",
+            {"bank_details": "New Info Attempt"},
+        )
+        self.assertEqual(bad_response.status_code, 400)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.bank_details, "**Updated:** Bank Info")
+
+    def test_generate_pdf_with_markdown_bank_details(self):
+        from core.pdf_service import generate_pdf_bytes
+
+        invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-PDF-01",
+            issue_date=date(2026, 9, 1),
+            currency="USD",
+            bank_details="**Bank of America**\n- Routing: 111000025\n- Account: 987654321",
+        )
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            description="Cloud Architecture Consulting",
+            quantity=Decimal("10.00"),
+            unit_price_foreign=Decimal("150.00"),
+        )
+        pdf_bytes = generate_pdf_bytes(invoice, self.company)
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+    def test_generate_pdf_without_bank_details(self):
+        from core.pdf_service import generate_pdf_bytes
+
+        invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-PDF-EMPTY",
+            issue_date=date(2026, 9, 1),
+            currency="USD",
+            bank_details="",
+        )
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            description="Design",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("100.00"),
+        )
+        pdf_bytes = generate_pdf_bytes(invoice, self.company)
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
+    def test_company_settings_has_no_bank_details_raw(self):
+        self.assertFalse(hasattr(self.company, "bank_details_raw"))

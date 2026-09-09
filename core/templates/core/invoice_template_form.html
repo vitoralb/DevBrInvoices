@@ -35,7 +35,24 @@
                 </div>
                 <form method="POST">
                     {% csrf_token %}
-                    {{ form.as_p }}
+                    <div class="row">
+                        <div class="col-md-8 mb-3">
+                            {{ form.name.label_tag }}
+                            {{ form.name }}
+                            {{ form.name.errors }}
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            {{ form.currency.label_tag }}
+                            {{ form.currency }}
+                            {{ form.currency.errors }}
+                        </div>
+                        <div class="col-12 mb-3">
+                            {{ form.bank_details.label_tag }}
+                            {{ form.bank_details }}
+                            <small class="form-text text-muted">Dados bancários que serão pré-preenchidos ao criar uma invoice a partir deste template. Suporta formatação em Markdown (negrito, listas, etc.).</small>
+                            {{ form.bank_details.errors }}
+                        </div>
+                    </div>
                     <hr>
                     <h6>Items</h6>
                     {{ formset.management_form }}

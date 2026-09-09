@@ -50,12 +50,19 @@ def validate_macros(text, valid_macros):
 class InvoiceForm(forms.ModelForm):
     class Meta:
         model = Invoice
-        fields = ["client", "invoice_number", "issue_date", "currency"]
+        fields = [
+            "client",
+            "invoice_number",
+            "issue_date",
+            "currency",
+            "bank_details",
+        ]
         labels = {
             "client": "Cliente",
             "invoice_number": "Número da Invoice",
             "issue_date": "Data de Emissão",
             "currency": "Moeda",
+            "bank_details": "Dados Bancários",
         }
         widgets = {
             "issue_date": forms.DateInput(
@@ -67,6 +74,13 @@ class InvoiceForm(forms.ModelForm):
             ),
             "currency": forms.TextInput(
                 attrs={"class": "form-control", "placeholder": "CAD, USD, EUR, etc."}
+            ),
+            "bank_details": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 4,
+                    "placeholder": "Dados bancários (suporta Markdown)...",
+                }
             ),
         }
 
@@ -128,10 +142,22 @@ class EmailTemplateForm(forms.ModelForm):
 class InvoiceTemplateForm(forms.ModelForm):
     class Meta:
         model = InvoiceTemplate
-        fields = ["name", "currency"]
+        fields = ["name", "currency", "bank_details"]
+        labels = {
+            "name": "Nome",
+            "currency": "Moeda",
+            "bank_details": "Dados Bancários",
+        }
         widgets = {
             "name": forms.TextInput(attrs={"class": "form-control"}),
             "currency": forms.TextInput(attrs={"class": "form-control"}),
+            "bank_details": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 4,
+                    "placeholder": "Dados bancários (suporta Markdown)...",
+                }
+            ),
         }
 
 

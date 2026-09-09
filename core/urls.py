@@ -33,6 +33,11 @@ urlpatterns = [
         name="htmx_update_invoice_number",
     ),
     path(
+        "invoices/<uuid:pk>/update-bank-details/",
+        views.htmx_update_bank_details,
+        name="htmx_update_bank_details",
+    ),
+    path(
         "invoices/item/<uuid:item_pk>/delete/",
         views.htmx_delete_invoice_item,
         name="htmx_delete_invoice_item",

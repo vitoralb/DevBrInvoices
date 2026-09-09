@@ -134,12 +134,26 @@
             font-size: 9.5pt;
             line-height: 1.3;
         }
-        .notes-box strong {
+        .notes-box .notes-title {
+            font-weight: bold;
             display: block;
             margin-top: 8px;
         }
-        .notes-box strong:first-child {
+        .notes-box .notes-title:first-child {
             margin-top: 0;
+        }
+        .notes-box p {
+            margin: 0 0 0.85em 0;
+        }
+        .notes-box p:last-child {
+            margin-bottom: 0;
+        }
+        .notes-box ul, .notes-box ol {
+            margin: 0 0 0.85em 0;
+            padding-left: 18px;
+        }
+        .notes-box li {
+            margin-bottom: 2px;
         }
         .total-amount {
             font-size: 20pt;
@@ -175,7 +189,7 @@
             <div class="info-label">Invoice for</div>
             <div>{{ invoice.client.name }}</div>
             <div>{{ invoice.client.address_number|default_if_none:"" }} {{ invoice.client.address_line1 }}, {{ invoice.client.address_line2|default_if_none:"" }}</div>
-            <div>{{ invoice.client.address_city }} - {{ invoice.client.state_province }}, {{ invoice.client.country }}</div>
+            <div>{{ invoice.client.address_city }} - {{ invoice.client.address_state_province }}, {{ invoice.client.country }}</div>
             <div>{{ invoice.client.address_postal_code|default_if_none:"" }}</div>
             {% if invoice.client.email %}<div>{{ invoice.client.email }}</div>{% endif %}
         </div>
@@ -189,9 +203,9 @@
         <thead>
             <tr>
                 <th scope="col" class="text-left">Description</th>
-                <th scope="col" style="width: 5%;">Qty</th>
-                <th scope="col" style="width: 20%;">Unit price ({{ invoice.currency }})</th>
-                <th scope="col" style="width: 20%;">Total price ({{ invoice.currency }})</th>
+                <th scope="col">Qty</th>
+                <th scope="col">Unit price ({{ invoice.currency }})</th>
+                <th scope="col">Total price ({{ invoice.currency }})</th>
             </tr>
         </thead>
         <tbody>
@@ -215,10 +229,9 @@
         <div class="footer-col-left">
             <div class="notes-heading">Notes:</div>
             <div class="notes-box">
-                <strong>Payment is due 30 days from the invoice date.</strong>
-                
-                <strong>Payment instructions:</strong>
-                {% if company.bank_details_raw %}{{ company.bank_details_raw|linebreaksbr }}{% else %}N/A{% endif %}
+                <div class="bank-details-content">
+                    {% if invoice.bank_details %}{{ invoice.bank_details_html }}{% else %}N/A{% endif %}
+                </div>
             </div>
         </div>
         <div class="footer-col-right">
