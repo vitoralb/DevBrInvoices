@@ -34,6 +34,7 @@ def carregar_certificado_pfx_bytes(pfx_data, password):
 
     return key_pem, cert_pem, exp
 
+
 def carregar_certificado_pfx(pfx_path, password):
     """Reads a PKCS#12 (.pfx) file and extracts the private key and public certificate as PEM bytes."""
     if not os.path.exists(pfx_path):

@@ -1,6 +1,7 @@
 from django.db import models
 from core.utils.encryption import encrypt_value, decrypt_value
 
+
 class EncryptedTextField(models.TextField):
     def get_prep_value(self, value):
         value = super().get_prep_value(value)

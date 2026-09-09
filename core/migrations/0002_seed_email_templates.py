@@ -2,8 +2,9 @@
 
 from django.db import migrations
 
+
 def seed_email_templates(apps, schema_editor):
-    EmailTemplate = apps.get_model('core', 'EmailTemplate')
+    EmailTemplate = apps.get_model("core", "EmailTemplate")
 
     templates = [
         {
@@ -47,7 +48,7 @@ def seed_email_templates(apps, schema_editor):
             "subject": "ALERTA: Falha na Emissão da NFS-e - Fatura {{ invoice_number }}",
             "body": "A emissão da NFS-e para a fatura {{ invoice_number }} ({{ client_name }}) falhou após o número máximo de tentativas.\n\nErro: {{ error }}\n\nPor favor, acesse o sistema e tente emitir a NFS-e manualmente novamente.",
             "language": "pt-br",
-        }
+        },
     ]
 
     for data in templates:
@@ -58,16 +59,18 @@ def seed_email_templates(apps, schema_editor):
                 "subject": data["subject"],
                 "body": data["body"],
                 "language": data["language"],
-            }
+            },
         )
+
 
 def reverse_seed(apps, schema_editor):
     pass
 
+
 class Migration(migrations.Migration):
 
     dependencies = [
-        ('core', '0001_initial'),
+        ("core", "0001_initial"),
     ]
 
     operations = [

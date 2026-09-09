@@ -1,21 +1,19 @@
 import logging
-import csv
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date, timedelta
+from datetime import date
 from dateutil.relativedelta import relativedelta
 from django.db.models import Sum, Max
 from django.db import transaction, models
-from django.db.models.functions import Coalesce, TruncMonth
+from django.db.models.functions import Coalesce
 from django.conf import settings
-import os
-from xsdata.models.datatype import XmlDate
-from ..models import MonthlyConsolidation, CompanySettings, NotaFiscal, NfseLog
+from ..models import MonthlyConsolidation, CompanySettings, NotaFiscal
 from .. import signals as _signals
-import requests
 
 logger = logging.getLogger(__name__)
 
 from .tax_calculations import *
+
+
 def consolidate_month(month_year, actual_pro_labore=None):
     """Aggregates data, determines Annex III vs V, and locks in taxes for a month.
 
@@ -27,7 +25,6 @@ def consolidate_month(month_year, actual_pro_labore=None):
         return _consolidate_month_inner(month_year, actual_pro_labore)
     finally:
         _signals.set_consolidation_in_progress(False)
-
 
 
 @transaction.atomic
@@ -44,9 +41,12 @@ def _consolidate_month_inner(month_year, actual_pro_labore=None):
     )["total"]
 
     first_day = month_year.replace(day=1)
-    consolidation, created = MonthlyConsolidation.objects.get_or_create(
+    # Lock the row (or create it) to prevent concurrent consolidation of the same month
+    MonthlyConsolidation.objects.get_or_create(month_year=first_day)
+    consolidation = MonthlyConsolidation.objects.select_for_update().get(
         month_year=first_day
     )
+    created = not consolidation.status == "CONSOLIDATED"
 
     if actual_pro_labore is not None:
         consolidation.actual_pro_labore_paid = Decimal(str(actual_pro_labore))
@@ -107,7 +107,6 @@ def _consolidate_month_inner(month_year, actual_pro_labore=None):
     return consolidation
 
 
-
 @transaction.atomic
 def reconsolidate_with_prior(month_year, actual_pro_labore=None):
     """Reconsolidate a specific month, automatically reconsolidating
@@ -117,9 +116,11 @@ def reconsolidate_with_prior(month_year, actual_pro_labore=None):
     first_day = month_year.replace(day=1)
 
     # Find all OUTDATED months prior to (and including) the target
-    outdated_prior = MonthlyConsolidation.objects.select_for_update().filter(
-        month_year__lt=first_day, status="OUTDATED"
-    ).order_by("month_year")
+    outdated_prior = (
+        MonthlyConsolidation.objects.select_for_update()
+        .filter(month_year__lt=first_day, status="OUTDATED")
+        .order_by("month_year")
+    )
 
     # Reconsolidate each prior OUTDATED month chronologically
     for prior in outdated_prior:
@@ -128,7 +129,6 @@ def reconsolidate_with_prior(month_year, actual_pro_labore=None):
 
     # Now reconsolidate the target month
     return consolidate_month(first_day, actual_pro_labore)
-
 
 
 def audit_consolidations():
@@ -243,6 +243,3 @@ def audit_consolidations():
     )
 
     return findings
-
-
-

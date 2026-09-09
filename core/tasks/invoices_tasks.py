@@ -5,17 +5,29 @@ from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.utils import timezone
 from ..models import Invoice, CompanySettings
-from ..services import ( consultar_nfe_na_prefeitura, enviar_nfe_para_prefeitura, fetch_exchange_rate )
+from ..services import (
+    consultar_nfe_na_prefeitura,
+    enviar_nfe_para_prefeitura,
+    fetch_exchange_rate,
+)
 from ..pdf_service import generate_pdf_bytes
 from ..email_service import send_email_with_debug
 
 logger = get_task_logger(__name__)
 
+
+def _format_from_email(sender_name: str) -> str:
+    """Returns DEFAULT_FROM_EMAIL formatted with display name."""
+    addr = settings.DEFAULT_FROM_EMAIL
+    if "<" not in addr:
+        addr = f"{sender_name} <{addr}>"
+    return addr
+
+
 def _get_pdf_bytes_for_task(invoice_id):
     invoice = Invoice.objects.get(id=invoice_id)
     company = CompanySettings.objects.first()
     return generate_pdf_bytes(invoice, company)
-
 
 
 @shared_task
@@ -37,7 +49,6 @@ def finalize_invoice_task(invoice_id, send_to_client=False, send_to_company=Fals
             )
 
     return f"Invoice {invoice_id} finalized."
-
 
 
 @shared_task(
@@ -96,15 +107,14 @@ def cancel_invoice_task(self, invoice_id):
                         if company.company_name
                         else "System"
                     )
-                    from_email_addr = settings.DEFAULT_FROM_EMAIL
-                    if "<" not in from_email_addr:
-                        from_email_addr = f"{sender_name} <{from_email_addr}>"
+                    from_email_addr = _format_from_email(sender_name)
 
                     from core.utils.macros import get_email_content
+
                     subject, body = get_email_content(
-                        "COMPANY_CANCEL_FAILED", 
+                        "COMPANY_CANCEL_FAILED",
                         invoice,
-                        extra_context={"{{ error }}": str(e)}
+                        extra_context={"{{ error }}": str(e)},
                     )
                     try:
                         send_email_with_debug(
@@ -135,113 +145,109 @@ def cancel_invoice_task(self, invoice_id):
     return f"Invoice {invoice_id} canceled."
 
 
-
-@shared_task
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=30,
+    retry_backoff_max=600,
+    max_retries=3,
+)
 def email_invoice_task(
-    invoice_id, send_to_company=False, send_to_client=False, include_nfse=False
+    self, invoice_id, send_to_company=False, send_to_client=False, include_nfse=False
 ):
     invoice = Invoice.objects.get(id=invoice_id)
     company = CompanySettings.objects.first()
 
-    try:
-        if not company:
-            return "Company settings not configured."
+    if not company:
+        return "Company settings not configured."
 
-        pdf_bytes = _get_pdf_bytes_for_task(invoice.id)
-        invoice_pdf_attachment = (
-            f"{invoice.invoice_number}.pdf",
-            pdf_bytes,
-            "application/pdf",
-        )
-        company_attachments = [invoice_pdf_attachment]
+    pdf_bytes = _get_pdf_bytes_for_task(invoice.id)
+    invoice_pdf_attachment = (
+        f"{invoice.invoice_number}.pdf",
+        pdf_bytes,
+        "application/pdf",
+    )
+    company_attachments = [invoice_pdf_attachment]
 
-        if include_nfse and hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
-            nf = invoice.nota_fiscal
-            nfse_pdf = None
-            if nf.danfse_pdf:
-                try:
-                    if nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
-                        nf.danfse_pdf.open("rb")
-                        nfse_pdf = nf.danfse_pdf.read()
-                except Exception as e:
-                    logger.warning(
-                        "Error reading local danfse_pdf in email task: %s", e
-                    )
-                    nfse_pdf = None
+    if include_nfse and hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
+        nf = invoice.nota_fiscal
+        nfse_pdf = None
+        if nf.danfse_pdf:
+            try:
+                if nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
+                    nf.danfse_pdf.open("rb")
+                    nfse_pdf = nf.danfse_pdf.read()
+            except Exception as e:
+                logger.warning("Error reading local danfse_pdf in email task: %s", e)
+                nfse_pdf = None
 
-            if not nfse_pdf:
-                from core.nfse.provider_factory import get_provider
-                from django.core.files.base import ContentFile
+        if not nfse_pdf:
+            from core.nfse.provider_factory import get_provider
+            from django.core.files.base import ContentFile
 
-                try:
-                    provider = get_provider(invoice)
-                    nfse_pdf = provider.baixar_pdf(invoice)
-                    if nfse_pdf:
-                        nf.danfse_pdf.save(
-                            f"NFSe_{nf.nf_number}.pdf", ContentFile(nfse_pdf)
-                        )
-                except Exception as e:
-                    logger.error(
-                        "Error fetching NFS-e PDF from provider in email task: %s", e
-                    )
-                    nfse_pdf = None
+            try:
+                from core.services.nfse_services import fetch_and_save_nfse_pdf
 
-            if nfse_pdf:
-                company_attachments.append(
-                    (f"NFSe_{nf.nf_number}.pdf", nfse_pdf, "application/pdf")
+                provider = get_provider(invoice)
+                nfse_pdf = fetch_and_save_nfse_pdf(invoice, provider)
+            except Exception as e:
+                logger.error(
+                    "Error fetching NFS-e PDF from provider in email task: %s", e
                 )
+                nfse_pdf = None
 
-        mes_servico = invoice.issue_date.replace(day=1) - relativedelta(days=1)
-        sender_name = "Invoices"
-        from_email_addr = settings.DEFAULT_FROM_EMAIL
-        if "<" not in from_email_addr:
-            from_email_addr = f"{sender_name} <{from_email_addr}>"
-
-        # Client email: per AGENTS.md, NEVER attach NFS-e to client email
-        if send_to_client and invoice.client.email:
-            from core.utils.macros import get_email_content
-            client_subject, client_body = get_email_content(
-                "CLIENT_INVOICE_ISSUED",
-                invoice
-            )
-            cc_list = (
-                [cc.strip() for cc in invoice.client.email_cc.split(",") if cc.strip()]
-                if invoice.client.email_cc
-                else []
-            )
-            send_email_with_debug(
-                client_subject,
-                client_body,
-                [invoice.client.email],
-                cc_list,
-                from_email_addr,
-                [invoice_pdf_attachment],
-                company,
+        if nfse_pdf:
+            company_attachments.append(
+                (f"NFSe_{nf.nf_number}.pdf", nfse_pdf, "application/pdf")
             )
 
-        # Company internal email
-        if send_to_company and company.email:
-            from core.utils.macros import get_email_content
-            company_subject, company_body = get_email_content(
-                "COMPANY_INVOICE_ISSUED",
-                invoice
-            )
-            send_email_with_debug(
-                company_subject,
-                company_body,
-                [company.email],
-                [],
-                from_email_addr,
-                company_attachments,
-                company,
-            )
+    mes_servico = invoice.issue_date.replace(day=1) - relativedelta(days=1)
+    sender_name = "Invoices"
+    from_email_addr = _format_from_email(sender_name)
 
-        return f"Emails sent for invoice {invoice_id}."
-    finally:
-        invoice.task_id = ""
-        invoice.status = "FINALIZED"
-        invoice.save()
+    # Client email: per AGENTS.md, NEVER attach NFS-e to client email
+    if send_to_client and invoice.client.email:
+        from core.utils.macros import get_email_content
 
+        client_subject, client_body = get_email_content(
+            "CLIENT_INVOICE_ISSUED", invoice
+        )
+        cc_list = (
+            [cc.strip() for cc in invoice.client.email_cc.split(",") if cc.strip()]
+            if invoice.client.email_cc
+            else []
+        )
+        send_email_with_debug(
+            client_subject,
+            client_body,
+            [invoice.client.email],
+            cc_list,
+            from_email_addr,
+            [invoice_pdf_attachment],
+            company,
+        )
+
+    # Company internal email
+    if send_to_company and company.email:
+        from core.utils.macros import get_email_content
+
+        company_subject, company_body = get_email_content(
+            "COMPANY_INVOICE_ISSUED", invoice
+        )
+        send_email_with_debug(
+            company_subject,
+            company_body,
+            [company.email],
+            [],
+            from_email_addr,
+            company_attachments,
+            company,
+        )
+
+    invoice.task_id = ""
+    invoice.status = "FINALIZED"
+    invoice.save()
+    return f"Emails sent for invoice {invoice_id}."
 
 
 @shared_task
@@ -311,15 +317,14 @@ def process_daily_invoices_task(force=False):
                     if company.company_name
                     else "System"
                 )
-                from_email_addr = settings.DEFAULT_FROM_EMAIL
-                if "<" not in from_email_addr:
-                    from_email_addr = f"{sender_name} <{from_email_addr}>"
+                from_email_addr = _format_from_email(sender_name)
 
                 from core.utils.macros import get_email_content
+
                 subject, body = get_email_content(
                     "COMPANY_FAILSAFE_TRIGGERED",
                     invoice,
-                    extra_context={"{{ failsafe_reason }}": failsafe_reason}
+                    extra_context={"{{ failsafe_reason }}": failsafe_reason},
                 )
                 try:
                     send_email_with_debug(
@@ -327,13 +332,16 @@ def process_daily_invoices_task(force=False):
                     )
                 except Exception:
                     pass
-        else:
-            pass
-            # issue_nfse_task.delay(invoice.id, str(exchange_rate), send_to_company=company.auto_send_emails, send_to_client=False)
+        elif company.auto_emit_nfse:
+            from .nfse_tasks import issue_nfse_task
+
+            issue_nfse_task.delay(
+                invoice.id,
+                str(exchange_rate),
+                send_to_company=company.auto_send_emails,
+                send_to_client=False,
+            )
 
         count += 1
 
     return f"Processed {count} daily invoices."
-
-
-

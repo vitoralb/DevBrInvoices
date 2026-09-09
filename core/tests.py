@@ -17,8 +17,6 @@ from core.models import (
     InvoiceItem,
     MonthlyConsolidation,
     NotaFiscal,
-    
-    
 )
 from core.services import (
     calculate_ideal_pro_labore,
@@ -35,7 +33,11 @@ class TaxCalculationTests(TestCase):
         self.company = CompanySettings.objects.create(
             company_name="Test Co",
             cnpj="00.000.000/0001-00",
-            opening_date=date(2024, 1, 1), inscricao_municipal="123456", email="test@test.com", pfx_cert_pem="cert", pfx_key_pem="key",
+            opening_date=date(2024, 1, 1),
+            inscricao_municipal="123456",
+            email="test@test.com",
+            pfx_cert_pem="cert",
+            pfx_key_pem="key",
         )
 
     def test_minimum_salary(self):
@@ -73,7 +75,11 @@ class SignalAndModelIntegrityTests(TestCase):
         self.company = CompanySettings.objects.create(
             company_name="My Dev Corp",
             cnpj="12.345.678/0001-90",
-            opening_date=date(2024, 1, 1), inscricao_municipal="123456", email="test@test.com", pfx_cert_pem="cert", pfx_key_pem="key",
+            opening_date=date(2024, 1, 1),
+            inscricao_municipal="123456",
+            email="test@test.com",
+            pfx_cert_pem="cert",
+            pfx_key_pem="key",
             next_document_number=1,
             document_series="1",
         )
@@ -170,7 +176,10 @@ class NFSeProviderAbstractionTests(TestCase):
             company_name="Test Company",
             cnpj="12.345.678/0001-90",
             inscricao_municipal="12345678",
-            opening_date=date(2024, 1, 1), email="test@test.com", pfx_cert_pem="cert", pfx_key_pem="key",
+            opening_date=date(2024, 1, 1),
+            email="test@test.com",
+            pfx_cert_pem="cert",
+            pfx_key_pem="key",
             next_document_number=1,
             document_series="1",
             nfse_provider="PAULISTANA",
@@ -209,11 +218,12 @@ class NFSeProviderAbstractionTests(TestCase):
 
         self.company.nfse_provider = "PAULISTANA"
         self.company.save()
-        
+
         class DummyInvoice:
             pass
+
         dummy = DummyInvoice()
-        
+
         provider = get_provider(dummy)
         self.assertIsInstance(provider, PaulistanaProvider)
 
@@ -995,9 +1005,12 @@ class NFSeProviderAbstractionTests(TestCase):
             )
             return False
 
-        with patch("core.tasks.nfse_tasks.consultar_nfe_na_prefeitura", return_value=False):
+        with patch(
+            "core.tasks.nfse_tasks.consultar_nfe_na_prefeitura", return_value=False
+        ):
             with patch(
-                "core.tasks.nfse_tasks.enviar_nfe_para_prefeitura", side_effect=fake_emission
+                "core.tasks.nfse_tasks.enviar_nfe_para_prefeitura",
+                side_effect=fake_emission,
             ):
                 with self.assertRaises(Exception) as ctx:
                     issue_nfse_task(self.invoice.id, "4.20")

@@ -1,22 +1,19 @@
 import logging
 import csv
 from decimal import Decimal, ROUND_HALF_UP
-from datetime import date, timedelta
-from dateutil.relativedelta import relativedelta
-from django.db.models import Sum, Max
-from django.db import transaction, models
-from django.db.models.functions import Coalesce, TruncMonth
-from django.conf import settings
-import os
-from xsdata.models.datatype import XmlDate
-from ..models import MonthlyConsolidation, CompanySettings, NotaFiscal, NfseLog
-from .. import signals as _signals
+from datetime import timedelta
+from django.db import transaction
+from django.db.models.functions import Coalesce
+from django.db.models import Sum
+from ..models import CompanySettings, NotaFiscal, NfseLog
 import requests
 
 logger = logging.getLogger(__name__)
 
-from .tax_calculations import *
-from .consolidation import *
+from .tax_calculations import calculate_rbt12_and_fator_r, calculate_simples_tax
+from .consolidation import consolidate_month
+
+
 def fetch_exchange_rate(target_date, currency="CAD"):
     if currency.upper() == "BRL":
         return Decimal("1.0000")
@@ -46,62 +43,68 @@ def fetch_exchange_rate(target_date, currency="CAD"):
         if rows:
             latest_row = rows[-1]
             venda_rate_str = latest_row[4].replace(",", ".")
-            return Decimal(venda_rate_str).quantize(Decimal("0.0001"))
+            return Decimal(venda_rate_str).quantize(
+                Decimal("0.0001"), rounding=ROUND_HALF_UP
+            )
     except Exception as e:
         logger.warning(f"Error fetching exchange rate from BCB: {e}")
 
     return None
 
 
-
-def get_next_nf_number():
-    last_nf = NotaFiscal.objects.order_by("-issue_date", "-created_at").first()
-    if not last_nf or not last_nf.nf_number:
-        return "00000001"
-
-    current = last_nf.nf_number
-    if current.isdigit():
-        return str(int(current) + 1).zfill(len(current))
-
-    import re
-
-    match = re.search(r"(\d+)$", current)
-    if match:
-        num_str = match.group(1)
-        next_num = int(num_str) + 1
-        return current[: match.start()] + str(next_num).zfill(len(num_str))
-
-    return ""
-
+def assign_next_document_number(invoice):
+    """Assigns the next document number and series to the invoice atomically.
+    Uses a SELECT FOR UPDATE lock on CompanySettings to prevent concurrent
+    providers from assigning the same number.
+    """
+    with transaction.atomic():
+        comp = CompanySettings.objects.select_for_update().first()
+        if not comp:
+            raise ValueError("CompanySettings not found.")
+        invoice.document_number = comp.next_document_number
+        invoice.document_series = comp.document_series or "1"
+        comp.next_document_number += 1
+        comp.save()
+        invoice.save()
 
 
 @transaction.atomic
 def _prepare_nf_data(invoice):
-    total_foreign = sum(item.total_price_foreign for item in invoice.items.all())
+    total_foreign = sum(
+        (item.total_price_foreign for item in invoice.items.all()),
+        Decimal("0.00"),
+    )
+    if not invoice.exchange_rate_to_brl:
+        raise ValueError(
+            f"Exchange rate not set for invoice {invoice.invoice_number}. "
+            "Cannot prepare NF data without a valid exchange rate."
+        )
     amount_brl = (total_foreign * invoice.exchange_rate_to_brl).quantize(
-        Decimal("0.01")
+        Decimal("0.01"), rounding=ROUND_HALF_UP
     )
 
-    issue_month = invoice.issue_date.replace(day=1)
-    rbt12, _, _, _ = calculate_rbt12_and_fator_r(issue_month)
-    effective_rate_pct = Decimal("0.00")
     try:
-        bracket = get_applicable_bracket("ANNEX_III", rbt12, invoice.issue_date)
-        nominal_rate = bracket.nominal_rate / Decimal("100")
-        eff_rate = (
-            ((rbt12 * nominal_rate) - bracket.deduction) / rbt12
-            if rbt12 > 0
-            else nominal_rate
+        rbt12, fator_r, _, _ = calculate_rbt12_and_fator_r(
+            invoice.issue_date.replace(day=1)
         )
-        export_exemptions = (
-            bracket.pis_allocation + bracket.cofins_allocation + bracket.iss_allocation
-        ) / Decimal("100")
-        eff_export_rate = eff_rate * (Decimal("1.00") - export_exemptions)
-        effective_rate_pct = (eff_export_rate * Decimal("100")).quantize(
-            Decimal("0.01")
+        annex = "ANNEX_III" if fator_r >= Decimal("28.00") else "ANNEX_V"
+        das_tax, _ = calculate_simples_tax(
+            amount_brl, Decimal("0.00"), rbt12, annex, invoice.issue_date
         )
-    except Exception:
-        pass
+        effective_rate_pct = (
+            (das_tax / amount_brl * Decimal("100")).quantize(
+                Decimal("0.01"), rounding=ROUND_HALF_UP
+            )
+            if amount_brl > 0
+            else Decimal("0.00")
+        )
+    except Exception as e:
+        logger.warning(
+            "Failed to calculate effective tax rate for invoice %s: %s",
+            invoice.invoice_number,
+            e,
+        )
+        effective_rate_pct = Decimal("0.00")
 
     end_date = invoice.issue_date.replace(day=1) - timedelta(days=1)
     start_date = end_date.replace(day=1)
@@ -126,7 +129,6 @@ def _prepare_nf_data(invoice):
         f" - Conforme Lei 12.741/2012, o percentual total de impostos incidentes neste serviço prestado é de aproximadamente {fmt_br(effective_rate_pct)}%"
     )
     return amount_brl, description, effective_rate_pct
-
 
 
 def enviar_nfe_para_prefeitura(invoice):
@@ -199,10 +201,8 @@ def enviar_nfe_para_prefeitura(invoice):
 
         # Try to download PDF
         invoice.nota_fiscal = nf  # For the provider to access it
-        pdf_bytes = provider.baixar_pdf(invoice)
-        if pdf_bytes:
-            nf.danfse_pdf.save(f"NFSe_{nf.nf_number}.pdf", ContentFile(pdf_bytes))
-        else:
+        pdf_bytes = fetch_and_save_nfse_pdf(invoice, provider)
+        if not pdf_bytes:
             try:
                 from core.tasks import fetch_nfse_pdf_task
 
@@ -220,7 +220,6 @@ def enviar_nfe_para_prefeitura(invoice):
         )
         log_entry.save()
         return False
-
 
 
 def consultar_nfe_na_prefeitura(invoice):
@@ -269,13 +268,10 @@ def consultar_nfe_na_prefeitura(invoice):
 
         # Try to download PDF
         invoice.nota_fiscal = nf
-        pdf_bytes = provider.baixar_pdf(invoice)
-        if pdf_bytes:
-            nf.danfse_pdf.save(f"NFSe_{nf.nf_number}.pdf", ContentFile(pdf_bytes))
+        fetch_and_save_nfse_pdf(invoice, provider)
         return True
 
     return False
-
 
 
 def import_nfses(provider_type, start_date=None, end_date=None, chave_acesso=None):
@@ -329,36 +325,49 @@ def import_nfses(provider_type, start_date=None, end_date=None, chave_acesso=Non
             exists = q.exists()
 
         if not exists:
-            nf = NotaFiscal(
-                nf_number=nf_num,
-                verification_code=r.get("verification_code"),
-                chave_acesso_nacional=chave,
-                amount_brl=Decimal(r["amount_brl"]),
-                description=r["description"],
-                issue_date=r["issue_date"],
-                is_canceled=r.get("is_canceled", False),
-                cancelation_date=r.get("cancelation_date"),
-                is_export=True,
-                data_hora_autorizacao=r.get("data_hora_autorizacao"),
-                codigo_tributacao_nacional=r.get("codigo_tributacao_nacional", ""),
-                codigo_nbs=r.get("codigo_nbs", ""),
-                aliquota_iss=r.get("aliquota_iss"),
-                valor_iss=r.get("valor_iss"),
-                codigo_servico_municipio=r.get("codigo_servico_municipio", ""),
-            )
-            # Save raw XML
-            if r.get("raw_xml"):
-                nf.xml_autorizacao.save(
-                    f"NFSe_{nf_num}.xml",
-                    ContentFile(r["raw_xml"].encode("utf-8")),
-                    save=False,
-                )
+            with transaction.atomic():
+                # Re-check inside the transaction to avoid race condition
+                if chave:
+                    exists = NotaFiscal.objects.filter(
+                        chave_acesso_nacional=chave
+                    ).exists()
+                if not exists and nf_num:
+                    cod_ver = r.get("verification_code")
+                    q = NotaFiscal.objects.filter(nf_number=nf_num)
+                    if cod_ver:
+                        q = q.filter(verification_code=cod_ver)
+                    exists = q.exists()
 
-            nf.save()
-            count += 1
+                if not exists:
+                    nf = NotaFiscal(
+                        nf_number=nf_num,
+                        verification_code=r.get("verification_code"),
+                        chave_acesso_nacional=chave,
+                        amount_brl=Decimal(r["amount_brl"]),
+                        description=r["description"],
+                        issue_date=r["issue_date"],
+                        is_canceled=r.get("is_canceled", False),
+                        cancelation_date=r.get("cancelation_date"),
+                        is_export=True,
+                        data_hora_autorizacao=r.get("data_hora_autorizacao"),
+                        codigo_tributacao_nacional=r.get(
+                            "codigo_tributacao_nacional", ""
+                        ),
+                        codigo_nbs=r.get("codigo_nbs", ""),
+                        aliquota_iss=r.get("aliquota_iss"),
+                        valor_iss=r.get("valor_iss"),
+                        codigo_servico_municipio=r.get("codigo_servico_municipio", ""),
+                    )
+                    if r.get("raw_xml"):
+                        nf.xml_autorizacao.save(
+                            f"NFSe_{nf_num}.xml",
+                            ContentFile(r["raw_xml"].encode("utf-8")),
+                            save=False,
+                        )
+                    nf.save()
+                    count += 1
 
     return count, f"Foram importadas {count} NFS-es com sucesso."
-
 
 
 def cancel_nota_fiscal(invoice):
@@ -386,14 +395,21 @@ def cancel_nota_fiscal(invoice):
                         xml_to_save = consult_res.xml_retorno
                 except Exception as e:
                     import logging
-                    logging.getLogger(__name__).warning("Failed to fetch updated XML for canceled NFS-e: %s", e)
-            
+
+                    logging.getLogger(__name__).warning(
+                        "Failed to fetch updated XML for canceled NFS-e: %s", e
+                    )
+
             if xml_to_save:
                 if nf.xml_autorizacao:
                     nf.xml_autorizacao.delete(save=False)
-                    
-                file_content = xml_to_save.encode("utf-8") if isinstance(xml_to_save, str) else xml_to_save
-                
+
+                file_content = (
+                    xml_to_save.encode("utf-8")
+                    if isinstance(xml_to_save, str)
+                    else xml_to_save
+                )
+
                 nf.xml_autorizacao.save(
                     f"NFSe_{nf.nf_number}.xml",
                     ContentFile(file_content),
@@ -403,8 +419,31 @@ def cancel_nota_fiscal(invoice):
             nf.save()
 
             from core.tasks.nfse_tasks import fetch_nfse_pdf_task
+
             fetch_nfse_pdf_task.delay(invoice_id=invoice.id, force=True)
 
     return result
 
 
+def fetch_and_save_nfse_pdf(invoice_or_nf, provider, force=False):
+    """Fetches the NFS-e PDF from the provider and saves it to the NotaFiscal record.
+    Returns the pdf bytes if successful, None if not yet ready.
+    """
+    from django.core.files.base import ContentFile
+
+    if hasattr(invoice_or_nf, "nota_fiscal"):
+        nf = invoice_or_nf.nota_fiscal
+        target = invoice_or_nf
+    else:
+        nf = invoice_or_nf
+        target = invoice_or_nf
+
+    if not nf:
+        return None
+
+    pdf_bytes = provider.baixar_pdf(target)
+    if pdf_bytes:
+        if force and nf.danfse_pdf:
+            nf.danfse_pdf.delete(save=False)
+        nf.danfse_pdf.save(f"NFS-e_{nf.nf_number}.pdf", ContentFile(pdf_bytes))
+    return pdf_bytes

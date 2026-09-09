@@ -5,8 +5,6 @@ from .models import (
     Invoice,
     InvoiceItem,
     NotaFiscal,
-    
-    
     MonthlyConsolidation,
     NfseLog,
     ApiLog,
@@ -136,7 +134,6 @@ class NotaFiscalAdmin(admin.ModelAdmin):
     actions = [buscar_pdf_nfse_action]
 
 
-
 @admin.register(MonthlyConsolidation)
 class MonthlyConsolidationAdmin(admin.ModelAdmin):
     ordering = ("-month_year",)
@@ -182,13 +179,22 @@ class NfseLogAdmin(admin.ModelAdmin):
     def has_add_permission(self, request):
         return False
 
+
 @admin.register(ApiLog)
 class ApiLogAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
     list_display = ("created_at", "method", "endpoint", "status_code")
     list_filter = ("method", "status_code", "created_at")
     search_fields = ("endpoint", "request_payload", "response_payload")
-    readonly_fields = ("id", "created_at", "method", "endpoint", "status_code", "request_payload", "response_payload")
+    readonly_fields = (
+        "id",
+        "created_at",
+        "method",
+        "endpoint",
+        "status_code",
+        "request_payload",
+        "response_payload",
+    )
 
     def has_add_permission(self, request):
         return False

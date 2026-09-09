@@ -18,12 +18,20 @@ from django.http import (
     HttpResponseBadRequest,
     HttpResponseForbidden,
     FileResponse,
-    JsonResponse
+    JsonResponse,
 )
+from django.utils.html import escape
 from django.shortcuts import get_object_or_404, redirect, render
 from django.views.decorators.http import require_GET, require_POST
 
-from .forms import InvoiceForm, InvoiceItemForm, EmailTemplateForm, InvoiceTemplateForm, InvoiceTemplateItemFormSet, CompanySettingsForm
+from .forms import (
+    InvoiceForm,
+    InvoiceItemForm,
+    EmailTemplateForm,
+    InvoiceTemplateForm,
+    InvoiceTemplateItemFormSet,
+    CompanySettingsForm,
+)
 from .models import (
     Client,
     CompanySettings,
@@ -38,6 +46,7 @@ from .models import (
 from .pdf_service import generate_pdf_bytes
 from .services import (
     audit_consolidations,
+    attach_recommended_pl,
     calculate_ideal_pro_labore,
     calculate_rbt12_and_fator_r,
     calculate_simples_tax,
@@ -49,94 +58,6 @@ logger = logging.getLogger(__name__)
 
 
 # --- Dashboard & Consolidation ---
-
-
-def _attach_recommended_pl(consolidation, all_cons_dict=None):
-    pl_total = calculate_ideal_pro_labore(
-        consolidation.month_year, estimated_current_revenue=consolidation.total_revenue
-    )
-    consolidation.recommended_pl = pl_total
-
-    start_date = consolidation.month_year - relativedelta(months=11)
-    end_date = consolidation.month_year - relativedelta(months=1)
-
-    if all_cons_dict is not None:
-        rev_int = Decimal("0.00")
-        rev_exp = Decimal("0.00")
-        payroll = Decimal("0.00")
-        cpp_sum = Decimal("0.00")
-        curr = start_date
-        while curr <= end_date:
-            past_cons = all_cons_dict.get(curr)
-            if past_cons:
-                rev_int += past_cons.total_revenue_internal
-                rev_exp += past_cons.total_revenue_export
-                payroll += past_cons.actual_pro_labore_paid
-                if (
-                    not hasattr(settings, "CPP_ACCUMULATION_START_DATE")
-                    or not settings.CPP_ACCUMULATION_START_DATE
-                    or curr >= settings.CPP_ACCUMULATION_START_DATE
-                ):
-                    cpp_sum += past_cons.das_cpp_tax
-            curr += relativedelta(months=1)
-
-        consolidation.proj_rbt12 = rev_int + rev_exp + consolidation.total_revenue
-        consolidation.proj_pl_sum = payroll + consolidation.actual_pro_labore_paid
-        consolidation.proj_prev_cpp = cpp_sum
-    else:
-        past = MonthlyConsolidation.objects.filter(
-            month_year__gte=start_date, month_year__lte=end_date
-        )
-        agg = past.aggregate(
-            rev_int=Coalesce(Sum("total_revenue_internal"), Decimal("0.00")),
-            rev_exp=Coalesce(Sum("total_revenue_export"), Decimal("0.00")),
-            payroll=Coalesce(Sum("actual_pro_labore_paid"), Decimal("0.00")),
-        )
-        consolidation.proj_rbt12 = (
-            agg["rev_int"] + agg["rev_exp"] + consolidation.total_revenue
-        )
-
-        if (
-            hasattr(settings, "CPP_ACCUMULATION_START_DATE")
-            and settings.CPP_ACCUMULATION_START_DATE
-        ):
-            cpp_qs = past.filter(month_year__gte=settings.CPP_ACCUMULATION_START_DATE)
-        else:
-            cpp_qs = past
-
-        cpp_agg = cpp_qs.aggregate(cpp=Coalesce(Sum("das_cpp_tax"), Decimal("0.00")))
-        consolidation.proj_pl_sum = (
-            agg["payroll"] + consolidation.actual_pro_labore_paid
-        )
-        consolidation.proj_prev_cpp = cpp_agg["cpp"]
-
-    # Current CPP
-    current_rbt12, _, _, _ = calculate_rbt12_and_fator_r(consolidation.month_year)
-    _, current_cpp = calculate_simples_tax(
-        Decimal("0.00"),
-        consolidation.total_revenue,
-        current_rbt12,
-        "ANNEX_III",
-        consolidation.month_year,
-    )
-
-    if (
-        hasattr(settings, "CPP_ACCUMULATION_START_DATE")
-        and settings.CPP_ACCUMULATION_START_DATE
-    ):
-        if consolidation.month_year < settings.CPP_ACCUMULATION_START_DATE:
-            current_cpp = Decimal("0.00")
-
-    consolidation.proj_cpp = current_cpp
-
-    if consolidation.proj_rbt12 > 0:
-        consolidation.proj_fator_r = (
-            (consolidation.proj_pl_sum + consolidation.proj_prev_cpp + current_cpp)
-            / consolidation.proj_rbt12
-            * 100
-        ).quantize(Decimal("0.01"))
-    else:
-        consolidation.proj_fator_r = Decimal("0.00")
 
 
 @login_required
@@ -187,7 +108,7 @@ def dashboard_view(request):
     consolidations = list(qs.order_by("-month_year"))
     all_cons_dict = {c.month_year: c for c in MonthlyConsolidation.objects.all()}
     for c in consolidations:
-        _attach_recommended_pl(c, all_cons_dict)
+        attach_recommended_pl(c, all_cons_dict)
 
     total_revenue = sum(c.total_revenue for c in consolidations)
     total_tax = sum(c.total_tax for c in consolidations)
@@ -247,7 +168,7 @@ def htmx_reconsolidate_month(request, pk):
         consolidation = reconsolidate_with_prior(
             consolidation.month_year, actual_pro_labore=actual_pl
         )
-        _attach_recommended_pl(consolidation)
+        attach_recommended_pl(consolidation)
         return render(
             request,
             "core/partials/consolidation_row.html",
@@ -255,59 +176,30 @@ def htmx_reconsolidate_month(request, pk):
         )
     except Exception as e:
         logger.error("Error reconsolidating month %s: %s", consolidation.month_year, e)
-        return HttpResponseBadRequest(str(e))
+        return HttpResponseBadRequest(
+            "Erro ao reconsolidar. Verifique os logs para detalhes."
+        )
 
 
 @login_required
 @staff_member_required
 @require_POST
 def run_audit(request):
-    findings = audit_consolidations()
-    all_cons = list(MonthlyConsolidation.objects.all().order_by("-month_year"))
-    all_cons_dict = {c.month_year: c for c in all_cons}
-    for c in all_cons:
-        _attach_recommended_pl(c, all_cons_dict)
+    from core.services import audit_consolidations
 
-    today = date.today()
-    current_month = today.replace(day=1)
-    ideal_pro_labore = None
     try:
-        ideal_pro_labore = calculate_ideal_pro_labore(current_month)
+        findings = audit_consolidations()
+        fixed = findings.get("total_fixed", 0)
+        if fixed > 0:
+            messages.success(
+                request, f"Auditoria concluída: {fixed} registro(s) corrigido(s)."
+            )
+        else:
+            messages.info(request, "Auditoria concluída: nenhuma diferença encontrada.")
     except Exception as e:
-        logger.debug("Could not calculate ideal pro labore during audit: %s", e)
-
-    total_revenue = sum(c.total_revenue for c in all_cons)
-    total_tax = sum(c.total_tax for c in all_cons)
-    total_pl = sum(c.actual_pro_labore_paid for c in all_cons)
-    net_profit = total_revenue - total_tax - total_pl
-
-    available_years = list(
-        MonthlyConsolidation.objects.dates("month_year", "year")
-        .values_list("month_year__year", flat=True)
-        .distinct()
-    )
-    available_years.sort(reverse=True)
-    if today.year not in available_years:
-        available_years.insert(0, today.year)
-
-    return render(
-        request,
-        "core/dashboard.html",
-        {
-            "consolidations": all_cons,
-            "audit_findings": findings,
-            "ideal_pro_labore": ideal_pro_labore,
-            "current_month": current_month,
-            "total_revenue": total_revenue,
-            "total_tax": total_tax,
-            "total_pl": total_pl,
-            "net_profit": net_profit,
-            "available_years": available_years,
-            "quick_filter": str(today.year),
-            "start_date": f"{today.year}-01-01",
-            "end_date": f"{today.year}-12-31",
-        },
-    )
+        logger.error("Audit failed: %s", e)
+        messages.error(request, "Erro ao executar a auditoria. Verifique os logs.")
+    return redirect("dashboard")
 
 
 # --- Invoices Management ---
@@ -360,6 +252,7 @@ def invoice_list(request):
 @transaction.atomic
 def invoice_create(request):
     from .forms import InvoiceItemFormSet
+
     if request.method == "POST":
         form = InvoiceForm(request.POST)
         formset = InvoiceItemFormSet(request.POST)
@@ -369,25 +262,27 @@ def invoice_create(request):
             if formset.is_valid():
                 invoice.save()
                 items = formset.save()
-                
+
                 from .utils.macros import apply_invoice_macros
+
                 for item in items:
-                    item.description = apply_invoice_macros(item.description, invoice, language='en')
+                    item.description = apply_invoice_macros(
+                        item.description, invoice, language="en"
+                    )
                     item.save()
-                
 
                 messages.success(request, "Invoice criada com sucesso.")
                 return redirect("invoice_detail", pk=invoice.id)
     else:
         form = InvoiceForm()
         formset = InvoiceItemFormSet()
-        
+
     invoice_templates = InvoiceTemplate.objects.all()
-    return render(request, "core/invoice_form.html", {
-        "form": form, 
-        "formset": formset,
-        "invoice_templates": invoice_templates
-    })
+    return render(
+        request,
+        "core/invoice_form.html",
+        {"form": form, "formset": formset, "invoice_templates": invoice_templates},
+    )
 
 
 @login_required
@@ -463,10 +358,13 @@ def htmx_add_invoice_item(request, pk):
     if form.is_valid():
         item = form.save(commit=False)
         item.invoice = invoice
-        
+
         from .utils.macros import apply_invoice_macros
-        item.description = apply_invoice_macros(item.description, invoice, language='en')
-        
+
+        item.description = apply_invoice_macros(
+            item.description, invoice, language="en"
+        )
+
         item.save()
         response = render(
             request, "core/partials/invoice_item_list.html", {"invoice": invoice}
@@ -485,6 +383,8 @@ def htmx_delete_invoice_item(request, item_pk):
     if invoice.status == "DRAFT":
         item.delete()
     return render(request, "core/partials/invoice_item_list.html", {"invoice": invoice})
+
+
 @login_required
 @require_POST
 def htmx_update_invoice_number(request, pk):
@@ -873,39 +773,32 @@ def htmx_import_status(request, task_id):
         if res.successful():
             result_data = res.result
             msg = result_data.get("message", "Importação concluída.")
-            return HttpResponse(f"""
-                <div class="modal-content" id="importModalContent">
-                    <div class="modal-body text-center py-5">
-                        <i class="bi bi-check-circle text-success" style="font-size: 3rem;"></i>
-                        <h5 class="mt-3">Concluído!</h5>
-                        <p>{msg}</p>
-                        <a href="/nfse/" class="btn btn-primary mt-3">Atualizar Página</a>
-                    </div>
-                </div>
-            """)
+            return render(
+                request,
+                "core/partials/import_status.html",
+                {
+                    "state": "success",
+                    "message": msg,
+                },
+            )
         else:
-            return HttpResponse(f"""
-                <div class="modal-content" id="importModalContent">
-                    <div class="modal-body text-center py-5">
-                        <i class="bi bi-x-circle text-danger" style="font-size: 3rem;"></i>
-                        <h5 class="mt-3">Erro na Importação</h5>
-                        <p class="text-danger">{res.result}</p>
-                        <button class="btn btn-secondary mt-3" type="button" data-bs-dismiss="modal">Fechar</button>
-                    </div>
-                </div>
-            """)
+            return render(
+                request,
+                "core/partials/import_status.html",
+                {
+                    "state": "error",
+                    "message": str(res.result),
+                },
+            )
 
-    return HttpResponse(f"""
-        <div class="modal-content" id="importModalContent">
-            <div class="modal-body text-center py-5">
-                <div class="spinner-border text-primary mb-3" role="status"></div>
-                <h5>Importando NFS-es...</h5>
-                <p class="text-muted" hx-get="/nfse/import/status/{task_id}/" hx-trigger="every 2s" hx-target="#importModalContent" hx-swap="outerHTML">
-                    Aguarde enquanto consultamos o provedor. Pode levar alguns minutos.
-                </p>
-            </div>
-        </div>
-    """)
+    return render(
+        request,
+        "core/partials/import_status.html",
+        {
+            "state": "pending",
+            "task_id": task_id,
+        },
+    )
 
 
 @login_required
@@ -1022,19 +915,27 @@ def nfse_download_pdf(request, pk):
     )
     return redirect("nfse_detail", pk=pk)
 
+
 @login_required
 def email_template_list(request):
     email_templates = EmailTemplate.objects.all()
-    return render(request, "core/email_template_list.html", {
-        "email_templates": email_templates,
-    })
+    return render(
+        request,
+        "core/email_template_list.html",
+        {
+            "email_templates": email_templates,
+        },
+    )
+
 
 @login_required
 def invoice_template_list(request):
     invoice_templates = InvoiceTemplate.objects.all()
-    return render(request, "core/invoice_template_list.html", {
-        "invoice_templates": invoice_templates
-    })
+    return render(
+        request,
+        "core/invoice_template_list.html",
+        {"invoice_templates": invoice_templates},
+    )
 
 
 @login_required
@@ -1050,6 +951,7 @@ def email_template_update(request, pk):
         form = EmailTemplateForm(instance=template)
     return render(request, "core/email_template_form.html", {"form": form})
 
+
 @login_required
 def invoice_template_create(request):
     if request.method == "POST":
@@ -1064,7 +966,10 @@ def invoice_template_create(request):
     else:
         form = InvoiceTemplateForm()
         formset = InvoiceTemplateItemFormSet()
-    return render(request, "core/invoice_template_form.html", {"form": form, "formset": formset})
+    return render(
+        request, "core/invoice_template_form.html", {"form": form, "formset": formset}
+    )
+
 
 @login_required
 def invoice_template_update(request, pk):
@@ -1080,7 +985,10 @@ def invoice_template_update(request, pk):
     else:
         form = InvoiceTemplateForm(instance=template)
         formset = InvoiceTemplateItemFormSet(instance=template)
-    return render(request, "core/invoice_template_form.html", {"form": form, "formset": formset})
+    return render(
+        request, "core/invoice_template_form.html", {"form": form, "formset": formset}
+    )
+
 
 @login_required
 def invoice_template_delete(request, pk):
@@ -1089,19 +997,23 @@ def invoice_template_delete(request, pk):
         template.delete()
         messages.success(request, "Invoice template deleted.")
         return redirect("invoice_template_list")
-    return render(request, "core/invoice_template_confirm_delete.html", {"template": template})
+    return render(
+        request, "core/invoice_template_confirm_delete.html", {"template": template}
+    )
+
 
 @login_required
 def htmx_get_invoice_template(request, pk):
     template = get_object_or_404(InvoiceTemplate, pk=pk)
-    items = list(template.items.all().values("description", "quantity", "unit_price_foreign"))
+    items = list(
+        template.items.all().values("description", "quantity", "unit_price_foreign")
+    )
     # Decimal objects need to be converted to str for JSON serialization
     for item in items:
         item["quantity"] = str(item["quantity"])
         item["unit_price_foreign"] = str(item["unit_price_foreign"])
     return JsonResponse({"currency": template.currency, "items": items})
 
-@login_required
 
 @login_required
 @require_POST
@@ -1112,8 +1024,10 @@ def remove_certificate_view(request):
     company.certificate_valid_until = None
     company.save()
     from django.contrib import messages
+
     messages.success(request, "Certificado digital removido com sucesso.")
     return redirect("company_settings")
+
 
 @login_required
 def company_settings_view(request):
@@ -1128,7 +1042,9 @@ def company_settings_view(request):
         form = CompanySettingsForm(instance=company)
     return render(request, "core/company_settings_form.html", {"form": form})
 
+
 import requests
+
 
 @login_required
 def api_cep_view(request, cep):
@@ -1137,10 +1053,14 @@ def api_cep_view(request, cep):
         if response.status_code == 200:
             return JsonResponse(response.json())
         elif response.status_code in [400, 404]:
-            return JsonResponse({"error": "CEP não encontrado ou inválido."}, status=response.status_code)
+            return JsonResponse(
+                {"error": "CEP não encontrado ou inválido."},
+                status=response.status_code,
+            )
         response.raise_for_status()
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
 
 @login_required
 def api_cnpj_view(request, cnpj):
@@ -1149,7 +1069,10 @@ def api_cnpj_view(request, cnpj):
         if response.status_code == 200:
             return JsonResponse(response.json())
         elif response.status_code in [400, 404]:
-            return JsonResponse({"error": "CNPJ não encontrado ou inválido."}, status=response.status_code)
+            return JsonResponse(
+                {"error": "CNPJ não encontrado ou inválido."},
+                status=response.status_code,
+            )
         response.raise_for_status()
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)

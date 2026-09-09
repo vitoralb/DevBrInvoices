@@ -5,13 +5,19 @@ from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.utils import timezone
 from ..models import Invoice, CompanySettings
-from ..services import ( consultar_nfe_na_prefeitura, enviar_nfe_para_prefeitura, fetch_exchange_rate )
+from ..services import (
+    consultar_nfe_na_prefeitura,
+    enviar_nfe_para_prefeitura,
+    fetch_exchange_rate,
+)
 from ..pdf_service import generate_pdf_bytes
 from ..email_service import send_email_with_debug
 
 logger = get_task_logger(__name__)
 
-from .invoices_tasks import *
+from .invoices_tasks import _format_from_email, _get_pdf_bytes_for_task
+
+
 @shared_task(
     bind=True,
     autoretry_for=(Exception,),
@@ -90,15 +96,11 @@ def issue_nfse_task(
             if not pdf_bytes:
                 from core.nfse.provider_factory import get_provider
 
-                provider = get_provider(invoice)
-                pdf_bytes = provider.baixar_pdf(invoice)
-                if pdf_bytes:
-                    from django.core.files.base import ContentFile
+                from core.services.nfse_services import fetch_and_save_nfse_pdf
 
-                    nf.danfse_pdf.save(
-                        f"NFSe_{nf.nf_number}.pdf", ContentFile(pdf_bytes)
-                    )
-                else:
+                provider = get_provider(invoice)
+                pdf_bytes = fetch_and_save_nfse_pdf(invoice, provider)
+                if not pdf_bytes:
                     fetch_nfse_pdf_task.delay(invoice.id)
 
             if pdf_bytes:
@@ -107,15 +109,18 @@ def issue_nfse_task(
                     if company.company_name
                     else "Invoices"
                 )
-                from_email_addr = settings.DEFAULT_FROM_EMAIL
-                if "<" not in from_email_addr:
-                    from_email_addr = f"{sender_name} <{from_email_addr}>"
+                from_email_addr = _format_from_email(sender_name)
 
                 from core.utils.macros import get_email_content
+
                 subject, body = get_email_content(
                     "COMPANY_NFSE_ISSUED",
                     invoice,
-                    extra_context={"{{ nf_number }}": nf.nf_number, "{{ amount_brl }}": nf.amount_brl, "{{ verification_code }}": nf.verification_code}
+                    extra_context={
+                        "{{ nf_number }}": nf.nf_number,
+                        "{{ amount_brl }}": nf.amount_brl,
+                        "{{ verification_code }}": nf.verification_code,
+                    },
                 )
                 send_email_with_debug(
                     subject,
@@ -148,15 +153,14 @@ def issue_nfse_task(
                     if company.company_name
                     else "System"
                 )
-                from_email_addr = settings.DEFAULT_FROM_EMAIL
-                if "<" not in from_email_addr:
-                    from_email_addr = f"{sender_name} <{from_email_addr}>"
+                from_email_addr = _format_from_email(sender_name)
 
                 from core.utils.macros import get_email_content
+
                 subject, body = get_email_content(
                     "COMPANY_NFSE_FAILED",
                     invoice,
-                    extra_context={"{{ error }}": str(e)}
+                    extra_context={"{{ error }}": str(e)},
                 )
                 try:
                     send_email_with_debug(
@@ -172,8 +176,13 @@ def issue_nfse_task(
             raise e
 
 
-
-@shared_task(bind=True, max_retries=10, default_retry_delay=60)
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=10,
+)
 def fetch_nfse_pdf_task(self, invoice_id=None, nf_id=None, force=False):
     """Asynchronously fetches and saves the NFS-e PDF (DANFSe) for an invoice or nota fiscal with retries."""
     from django.core.files.base import ContentFile
@@ -208,12 +217,11 @@ def fetch_nfse_pdf_task(self, invoice_id=None, nf_id=None, force=False):
 
     target = invoice if invoice else DummyInvoice(nf)
 
+    from core.services.nfse_services import fetch_and_save_nfse_pdf
+
     provider = get_provider(target)
-    pdf_bytes = provider.baixar_pdf(target)
+    pdf_bytes = fetch_and_save_nfse_pdf(target, provider, force=force)
     if pdf_bytes:
-        if force and nf.danfse_pdf:
-            nf.danfse_pdf.delete(save=False)
-        nf.danfse_pdf.save(f"NFSe_{nf.nf_number}.pdf", ContentFile(pdf_bytes))
         logger.info("Successfully fetched and saved PDF for NF %s", nf.nf_number)
         return f"PDF successfully downloaded for NF {nf.nf_number}."
     else:
@@ -224,7 +232,6 @@ def fetch_nfse_pdf_task(self, invoice_id=None, nf_id=None, force=False):
             self.max_retries,
         )
         raise Exception(f"PDF not ready yet for NF {nf.nf_number}.")
-
 
 
 @shared_task(bind=True)
@@ -241,8 +248,13 @@ def import_nfses_task(
         return {"count": 0, "message": f"Erro durante a importação: {str(e)}"}
 
 
-
-@shared_task(bind=True, max_retries=10)
+@shared_task(
+    bind=True,
+    autoretry_for=(Exception,),
+    retry_backoff=60,
+    retry_backoff_max=600,
+    max_retries=10,
+)
 def cancel_nfse_standalone_task(self, nf_id):
     from core.models import NotaFiscal, NfseLog
     from core.nfse.provider_factory import get_provider
@@ -259,28 +271,17 @@ def cancel_nfse_standalone_task(self, nf_id):
     dummy = DummyInvoice(nf)
     provider = get_provider(dummy)
 
-    try:
-        cancel_result = provider.cancelar_nfse(dummy)
+    cancel_result = provider.cancelar_nfse(dummy)
 
-        # We don't have a real invoice for NfseLog, but we can bypass or just not log it
-        # NfseLog requires invoice. Since there's no invoice, we might skip NfseLog for standalone
-        # Or change NfseLog to allow null invoice.
-        # But wait, NfseLog invoice is a ForeignKey(Invoice, null=False).
-        # For standalone NFS-es, we don't have an Invoice. We'll skip it for now.
+    # We don't have a real invoice for NfseLog, but we can bypass or just not log it
+    # NfseLog requires invoice. Since there's no invoice, we might skip NfseLog for standalone
+    # Or change NfseLog to allow null invoice.
+    # But wait, NfseLog invoice is a ForeignKey(Invoice, null=False).
+    # For standalone NFS-es, we don't have an Invoice. We'll skip it for now.
 
-        if not cancel_result.sucesso:
-            raise Exception(
-                f"Falha ao cancelar NFS-e: {' | '.join(cancel_result.erros)}"
-            )
+    if not cancel_result.sucesso:
+        raise Exception(f"Falha ao cancelar NFS-e: {' | '.join(cancel_result.erros)}")
 
-        nf.is_canceled = True
-        nf.save()
-        return f"NFSe {nf_id} canceled successfully."
-    except Exception as e:
-        logger.error("Erro no cancelamento da NFS-e avulsa %s: %s", nf.nf_number, e)
-        if self.request.retries >= self.max_retries:
-            raise e
-        else:
-            raise self.retry(exc=e, countdown=60)
-
-
+    nf.is_canceled = True
+    nf.save()
+    return f"NFSe {nf_id} canceled successfully."

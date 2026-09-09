@@ -1,22 +1,17 @@
 import logging
-import csv
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date, timedelta
 from dateutil.relativedelta import relativedelta
-from django.db.models import Sum, Max
+from django.db.models import Sum
 from django.db import transaction, models
-from django.db.models.functions import Coalesce, TruncMonth
+from django.db.models.functions import Coalesce
 from django.conf import settings
-import os
-from xsdata.models.datatype import XmlDate
-from ..models import MonthlyConsolidation, CompanySettings, NotaFiscal, NfseLog
+from ..models import MonthlyConsolidation, CompanySettings, NotaFiscal
 from utils.taxes import get_applicable_bracket, get_minimum_salary, calculate_inss
 from .. import signals as _signals
-import requests
 
 logger = logging.getLogger(__name__)
 
-from ..models import *
 
 def calculate_irrf(pro_labore_amount, reference_date):
     inss_deduction = calculate_inss(pro_labore_amount, reference_date)
@@ -44,7 +39,6 @@ def calculate_irrf(pro_labore_amount, reference_date):
             e,
         )
         return Decimal("0.00")
-
 
 
 def calculate_rbt12_and_fator_r(target_month_year):
@@ -153,7 +147,6 @@ def calculate_rbt12_and_fator_r(target_month_year):
     return sum_revenue, fator_r, pl_sum, cpp_sum
 
 
-
 def calculate_ideal_pro_labore(target_month, estimated_current_revenue=None):
     """Calculate the minimum Pró-labore needed in the current month so that
     next month's Fator R >= 28% (qualifying for Annex III).
@@ -252,7 +245,6 @@ def calculate_ideal_pro_labore(target_month, estimated_current_revenue=None):
     )
 
 
-
 def calculate_simples_tax(
     revenue_internal, revenue_export, rbt12, annex_type, reference_date
 ):
@@ -300,4 +292,100 @@ def calculate_simples_tax(
     return total_tax, cpp_tax
 
 
+def attach_recommended_pl(consolidation, all_cons_dict=None):
+    """Computes and attaches Fator R projection attributes to a MonthlyConsolidation instance.
 
+    Calculates the ideal pró-labore, rolling 11-month revenue/payroll sums, and
+    projected Fator R. Results are attached as transient attributes on the consolidation
+    object (not persisted to the DB) for display in the dashboard.
+
+    Args:
+        consolidation: A MonthlyConsolidation instance.
+        all_cons_dict: Optional dict mapping month_year → consolidation for bulk lookups.
+                       When provided, avoids extra DB queries per consolidation.
+    """
+    pl_total = calculate_ideal_pro_labore(
+        consolidation.month_year, estimated_current_revenue=consolidation.total_revenue
+    )
+    consolidation.recommended_pl = pl_total
+
+    start_date = consolidation.month_year - relativedelta(months=11)
+    end_date = consolidation.month_year - relativedelta(months=1)
+
+    if all_cons_dict is not None:
+        rev_int = Decimal("0.00")
+        rev_exp = Decimal("0.00")
+        payroll = Decimal("0.00")
+        cpp_sum = Decimal("0.00")
+        curr = start_date
+        while curr <= end_date:
+            past_cons = all_cons_dict.get(curr)
+            if past_cons:
+                rev_int += past_cons.total_revenue_internal
+                rev_exp += past_cons.total_revenue_export
+                payroll += past_cons.actual_pro_labore_paid
+                if (
+                    not hasattr(settings, "CPP_ACCUMULATION_START_DATE")
+                    or not settings.CPP_ACCUMULATION_START_DATE
+                    or curr >= settings.CPP_ACCUMULATION_START_DATE
+                ):
+                    cpp_sum += past_cons.das_cpp_tax
+            curr += relativedelta(months=1)
+
+        consolidation.proj_rbt12 = rev_int + rev_exp + consolidation.total_revenue
+        consolidation.proj_pl_sum = payroll + consolidation.actual_pro_labore_paid
+        consolidation.proj_prev_cpp = cpp_sum
+    else:
+        past = MonthlyConsolidation.objects.filter(
+            month_year__gte=start_date, month_year__lte=end_date
+        )
+        agg = past.aggregate(
+            rev_int=Coalesce(Sum("total_revenue_internal"), Decimal("0.00")),
+            rev_exp=Coalesce(Sum("total_revenue_export"), Decimal("0.00")),
+            payroll=Coalesce(Sum("actual_pro_labore_paid"), Decimal("0.00")),
+        )
+        consolidation.proj_rbt12 = (
+            agg["rev_int"] + agg["rev_exp"] + consolidation.total_revenue
+        )
+
+        if (
+            hasattr(settings, "CPP_ACCUMULATION_START_DATE")
+            and settings.CPP_ACCUMULATION_START_DATE
+        ):
+            cpp_qs = past.filter(month_year__gte=settings.CPP_ACCUMULATION_START_DATE)
+        else:
+            cpp_qs = past
+
+        cpp_agg = cpp_qs.aggregate(cpp=Coalesce(Sum("das_cpp_tax"), Decimal("0.00")))
+        consolidation.proj_pl_sum = (
+            agg["payroll"] + consolidation.actual_pro_labore_paid
+        )
+        consolidation.proj_prev_cpp = cpp_agg["cpp"]
+
+    # Current CPP
+    current_rbt12, _, _, _ = calculate_rbt12_and_fator_r(consolidation.month_year)
+    _, current_cpp = calculate_simples_tax(
+        Decimal("0.00"),
+        consolidation.total_revenue,
+        current_rbt12,
+        "ANNEX_III",
+        consolidation.month_year,
+    )
+
+    if (
+        hasattr(settings, "CPP_ACCUMULATION_START_DATE")
+        and settings.CPP_ACCUMULATION_START_DATE
+    ):
+        if consolidation.month_year < settings.CPP_ACCUMULATION_START_DATE:
+            current_cpp = Decimal("0.00")
+
+    consolidation.proj_cpp = current_cpp
+
+    if consolidation.proj_rbt12 > 0:
+        consolidation.proj_fator_r = (
+            (consolidation.proj_pl_sum + consolidation.proj_prev_cpp + current_cpp)
+            / consolidation.proj_rbt12
+            * 100
+        ).quantize(Decimal("0.01"))
+    else:
+        consolidation.proj_fator_r = Decimal("0.00")

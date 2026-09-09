@@ -4,6 +4,7 @@ import os
 import tempfile
 from decimal import Decimal
 from typing import List, Optional, Tuple
+from contextlib import contextmanager
 
 import requests
 from django.conf import settings
@@ -35,6 +36,23 @@ from .signer import assinar_xml, carregar_certificado_pfx
 logger = logging.getLogger(__name__)
 
 SAFE_PARSER = etree.XMLParser(resolve_entities=False, no_network=True)
+
+
+@contextmanager
+def _temp_cert_file(cert_pem: bytes, key_pem: bytes):
+    """Context manager that writes cert/key to a short-lived temp file,
+    yields the path, then securely deletes it."""
+    fd, path = tempfile.mkstemp(suffix=".pem")
+    try:
+        os.chmod(path, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(cert_pem + b"\n" + key_pem)
+        yield path
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 def extract_soap_fault(content: str | bytes) -> Optional[str]:
@@ -111,11 +129,15 @@ def extract_paulistana_xml_errors(xml_str: str) -> List[str]:
 
 
 class NFeClient:
-    def __init__(self, cert_pem: str, key_pem: str, cnpj: str, inscricao_municipal: str):
+    def __init__(
+        self, cert_pem: str, key_pem: str, cnpj: str, inscricao_municipal: str
+    ):
         self.cnpj = cnpj
         self.inscricao_municipal = inscricao_municipal
-        self.cert_pem = cert_pem.encode('utf-8') if isinstance(cert_pem, str) else cert_pem
-        self.key_pem = key_pem.encode('utf-8') if isinstance(key_pem, str) else key_pem
+        self.cert_pem = (
+            cert_pem.encode("utf-8") if isinstance(cert_pem, str) else cert_pem
+        )
+        self.key_pem = key_pem.encode("utf-8") if isinstance(key_pem, str) else key_pem
         self.url = getattr(
             settings, "NFE_SP_URL", "https://nfews.prefeitura.sp.gov.br/lotenfe.asmx"
         )
@@ -141,16 +163,9 @@ class NFeClient:
   </soap12:Body>
 </soap12:Envelope>"""
 
-        # Write certs to temporary file with restrictive permissions (0600)
-        fd, temp_cert_path = tempfile.mkstemp(suffix=".pem")
-        
         response_text = ""
         error_msg = ""
-        try:
-            os.chmod(temp_cert_path, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(self.cert_pem + b"\n" + self.key_pem)
-
+        with _temp_cert_file(self.cert_pem, self.key_pem) as temp_cert_path:
             headers = {"Content-Type": "application/soap+xml; charset=utf-8"}
             response = logged_post(
                 self.url,
@@ -197,7 +212,9 @@ class NFeClient:
             try:
                 root = etree.fromstring(response.content, parser=SAFE_PARSER)
             except Exception:
-                error_msg = f"Resposta SOAP inválida (XML malformado): {response.text[:300]}"
+                error_msg = (
+                    f"Resposta SOAP inválida (XML malformado): {response.text[:300]}"
+                )
                 raise NFSeProviderError(
                     error_msg,
                     raw_response=response.text,
@@ -230,18 +247,6 @@ class NFeClient:
                 )
 
             return retorno_node[0].text
-        except Exception as e:
-            if not error_msg:
-                error_msg = str(e)
-            raise e
-        finally:
-            pass
-
-            if os.path.exists(temp_cert_path):
-                try:
-                    os.remove(temp_cert_path)
-                except OSError:
-                    pass
 
     def consultar_nfe_emitidas(
         self, dt_inicio: datetime.date, dt_fim: datetime.date, pagina: int = 1

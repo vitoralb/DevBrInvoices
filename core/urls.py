@@ -79,18 +79,47 @@ urlpatterns = [
         views.htmx_fetch_exchange_rate,
         name="htmx_fetch_exchange_rate",
     ),
-
     # Templates
     path("templates/emails/", views.email_template_list, name="email_template_list"),
-    path("templates/invoices/", views.invoice_template_list, name="invoice_template_list"),
-    path("templates/email/<uuid:pk>/edit/", views.email_template_update, name="email_template_update"),
-    path("templates/invoice/new/", views.invoice_template_create, name="invoice_template_create"),
-    path("templates/invoice/<uuid:pk>/edit/", views.invoice_template_update, name="invoice_template_update"),
-    path("templates/invoice/<uuid:pk>/delete/", views.invoice_template_delete, name="invoice_template_delete"),
-    path("htmx/template-details/<uuid:pk>/", views.htmx_get_invoice_template, name="htmx_get_invoice_template"),
+    path(
+        "templates/invoices/", views.invoice_template_list, name="invoice_template_list"
+    ),
+    path(
+        "templates/email/<uuid:pk>/edit/",
+        views.email_template_update,
+        name="email_template_update",
+    ),
+    path(
+        "templates/invoice/new/",
+        views.invoice_template_create,
+        name="invoice_template_create",
+    ),
+    path(
+        "templates/invoice/<uuid:pk>/edit/",
+        views.invoice_template_update,
+        name="invoice_template_update",
+    ),
+    path(
+        "templates/invoice/<uuid:pk>/delete/",
+        views.invoice_template_delete,
+        name="invoice_template_delete",
+    ),
+    path(
+        "htmx/template-details/<uuid:pk>/",
+        views.htmx_get_invoice_template,
+        name="htmx_get_invoice_template",
+    ),
     path("settings/company/", views.company_settings_view, name="company_settings"),
-    path("settings/company/remove-cert/", views.remove_certificate_view, name="remove_certificate"),
+    path(
+        "settings/company/remove-cert/",
+        views.remove_certificate_view,
+        name="remove_certificate",
+    ),
     path("api/cep/<str:cep>/", views.api_cep_view, name="api_cep"),
     path("api/cnpj/<str:cnpj>/", views.api_cnpj_view, name="api_cnpj"),
-    path("api/taxes/", __import__("utils.taxes.api", fromlist=["api_tax_tables"]).api_tax_tables, name="api_taxes"),
+    path(
+        "api/taxes/",
+        __import__("utils.taxes.api", fromlist=["api_tax_tables"]).api_tax_tables,
+        name="api_taxes",
+    ),
 ]

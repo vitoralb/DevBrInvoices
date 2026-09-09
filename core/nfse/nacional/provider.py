@@ -4,13 +4,33 @@ import gzip
 import logging
 import os
 import re
+import ssl  # noqa: F401 - reserved for future in-memory SSL adapter
 import tempfile
+from contextlib import contextmanager
 from decimal import Decimal
 from typing import Optional, Tuple, List
 
 import requests
 
 from core.utils.http import logged_get as _logged_get, logged_post as _logged_post
+
+
+@contextmanager
+def _temp_cert_file(cert_pem: bytes, key_pem: bytes):
+    """Context manager that writes cert/key to a short-lived temp file,
+    yields the path, then securely deletes it. Using a temp file is unavoidable
+    for requests mTLS, but we minimize the window and ensure cleanup."""
+    fd, path = tempfile.mkstemp(suffix=".pem")
+    try:
+        os.chmod(path, 0o600)
+        with os.fdopen(fd, "wb") as f:
+            f.write(cert_pem + b"\n" + key_pem)
+        yield path
+    finally:
+        try:
+            os.remove(path)
+        except OSError:
+            pass
 
 
 from django.conf import settings
@@ -85,8 +105,10 @@ class NacionalProvider(NFSeProvider):
 
         company = CompanySettings.objects.first()
         if not company or not company.pfx_cert_pem or not company.pfx_key_pem:
-            raise Exception("Certificado digital não configurado. Por favor, faça o upload na página Sua Empresa.")
-        return company.pfx_key_pem.encode('utf-8'), company.pfx_cert_pem.encode('utf-8')
+            raise Exception(
+                "Certificado digital não configurado. Por favor, faça o upload na página Sua Empresa."
+            )
+        return company.pfx_key_pem.encode("utf-8"), company.pfx_cert_pem.encode("utf-8")
 
     def _build_and_sign_dps(
         self,
@@ -114,15 +136,9 @@ class NacionalProvider(NFSeProvider):
 
         client_obj = invoice.client
         country_code = (client_obj.address_country_code).upper()
-        postal_code = (
-            client_obj.address_postal_code
-        )[:11]
-        city_name = (
-            client_obj.address_city
-        )[:60]
-        state_province = (
-            client_obj.address_state_province
-        )[:60]
+        postal_code = (client_obj.address_postal_code)[:11]
+        city_name = (client_obj.address_city)[:60]
+        state_province = (client_obj.address_state_province)[:60]
         bairro = (client_obj.address_neighborhood or "Centro")[:60]
         logradouro = (client_obj.address_line1 or "")[:255]
         numero = (client_obj.address_number or "1")[:60]
@@ -234,7 +250,8 @@ class NacionalProvider(NFSeProvider):
 
         # Sign XML
         key_pem, cert_pem = self._get_cert_pems()
-        root = etree.fromstring(unsigned_xml.encode("utf-8"))
+        _safe_parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        root = etree.fromstring(unsigned_xml.encode("utf-8"), parser=_safe_parser)
         signer = XMLSigner(
             method=methods.enveloped,
             signature_algorithm="rsa-sha256",
@@ -440,18 +457,8 @@ class NacionalProvider(NFSeProvider):
 
         base_url, _ = self._get_urls(company.debug_mode)
         key_pem, cert_pem = self._get_cert_pems()
-        fd, temp_cert_path = tempfile.mkstemp(suffix=".pem")
-        try:
-            os.chmod(temp_cert_path, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(cert_pem + b"\n" + key_pem)
+        with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
             return self._consultar_dps(id_dps, base_url, temp_cert_path)
-        finally:
-            if os.path.exists(temp_cert_path):
-                try:
-                    os.remove(temp_cert_path)
-                except OSError:
-                    pass
 
     def emitir_nfse(self, invoice: Invoice) -> EmitResult:
         company = CompanySettings.objects.first()
@@ -460,16 +467,9 @@ class NacionalProvider(NFSeProvider):
 
         # Ensure document number is assigned
         if not invoice.document_number:
-            with transaction.atomic():
-                comp = CompanySettings.objects.select_for_update().first()
-                if comp:
-                    invoice.document_number = comp.next_document_number
-                    invoice.document_series = comp.document_series or "1"
-                    comp.next_document_number += 1
-                    comp.save()
-                    invoice.save()
-                else:
-                    raise ValueError("CompanySettings not found.")
+            from core.services.nfse_services import assign_next_document_number
+
+            assign_next_document_number(invoice)
 
         serie_dps = str(invoice.document_series or "1")
         numero_dps = invoice.document_number
@@ -482,155 +482,155 @@ class NacionalProvider(NFSeProvider):
         endpoint = f"{base_url}/nfse"
 
         key_pem, cert_pem = self._get_cert_pems()
-        fd, temp_cert_path = tempfile.mkstemp(suffix=".pem")
-        try:
-            os.chmod(temp_cert_path, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(cert_pem + b"\n" + key_pem)
-
-            # Idempotency pre-check: Was this DPS already issued?
+        with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
             try:
-                already_issued = self._consultar_dps(id_dps, base_url, temp_cert_path)
-                if already_issued:
-                    already_issued.xml_enviado = signed_xml
-                    return already_issued
-            except Exception as check_ex:
-                logger.error(
-                    "DPS idempotency pre-check failed for %s: %s. Aborting emission to prevent duplicates.",
-                    id_dps,
-                    check_ex,
+
+                # Idempotency pre-check: Was this DPS already issued?
+                try:
+                    already_issued = self._consultar_dps(
+                        id_dps, base_url, temp_cert_path
+                    )
+                    if already_issued:
+                        already_issued.xml_enviado = signed_xml
+                        return already_issued
+                except Exception as check_ex:
+                    logger.error(
+                        "DPS idempotency pre-check failed for %s: %s. Aborting emission to prevent duplicates.",
+                        id_dps,
+                        check_ex,
+                    )
+                    raw_resp = getattr(check_ex, "raw_response", "") or ""
+                    return EmitResult(
+                        sucesso=False,
+                        xml_enviado=signed_xml,
+                        xml_retorno=raw_resp,
+                        erros=[
+                            f"Falha na consulta prévia da DPS (idempotência): {check_ex}. Emissão abortada para evitar duplicidade."
+                        ],
+                    )
+
+                # Compress to GZip base64
+                compressed_dps = gzip.compress(signed_xml.encode("utf-8"))
+                dps_b64 = base64.b64encode(compressed_dps).decode("utf-8")
+
+                headers = {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                }
+                body = {"dpsXmlGZipB64": dps_b64}
+
+                logger.info("Sending DPS %s to Sefin Nacional: %s", id_dps, endpoint)
+                resp = _logged_post(
+                    endpoint,
+                    json=body,
+                    headers=headers,
+                    cert=temp_cert_path,
+                    timeout=40,
                 )
-                raw_resp = getattr(check_ex, "raw_response", "") or ""
-                return EmitResult(
+
+                result = EmitResult(
                     sucesso=False,
                     xml_enviado=signed_xml,
-                    xml_retorno=raw_resp,
-                    erros=[
-                        f"Falha na consulta prévia da DPS (idempotência): {check_ex}. Emissão abortada para evitar duplicidade."
-                    ],
+                    xml_retorno=resp.text,
                 )
 
-            # Compress to GZip base64
-            compressed_dps = gzip.compress(signed_xml.encode("utf-8"))
-            dps_b64 = base64.b64encode(compressed_dps).decode("utf-8")
+                if resp.status_code == 201:
+                    data = resp.json()
+                    result.sucesso = True
+                    result.chave_acesso_nacional = data.get("chaveAcesso", "")
+                    result.codigo_verificacao = result.chave_acesso_nacional
 
-            headers = {
-                "Content-Type": "application/json",
-                "Accept": "application/json",
-            }
-            body = {"dpsXmlGZipB64": dps_b64}
+                    nfse_b64 = data.get("nfseXmlGZipB64")
+                    if nfse_b64:
+                        try:
+                            decompressed_xml = gzip.decompress(
+                                base64.b64decode(nfse_b64)
+                            ).decode("utf-8")
+                            result.xml_retorno = decompressed_xml
 
-            logger.info("Sending DPS %s to Sefin Nacional: %s", id_dps, endpoint)
-            resp = _logged_post(
-                endpoint,
-                json=body,
-                headers=headers,
-                cert=temp_cert_path,
-                timeout=40,
-            )
+                            # Extract nNFSe
+                            match = re.search(r"<nNFSe>(\d+)</nNFSe>", decompressed_xml)
+                            if match:
+                                result.numero_nf = match.group(1)
 
-            result = EmitResult(
-                sucesso=False,
-                xml_enviado=signed_xml,
-                xml_retorno=resp.text,
-            )
-
-            if resp.status_code == 201:
-                data = resp.json()
-                result.sucesso = True
-                result.chave_acesso_nacional = data.get("chaveAcesso", "")
-                result.codigo_verificacao = result.chave_acesso_nacional
-
-                nfse_b64 = data.get("nfseXmlGZipB64")
-                if nfse_b64:
-                    try:
-                        decompressed_xml = gzip.decompress(
-                            base64.b64decode(nfse_b64)
-                        ).decode("utf-8")
-                        result.xml_retorno = decompressed_xml
-
-                        # Extract nNFSe
-                        match = re.search(r"<nNFSe>(\d+)</nNFSe>", decompressed_xml)
-                        if match:
-                            result.numero_nf = match.group(1)
-
-                        dh_proc = None
-                        match_dh = re.search(
-                            r"<dhProc>([^<]+)</dhProc>", decompressed_xml
-                        )
-                        if match_dh:
-                            try:
-                                dh_proc = datetime.datetime.fromisoformat(
-                                    match_dh.group(1).replace("Z", "+00:00")
-                                )
-                            except Exception:
-                                pass
-
-                        c_trib_nac = re.search(
-                            r"<cTribNac>([^<]+)</cTribNac>", decompressed_xml
-                        )
-                        c_nbs = re.search(r"<cNBS>([^<]+)</cNBS>", decompressed_xml)
-                        c_trib_mun = re.search(
-                            r"<cTribMun>([^<]+)</cTribMun>", decompressed_xml
-                        )
-                        p_aliq = re.search(r"<pAliq>([^<]+)</pAliq>", decompressed_xml)
-                        if not p_aliq:
-                            p_aliq = re.search(
-                                r"<pAliqAplic>([^<]+)</pAliqAplic>", decompressed_xml
+                            dh_proc = None
+                            match_dh = re.search(
+                                r"<dhProc>([^<]+)</dhProc>", decompressed_xml
                             )
-                        v_iss = re.search(r"<vISSQN>([^<]+)</vISSQN>", decompressed_xml)
+                            if match_dh:
+                                try:
+                                    dh_proc = datetime.datetime.fromisoformat(
+                                        match_dh.group(1).replace("Z", "+00:00")
+                                    )
+                                except Exception:
+                                    pass
 
-                        result.data_hora_autorizacao = dh_proc
-                        if c_trib_nac:
-                            result.codigo_tributacao_nacional = c_trib_nac.group(1)
-                        if c_nbs:
-                            result.codigo_nbs = c_nbs.group(1)
-                        if c_trib_mun:
-                            result.codigo_servico_municipio = c_trib_mun.group(1)
-                        if p_aliq:
-                            result.aliquota_iss = Decimal(p_aliq.group(1))
-                        if v_iss:
-                            result.valor_iss = Decimal(v_iss.group(1))
-                    except Exception as ex:
-                        logger.warning("Error decompressing returned NFSe XML: %s", ex)
+                            c_trib_nac = re.search(
+                                r"<cTribNac>([^<]+)</cTribNac>", decompressed_xml
+                            )
+                            c_nbs = re.search(r"<cNBS>([^<]+)</cNBS>", decompressed_xml)
+                            c_trib_mun = re.search(
+                                r"<cTribMun>([^<]+)</cTribMun>", decompressed_xml
+                            )
+                            p_aliq = re.search(
+                                r"<pAliq>([^<]+)</pAliq>", decompressed_xml
+                            )
+                            if not p_aliq:
+                                p_aliq = re.search(
+                                    r"<pAliqAplic>([^<]+)</pAliqAplic>",
+                                    decompressed_xml,
+                                )
+                            v_iss = re.search(
+                                r"<vISSQN>([^<]+)</vISSQN>", decompressed_xml
+                            )
 
-                if not result.numero_nf:
-                    # Fallback to document number or part of chave de acesso
-                    result.numero_nf = result.chave_acesso_nacional[-15:].lstrip(
-                        "0"
-                    ) or str(numero_dps)
+                            result.data_hora_autorizacao = dh_proc
+                            if c_trib_nac:
+                                result.codigo_tributacao_nacional = c_trib_nac.group(1)
+                            if c_nbs:
+                                result.codigo_nbs = c_nbs.group(1)
+                            if c_trib_mun:
+                                result.codigo_servico_municipio = c_trib_mun.group(1)
+                            if p_aliq:
+                                result.aliquota_iss = Decimal(p_aliq.group(1))
+                            if v_iss:
+                                result.valor_iss = Decimal(v_iss.group(1))
+                        except Exception as ex:
+                            logger.warning(
+                                "Error decompressing returned NFSe XML: %s", ex
+                            )
 
-                return result
+                    if not result.numero_nf:
+                        # Fallback to document number or part of chave de acesso
+                        result.numero_nf = result.chave_acesso_nacional[-15:].lstrip(
+                            "0"
+                        ) or str(numero_dps)
 
-            else:
-                result.erros = self._parse_error_response(resp)
-                return result
+                    return result
 
-        except Exception as e:
-            logger.exception("Error transmitting DPS to Nacional: %s", e)
-            raw_retorno = ""
-            err_list = []
-            if hasattr(e, "response") and e.response is not None:
-                raw_retorno = e.response.text
-                err_list = self._parse_error_response(e.response)
-            elif hasattr(e, "raw_response") and e.raw_response:
-                raw_retorno = e.raw_response
+                else:
+                    result.erros = self._parse_error_response(resp)
+                    return result
 
-            if not err_list:
-                err_list = [str(e)]
+            except Exception as e:
+                logger.exception("Error transmitting DPS to Nacional: %s", e)
+                raw_retorno = ""
+                err_list = []
+                if hasattr(e, "response") and e.response is not None:
+                    raw_retorno = e.response.text
+                    err_list = self._parse_error_response(e.response)
+                elif hasattr(e, "raw_response") and e.raw_response:
+                    raw_retorno = e.raw_response
 
-            return EmitResult(
-                sucesso=False,
-                xml_enviado=signed_xml if "signed_xml" in locals() else "",
-                xml_retorno=raw_retorno,
-                erros=err_list,
-            )
-        finally:
-            if os.path.exists(temp_cert_path):
-                try:
-                    os.remove(temp_cert_path)
-                except OSError:
-                    pass
+                if not err_list:
+                    err_list = [str(e)]
+
+                return EmitResult(
+                    sucesso=False,
+                    xml_enviado=signed_xml if "signed_xml" in locals() else "",
+                    xml_retorno=raw_retorno,
+                    erros=err_list,
+                )
 
     def baixar_pdf(self, invoice: Invoice) -> Optional[bytes]:
         company = CompanySettings.objects.first()
@@ -648,37 +648,28 @@ class NacionalProvider(NFSeProvider):
         url = f"{danfse_base_url}/{chave_acesso}"
 
         key_pem, cert_pem = self._get_cert_pems()
-        fd, temp_cert_path = tempfile.mkstemp(suffix=".pem")
-        try:
-            os.chmod(temp_cert_path, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(cert_pem + b"\n" + key_pem)
+        with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
+            try:
 
-            headers = {"Accept": "application/pdf"}
-            resp = _logged_get(
-                url,
-                headers=headers,
-                cert=temp_cert_path,
-                timeout=30,
-            )
-            if resp.status_code == 200 and resp.content.startswith(b"%PDF"):
-                return resp.content
-            else:
-                logger.warning(
-                    "DANFSe PDF download returned status %s for chave %s",
-                    resp.status_code,
-                    chave_acesso,
+                headers = {"Accept": "application/pdf"}
+                resp = _logged_get(
+                    url,
+                    headers=headers,
+                    cert=temp_cert_path,
+                    timeout=30,
                 )
+                if resp.status_code == 200 and resp.content.startswith(b"%PDF"):
+                    return resp.content
+                else:
+                    logger.warning(
+                        "DANFSe PDF download returned status %s for chave %s",
+                        resp.status_code,
+                        chave_acesso,
+                    )
+                    return None
+            except Exception as e:
+                logger.warning("Error downloading DANFSe PDF: %s", e)
                 return None
-        except Exception as e:
-            logger.warning("Error downloading DANFSe PDF: %s", e)
-            return None
-        finally:
-            if os.path.exists(temp_cert_path):
-                try:
-                    os.remove(temp_cert_path)
-                except OSError:
-                    pass
 
     def cancelar_nfse(self, invoice: Invoice) -> CancelResult:
         company = CompanySettings.objects.first()
@@ -744,7 +735,8 @@ class NacionalProvider(NFSeProvider):
 
         # Sign XML
         key_pem, cert_pem = self._get_cert_pems()
-        root = etree.fromstring(unsigned_xml.encode("utf-8"))
+        _safe_parser = etree.XMLParser(resolve_entities=False, no_network=True)
+        root = etree.fromstring(unsigned_xml.encode("utf-8"), parser=_safe_parser)
         signer = XMLSigner(
             method=methods.enveloped,
             signature_algorithm="rsa-sha256",
@@ -766,76 +758,67 @@ class NacionalProvider(NFSeProvider):
         base_url, _ = self._get_urls(company.debug_mode)
         endpoint = f"{base_url}/nfse/eventos"
 
-        fd, temp_cert_path = tempfile.mkstemp(suffix=".pem")
-        try:
-            os.chmod(temp_cert_path, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(cert_pem + b"\n" + key_pem)
+        with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
+            try:
 
-            headers = {
-                "Content-Type": "application/xml",
-                "Accept": "application/json",
-            }
+                headers = {
+                    "Content-Type": "application/xml",
+                    "Accept": "application/json",
+                }
 
-            logger.info("Sending Cancel Event to Sefin Nacional: %s", endpoint)
-            resp = _logged_post(
-                endpoint,
-                data=signed_xml.encode("utf-8"),
-                headers=headers,
-                cert=temp_cert_path,
-                timeout=40,
-            )
+                logger.info("Sending Cancel Event to Sefin Nacional: %s", endpoint)
+                resp = _logged_post(
+                    endpoint,
+                    data=signed_xml.encode("utf-8"),
+                    headers=headers,
+                    cert=temp_cert_path,
+                    timeout=40,
+                )
 
-            cancelation_date = None
-            if resp.status_code == 201:
-                match = re.search(r"<dhEvento>([^<]+)</dhEvento>", resp.text)
-                if match:
-                    try:
-                        cancelation_date = datetime.datetime.fromisoformat(
-                            match.group(1).replace("Z", "+00:00")
-                        )
-                    except Exception:
-                        pass
+                cancelation_date = None
+                if resp.status_code == 201:
+                    match = re.search(r"<dhEvento>([^<]+)</dhEvento>", resp.text)
+                    if match:
+                        try:
+                            cancelation_date = datetime.datetime.fromisoformat(
+                                match.group(1).replace("Z", "+00:00")
+                            )
+                        except Exception:
+                            pass
 
-            result = CancelResult(
-                sucesso=False,
-                xml_enviado=signed_xml,
-                xml_retorno=resp.text,
-                cancelation_date=cancelation_date,
-            )
+                result = CancelResult(
+                    sucesso=False,
+                    xml_enviado=signed_xml,
+                    xml_retorno=resp.text,
+                    cancelation_date=cancelation_date,
+                )
 
-            if resp.status_code == 201:
-                result.sucesso = True
-                return result
-            else:
-                result.erros = self._parse_error_response(resp)
-                return result
+                if resp.status_code == 201:
+                    result.sucesso = True
+                    return result
+                else:
+                    result.erros = self._parse_error_response(resp)
+                    return result
 
-        except Exception as e:
-            logger.exception("Error transmitting Cancel Event to Nacional: %s", e)
-            raw_retorno = ""
-            err_list = []
-            if hasattr(e, "response") and e.response is not None:
-                raw_retorno = e.response.text
-                err_list = self._parse_error_response(e.response)
-            elif hasattr(e, "raw_response") and e.raw_response:
-                raw_retorno = e.raw_response
+            except Exception as e:
+                logger.exception("Error transmitting Cancel Event to Nacional: %s", e)
+                raw_retorno = ""
+                err_list = []
+                if hasattr(e, "response") and e.response is not None:
+                    raw_retorno = e.response.text
+                    err_list = self._parse_error_response(e.response)
+                elif hasattr(e, "raw_response") and e.raw_response:
+                    raw_retorno = e.raw_response
 
-            if not err_list:
-                err_list = [str(e)]
+                if not err_list:
+                    err_list = [str(e)]
 
-            return CancelResult(
-                sucesso=False,
-                xml_enviado=signed_xml if "signed_xml" in locals() else "",
-                xml_retorno=raw_retorno,
-                erros=err_list,
-            )
-        finally:
-            if os.path.exists(temp_cert_path):
-                try:
-                    os.remove(temp_cert_path)
-                except OSError:
-                    pass
+                return CancelResult(
+                    sucesso=False,
+                    xml_enviado=signed_xml if "signed_xml" in locals() else "",
+                    xml_retorno=raw_retorno,
+                    erros=err_list,
+                )
 
     def buscar_nfses_por_periodo(self, start_date, end_date) -> list:
         raise NotImplementedError(
@@ -852,11 +835,7 @@ class NacionalProvider(NFSeProvider):
         headers = {"Accept": "application/json"}
 
         key_pem, cert_pem = self._get_cert_pems()
-        fd, temp_cert_path = tempfile.mkstemp(suffix=".pem")
-        try:
-            os.chmod(temp_cert_path, 0o600)
-            with os.fdopen(fd, "wb") as f:
-                f.write(cert_pem + b"\n" + key_pem)
+        with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
 
             resp = _logged_get(
                 endpoint, headers=headers, cert=temp_cert_path, timeout=20
@@ -942,9 +921,3 @@ class NacionalProvider(NFSeProvider):
                         logger.warning(f"Error decompressing Nacional XML: {ex}")
 
             return None
-        finally:
-            if os.path.exists(temp_cert_path):
-                try:
-                    os.remove(temp_cert_path)
-                except:
-                    pass

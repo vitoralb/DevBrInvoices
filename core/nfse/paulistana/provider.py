@@ -25,7 +25,9 @@ class PaulistanaProvider(NFSeProvider):
     def _get_client(self, company: CompanySettings):
 
         if not company.pfx_cert_pem or not company.pfx_key_pem:
-            raise Exception("Certificado digital não configurado. Por favor, faça o upload na página Sua Empresa.")
+            raise Exception(
+                "Certificado digital não configurado. Por favor, faça o upload na página Sua Empresa."
+            )
         cnpj = company.cnpj.replace(".", "").replace("/", "").replace("-", "")
         im = company.inscricao_municipal
         return NFeClient(company.pfx_cert_pem, company.pfx_key_pem, cnpj, im), im
@@ -37,19 +39,9 @@ class PaulistanaProvider(NFSeProvider):
 
         # Assign document number if it doesn't have one
         if not invoice.document_number:
-            with transaction.atomic():
-                comp = CompanySettings.objects.select_for_update().first()
-                if comp:
-                    invoice.document_number = comp.next_document_number
-                    invoice.document_series = comp.document_series
-                    if not comp.debug_mode:
-                        comp.next_document_number += 1
-                    comp.save()
-                    invoice.save()
-                else:
-                    raise Exception(
-                        "CompanySettings not found, cannot assign document number."
-                    )
+            from core.services.nfse_services import assign_next_document_number
+
+            assign_next_document_number(invoice)
 
         rps_series = invoice.document_series
         numero_rps = str(invoice.document_number)

@@ -20,6 +20,8 @@ if not SECRET_KEY:
             "SECRET_KEY environment variable must be set in production."
         )
 
+ENCRYPTION_KEY = os.environ.get("ENCRYPTION_KEY", "")
+
 allowed_hosts_env = os.environ.get("ALLOWED_HOSTS", "")
 ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_env.split(",") if h.strip()]
 if not ALLOWED_HOSTS:
@@ -63,7 +65,6 @@ if not DEBUG:
     SECURE_SSL_REDIRECT = True
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
-SECURE_CROSS_ORIGIN_OPENER_POLICY = None
 
 ROOT_URLCONF = "config.urls"
 
