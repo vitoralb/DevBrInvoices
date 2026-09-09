@@ -104,11 +104,8 @@ def issue_nfse_task(
                     fetch_nfse_pdf_task.delay(invoice.id)
 
             if pdf_bytes:
-                sender_name = (
-                    f"{company.company_name} Invoices"
-                    if company.company_name
-                    else "Invoices"
-                )
+                short_company_name = " ".join(company.company_name.split()[:3])
+                sender_name = f"{short_company_name} Invoices"
                 from_email_addr = _format_from_email(sender_name)
 
                 from core.utils.macros import get_email_content
@@ -148,11 +145,8 @@ def issue_nfse_task(
 
             # Send failure email
             if company and company.email:
-                sender_name = (
-                    f"{company.company_name} System"
-                    if company.company_name
-                    else "System"
-                )
+                short_company_name = " ".join(company.company_name.split()[:3])
+                sender_name = f"{short_company_name} System"
                 from_email_addr = _format_from_email(sender_name)
 
                 from core.utils.macros import get_email_content

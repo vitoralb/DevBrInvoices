@@ -102,11 +102,8 @@ def cancel_invoice_task(self, invoice_id):
                 # Send failure email
                 company = CompanySettings.objects.first()
                 if company and company.email:
-                    sender_name = (
-                        f"{company.company_name} System"
-                        if company.company_name
-                        else "System"
-                    )
+                    short_company_name = " ".join(company.company_name.split()[:3])
+                    sender_name = f"{short_company_name} System"
                     from_email_addr = _format_from_email(sender_name)
 
                     from core.utils.macros import get_email_content
@@ -201,8 +198,9 @@ def email_invoice_task(
                 (f"NFSe_{nf.nf_number}.pdf", nfse_pdf, "application/pdf")
             )
 
-    mes_servico = invoice.issue_date.replace(day=1) - relativedelta(days=1)
-    sender_name = "Invoices"
+    # get first 3 words of company name for email display
+    short_company_name = " ".join(company.company_name.split()[:3])
+    sender_name = f"{short_company_name} Invoices"
     from_email_addr = _format_from_email(sender_name)
 
     # Client email: per AGENTS.md, NEVER attach NFS-e to client email
@@ -312,11 +310,8 @@ def process_daily_invoices_task(force=False):
 
         if failsafe_triggered:
             if company and company.email:
-                sender_name = (
-                    f"{company.company_name} System"
-                    if company.company_name
-                    else "System"
-                )
+                short_company_name = " ".join(company.company_name.split()[:3])
+                sender_name = f"{short_company_name} System"
                 from_email_addr = _format_from_email(sender_name)
 
                 from core.utils.macros import get_email_content
