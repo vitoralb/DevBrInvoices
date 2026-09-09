@@ -63,6 +63,42 @@ class TaxCalculationTests(TestCase):
         self.assertIsInstance(irrf, Decimal)
         self.assertEqual(irrf, Decimal("0.00"))
 
+    def test_calculate_irrf_progressive_brackets(self):
+        # 10000 pró-labore on 2024-06-01:
+        # INSS: min(10000, 7786.02) * 11% = 856.46
+        # Base: 10000 - 856.46 = 9143.54
+        # Bracket 0 (up to 2259.20): 2259.20 * 0% = 0.00
+        # Bracket 1 (2259.20 to 2826.65): 567.45 * 7.5% = 42.55875
+        # Bracket 2 (2826.65 to 3751.05): 924.40 * 15% = 138.66
+        # Bracket 3 (3751.05 to 4664.68): 913.63 * 22.5% = 205.56675
+        # Bracket 4 (above 4664.68): (9143.54 - 4664.68) * 27.5% = 4478.86 * 27.5% = 1231.6865
+        # Total: 0 + 42.55875 + 138.66 + 205.56675 + 1231.6865 = 1618.472 -> 1618.47
+        irrf = calculate_irrf(Decimal("10000.00"), date(2024, 6, 1))
+        self.assertEqual(irrf, Decimal("1618.47"))
+
+    def test_calculate_irrf_second_bracket(self):
+        # 3000 pró-labore on 2024-06-01:
+        # INSS: 3000 * 11% = 330.00
+        # Base: 3000 - 330 = 2670.00
+        # Bracket 0: 2259.20 * 0% = 0.00
+        # Bracket 1: (2670.00 - 2259.20) * 7.5% = 410.80 * 7.5% = 30.81
+        irrf = calculate_irrf(Decimal("3000.00"), date(2024, 6, 1))
+        self.assertEqual(irrf, Decimal("30.81"))
+
+    def test_calculate_irrf_july_2026(self):
+        # In July 2026:
+        # Pró-labore = 11477.49
+        # INSS 2026: ceiling 8475.55 * 11% = 932.31
+        # Base: 11477.49 - 932.31 = 10545.18
+        # IRRF (new table valid from 2025-05-01): 10545.18 * 27.5% - 908.73 = 1991.19
+        irrf = calculate_irrf(Decimal("11477.49"), date(2026, 7, 1))
+        self.assertEqual(irrf, Decimal("1991.19"))
+
+    def test_calculate_irrf_zero_or_negative(self):
+        self.assertEqual(
+            calculate_irrf(Decimal("0.00"), date(2024, 6, 1)), Decimal("0.00")
+        )
+
     def test_calculate_ideal_pro_labore_zero_revenue(self):
         pl = calculate_ideal_pro_labore(
             date(2024, 6, 1), estimated_current_revenue=Decimal("0.00")

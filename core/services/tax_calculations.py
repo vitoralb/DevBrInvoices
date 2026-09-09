@@ -7,7 +7,12 @@ from django.db import transaction, models
 from django.db.models.functions import Coalesce
 from django.conf import settings
 from ..models import MonthlyConsolidation, CompanySettings, NotaFiscal
-from utils.taxes import get_applicable_bracket, get_minimum_salary, calculate_inss
+from utils.taxes import (
+    get_applicable_bracket,
+    get_minimum_salary,
+    calculate_inss,
+    get_active_table,
+)
 from .. import signals as _signals
 
 logger = logging.getLogger(__name__)
@@ -15,7 +20,9 @@ logger = logging.getLogger(__name__)
 
 def calculate_irrf(pro_labore_amount, reference_date):
     inss_deduction = calculate_inss(pro_labore_amount, reference_date)
-    base_calc = pro_labore_amount - inss_deduction
+    base_calc = (Decimal(str(pro_labore_amount)) - inss_deduction).quantize(
+        Decimal("0.01"), rounding=ROUND_HALF_UP
+    )
 
     logger.debug(
         "Calculating IRRF for Pró-labore: %s, INSS Deduction: %s, Base Calc: %s",
@@ -23,6 +30,9 @@ def calculate_irrf(pro_labore_amount, reference_date):
         inss_deduction,
         base_calc,
     )
+
+    if base_calc <= Decimal("0.00"):
+        return Decimal("0.00")
 
     try:
         bracket = get_applicable_bracket("IRRF", base_calc, reference_date)
