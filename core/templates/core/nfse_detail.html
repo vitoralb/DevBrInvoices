@@ -15,21 +15,37 @@
                     <span class="badge bg-danger ms-2">CANCELADA</span>
                     {% endif %}
                 </h5>
-                <span class="badge bg-info text-dark">{{ nf.provider_type }}</span>
+                <div class="d-flex align-items-center gap-2">
+                    <span class="badge bg-info text-dark">{{ nf.provider_type }}</span>
+                    <form method="POST" action="{% url 'nfse_refresh' nf.id %}" class="d-inline">
+                        {% csrf_token %}
+                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Sincronizar com o provedor">
+                            <i class="bi bi-arrow-clockwise"></i> Sincronizar
+                        </button>
+                    </form>
+                </div>
             </div>
             <div class="card-body">
                 <div class="row mb-3">
                     <div class="col-sm-4 text-muted">Data de Emissão:</div>
                     <div class="col-sm-8">{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</div>
                 </div>
+                {% if nf.is_canceled and nf.cancelation_date %}
+                <div class="row mb-3">
+                    <div class="col-sm-4 text-muted">Data de Cancelamento:</div>
+                    <div class="col-sm-8 text-danger fw-semibold">{{ nf.cancelation_date|date:"SHORT_DATETIME_FORMAT" }}</div>
+                </div>
+                {% endif %}
                 <div class="row mb-3">
                     <div class="col-sm-4 text-muted">Valor Total:</div>
                     <div class="col-sm-8"><strong>R$ {{ nf.amount_brl }}</strong></div>
                 </div>
+                {% if nf.verification_code %}
                 <div class="row mb-3">
                     <div class="col-sm-4 text-muted">Código Verificação:</div>
-                    <div class="col-sm-8">{{ nf.verification_code|default:"N/A" }}</div>
+                    <div class="col-sm-8">{{ nf.verification_code }}</div>
                 </div>
+                {% endif %}
                 <div class="row mb-3">
                     <div class="col-sm-4 text-muted">Chave Nacional:</div>
                     <div class="col-sm-8">{{ nf.chave_acesso_nacional|default:"N/A" }}</div>
@@ -43,17 +59,16 @@
                 
                 <hr>
                 
-                <h6 class="mt-4 mb-3">Arquivos</h6>
-                <div class="d-flex gap-2">
+                <h6 class="mt-4 mb-3">Ações e Arquivos</h6>
+                <div class="d-flex gap-2 flex-wrap align-items-center">
                     <a href="{% url 'nfse_download_pdf' nf.id %}" target="_blank" class="btn btn-outline-primary">
                         <i class="bi bi-file-earmark-pdf"></i> Baixar PDF
                     </a>
                     
-                    {% if nf.xml_autorizacao %}
-                    <a href="{{ nf.xml_autorizacao.url }}" target="_blank" class="btn btn-outline-secondary">
+                    <a href="{% url 'nfse_download_xml' nf.id %}" target="_blank" class="btn btn-outline-secondary">
                         <i class="bi bi-filetype-xml"></i> Baixar XML
                     </a>
-                    {% endif %}
+
                     
                     {% if nf.can_be_canceled %}
                     <form method="POST" action="{% url 'nfse_cancel' nf.id %}" onsubmit="return confirm('Tem certeza que deseja CANCELAR esta NFS-e na prefeitura? Isso não pode ser desfeito.');" class="ms-auto">

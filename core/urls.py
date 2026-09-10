@@ -73,12 +73,14 @@ urlpatterns = [
     ),
     path("nfse/<uuid:pk>/", views.nfse_detail, name="nfse_detail"),
     path("nfse/<uuid:pk>/pdf/", views.nfse_download_pdf, name="nfse_download_pdf"),
+    path("nfse/<uuid:pk>/xml/", views.nfse_download_xml, name="nfse_download_xml"),
     path(
         "nfse/<uuid:pk>/link-invoice/",
         views.nfse_link_invoice,
         name="nfse_link_invoice",
     ),
     path("nfse/<uuid:pk>/cancel/", views.nfse_cancel, name="nfse_cancel"),
+    path("nfse/<uuid:pk>/refresh/", views.nfse_refresh, name="nfse_refresh"),
     path(
         "htmx/fetch-exchange-rate/",
         views.htmx_fetch_exchange_rate,

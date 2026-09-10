@@ -1,6 +1,6 @@
 import logging
 import threading
-from django.db.models.signals import post_save, post_delete
+from django.db.models.signals import pre_save, post_save, post_delete
 from django.dispatch import receiver
 from dateutil.relativedelta import relativedelta
 from .models import NotaFiscal, MonthlyConsolidation
@@ -49,6 +49,34 @@ def flag_months_outdated(target_date):
     ).update(status="OUTDATED")
 
 
+@receiver(pre_save, sender=NotaFiscal)
+def track_nf_pre_save(sender, instance, **kwargs):
+    """Tracks previous values of NotaFiscal before saving to detect if financial/status fields change."""
+    if kwargs.get("raw", False) or is_consolidation_in_progress():
+        return
+
+    if not instance.pk:
+        instance._nf_existed_in_db = False
+        return
+
+    try:
+        old = (
+            NotaFiscal.objects.filter(pk=instance.pk)
+            .values("amount_brl", "is_canceled", "issue_date", "is_export")
+            .first()
+        )
+        if old is not None:
+            instance._nf_existed_in_db = True
+            instance._old_amount_brl = old["amount_brl"]
+            instance._old_is_canceled = old["is_canceled"]
+            instance._old_issue_date = old["issue_date"]
+            instance._old_is_export = old["is_export"]
+        else:
+            instance._nf_existed_in_db = False
+    except Exception:
+        instance._nf_existed_in_db = False
+
+
 @receiver(post_save, sender=NotaFiscal)
 @receiver(post_delete, sender=NotaFiscal)
 def handle_nf_changes(sender, instance, **kwargs):
@@ -58,19 +86,47 @@ def handle_nf_changes(sender, instance, **kwargs):
     if is_consolidation_in_progress():
         return
 
-    first_day_of_month = instance.issue_date.replace(day=1)
+    # Deletion handling
+    if "created" not in kwargs:
+        if not instance.is_canceled:
+            flag_months_outdated(instance.issue_date)
+        return
 
-    from .services import calculate_ideal_pro_labore, get_minimum_salary
-    from decimal import Decimal
-    from django.db.models import Sum
-    from django.db.models.functions import Coalesce
+    created = kwargs.get("created", False)
 
-    # Ensure a consolidation record exists for the target month
-    cons, _ = MonthlyConsolidation.objects.get_or_create(
-        month_year=first_day_of_month, defaults={"status": "OUTDATED"}
-    )
+    # Creation handling: only flag if active (adds revenue)
+    if created:
+        if not instance.is_canceled:
+            flag_months_outdated(instance.issue_date)
+        return
 
-    flag_months_outdated(instance.issue_date)
+    # Update handling: check if financial or status fields changed
+    if getattr(instance, "_nf_existed_in_db", False):
+        update_fields = kwargs.get("update_fields")
+        relevant_fields = {"amount_brl", "is_canceled", "issue_date", "is_export"}
+
+        # If update_fields was explicitly provided and none of the relevant fields are present, skip
+        if update_fields is not None and not (relevant_fields & set(update_fields)):
+            return
+
+        old_amount = getattr(instance, "_old_amount_brl", None)
+        old_canceled = getattr(instance, "_old_is_canceled", None)
+        old_date = getattr(instance, "_old_issue_date", None)
+        old_export = getattr(instance, "_old_is_export", None)
+
+        amount_changed = (old_amount is not None) and (old_amount != instance.amount_brl)
+        canceled_changed = (old_canceled is not None) and (old_canceled != instance.is_canceled)
+        date_changed = (old_date is not None) and (old_date != instance.issue_date)
+        export_changed = (old_export is not None) and (old_export != instance.is_export)
+
+        if not (amount_changed or canceled_changed or date_changed or export_changed):
+            # No financially relevant field changed
+            return
+
+        if date_changed and old_date:
+            flag_months_outdated(old_date)
+
+        flag_months_outdated(instance.issue_date)
 
 
 @receiver(post_save, sender=MonthlyConsolidation)
@@ -102,6 +158,21 @@ def handle_consolidation_pro_labore_change(sender, instance, **kwargs):
 from .models import Invoice
 
 
+@receiver(pre_save, sender=Invoice)
+def track_invoice_pre_save(sender, instance, **kwargs):
+    """Tracks previous status of Invoice to only flag when transitioning to CANCELED."""
+    if kwargs.get("raw", False) or is_consolidation_in_progress():
+        return
+    if not instance.pk:
+        return
+    try:
+        old = Invoice.objects.filter(pk=instance.pk).values("status").first()
+        if old is not None:
+            instance._old_status = old["status"]
+    except Exception:
+        pass
+
+
 @receiver(post_save, sender=Invoice)
 def handle_invoice_changes(sender, instance, **kwargs):
     """When an invoice status changes (e.g. to CANCELED), flag affected months."""
@@ -112,7 +183,8 @@ def handle_invoice_changes(sender, instance, **kwargs):
 
     # Only matters if the invoice has a Nota Fiscal and is affecting totals
     if hasattr(instance, "nota_fiscal") and instance.nota_fiscal:
-        # Optimization: We only strictly need to trigger this if the status is CANCELED
-        # because normal finalized invoices are already covered by NotaFiscal post_save.
-        if instance.status == "CANCELED":
+        old_status = getattr(instance, "_old_status", None)
+        # Optimization: Only trigger if status changed to CANCELED
+        if instance.status == "CANCELED" and old_status != "CANCELED":
             flag_months_outdated(instance.issue_date)
+

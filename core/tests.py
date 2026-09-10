@@ -1400,7 +1400,7 @@ class NfseCancelRestrictionTests(TestCase):
             self.assertEqual(len(notas_vazias), 0)
 
     def test_rate_limiter(self):
-        from scripts.consultar_nfse_paulistana import RateLimiter
+        from core.utils.rate_limiter import RateLimiter
         import time
 
         limiter = RateLimiter(max_per_second=10.0)  # 10 req/s => 0.1s intervalo
@@ -1533,3 +1533,226 @@ class NfseCancelRestrictionTests(TestCase):
         count, msg = import_nfses("NACIONAL")
         self.assertEqual(count, 0)
         self.assertIn("não está disponível", msg)
+
+    @patch("core.nfse.paulistana.provider.PaulistanaProvider.buscar_nfse_por_numero")
+    def test_sync_nota_fiscal_externally_canceled(self, mock_buscar):
+        from core.services.nfse_services import sync_nota_fiscal
+        from django.utils import timezone
+
+        invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-SYNC-01",
+            issue_date=date(2026, 9, 1),
+            currency="USD",
+            status="FINALIZED",
+        )
+        nf = NotaFiscal.objects.create(
+            invoice=invoice,
+            nf_number="88",
+            verification_code="VERIF88",
+            issue_date=date(2026, 9, 1),
+            amount_brl=Decimal("500.00"),
+            is_canceled=False,
+        )
+
+        now = timezone.now()
+        mock_buscar.return_value = {
+            "nf_number": "88",
+            "verification_code": "VERIF88",
+            "chave_acesso_nacional": "CHAVE88",
+            "amount_brl": "500.00",
+            "description": "Serviços",
+            "issue_date": date(2026, 9, 1),
+            "is_canceled": True,
+            "cancelation_date": now,
+            "raw_xml": "<xml_canceled/>",
+        }
+
+        with patch("core.services.nfse_services.fetch_and_save_nfse_pdf") as mock_fetch_pdf:
+            success, msg = sync_nota_fiscal(nf)
+            self.assertTrue(success)
+            self.assertIn("identificada como CANCELADA", msg)
+
+        nf.refresh_from_db()
+        self.assertTrue(nf.is_canceled)
+        self.assertIsNotNone(nf.cancelation_date)
+
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "CANCELED")
+
+    @patch("core.services.nfse_services.sync_nota_fiscal")
+    def test_nfse_refresh_view(self, mock_sync):
+        mock_sync.return_value = (True, "NFS-e sincronizada com sucesso com o provedor.")
+
+        nf = NotaFiscal.objects.create(
+            nf_number="99",
+            verification_code="VERIF99",
+            issue_date=date(2026, 9, 1),
+            amount_brl=Decimal("300.00"),
+        )
+
+        response = self.client_http.post(reverse("nfse_refresh", kwargs={"pk": nf.id}))
+        self.assertRedirects(response, reverse("nfse_detail", kwargs={"pk": nf.id}))
+        mock_sync.assert_called_once_with(nf)
+
+    @patch("core.nfse.paulistana.provider.PaulistanaProvider.buscar_nfse_por_numero")
+    def test_sync_nota_fiscal_not_found(self, mock_buscar):
+        from core.services.nfse_services import sync_nota_fiscal
+
+        nf = NotaFiscal.objects.create(
+            nf_number="100",
+            verification_code="VERIF100",
+            issue_date=date(2026, 9, 1),
+            amount_brl=Decimal("100.00"),
+        )
+        mock_buscar.return_value = None
+
+        success, msg = sync_nota_fiscal(nf)
+        self.assertFalse(success)
+        self.assertIn("não encontrada", msg)
+
+    @patch("core.nfse.paulistana.provider.PaulistanaProvider.buscar_nfse_por_numero")
+    def test_sync_nota_fiscal_no_changes_does_not_outdate_consolidation(self, mock_buscar):
+        from core.services.nfse_services import sync_nota_fiscal
+        from core.models import MonthlyConsolidation
+
+        target_month = date(2026, 9, 1)
+        cons = MonthlyConsolidation.objects.create(
+            month_year=target_month,
+            status="CONSOLIDATED",
+            actual_pro_labore_paid=Decimal("5000.00"),
+        )
+        nf = NotaFiscal.objects.create(
+            nf_number="101",
+            verification_code="VERIF101",
+            issue_date=target_month,
+            amount_brl=Decimal("1000.00"),
+            is_canceled=False,
+        )
+        # Reset consolidation status to CONSOLIDATED after creating NF
+        cons.status = "CONSOLIDATED"
+        cons.save()
+
+        # Mock provider returning identical values
+        mock_buscar.return_value = {
+            "nf_number": "101",
+            "verification_code": "VERIF101",
+            "amount_brl": "1000.00",
+            "description": "Serviços",
+            "issue_date": target_month,
+            "is_canceled": False,
+            "raw_xml": "<xml_identical/>",
+        }
+
+        success, msg = sync_nota_fiscal(nf)
+        self.assertTrue(success)
+
+        cons.refresh_from_db()
+        self.assertEqual(cons.status, "CONSOLIDATED")
+
+    @patch("core.nfse.paulistana.provider.PaulistanaProvider.buscar_nfse_por_numero")
+    def test_sync_nota_fiscal_value_change_outdates_consolidation(self, mock_buscar):
+        from core.services.nfse_services import sync_nota_fiscal
+        from core.models import MonthlyConsolidation
+
+        target_month = date(2026, 9, 1)
+        cons = MonthlyConsolidation.objects.create(
+            month_year=target_month,
+            status="CONSOLIDATED",
+            actual_pro_labore_paid=Decimal("5000.00"),
+        )
+        nf = NotaFiscal.objects.create(
+            nf_number="102",
+            verification_code="VERIF102",
+            issue_date=target_month,
+            amount_brl=Decimal("1000.00"),
+            is_canceled=False,
+        )
+        cons.status = "CONSOLIDATED"
+        cons.save()
+
+        # Mock provider returning altered amount
+        mock_buscar.return_value = {
+            "nf_number": "102",
+            "verification_code": "VERIF102",
+            "amount_brl": "1500.00",
+            "description": "Serviços",
+            "issue_date": target_month,
+            "is_canceled": False,
+            "raw_xml": "<xml_value_changed/>",
+        }
+
+        success, msg = sync_nota_fiscal(nf)
+        self.assertTrue(success)
+
+        cons.refresh_from_db()
+        self.assertEqual(cons.status, "OUTDATED")
+
+    @patch("core.nfse.provider_factory.get_provider")
+    def test_download_pdf_does_not_outdate_consolidation(self, mock_get_provider):
+        from core.models import MonthlyConsolidation
+        from unittest.mock import MagicMock
+
+        mock_provider = MagicMock()
+        mock_provider.baixar_pdf.return_value = b"%PDF-1.4 test pdf content"
+        mock_get_provider.return_value = mock_provider
+
+        target_month = date(2026, 9, 1)
+        cons = MonthlyConsolidation.objects.create(
+            month_year=target_month,
+            status="CONSOLIDATED",
+            actual_pro_labore_paid=Decimal("5000.00"),
+        )
+        nf = NotaFiscal.objects.create(
+            nf_number="103",
+            verification_code="VERIF103",
+            issue_date=target_month,
+            amount_brl=Decimal("1000.00"),
+            is_canceled=False,
+        )
+        cons.status = "CONSOLIDATED"
+        cons.save()
+
+        response = self.client_http.get(reverse("nfse_download_pdf", kwargs={"pk": nf.id}))
+        self.assertEqual(response.status_code, 200)
+
+        cons.refresh_from_db()
+        self.assertEqual(cons.status, "CONSOLIDATED")
+
+
+    @patch("core.nfse.paulistana.provider.PaulistanaProvider.buscar_nfse_por_numero")
+    def test_download_xml_does_not_outdate_consolidation(self, mock_buscar):
+        from core.models import MonthlyConsolidation
+
+        mock_buscar.return_value = {
+            "nf_number": "104",
+            "verification_code": "VERIF104",
+            "amount_brl": "1000.00",
+            "description": "Serviços",
+            "issue_date": date(2026, 9, 1),
+            "is_canceled": False,
+            "raw_xml": "<xml_content>hello</xml_content>",
+        }
+
+        target_month = date(2026, 9, 1)
+        cons = MonthlyConsolidation.objects.create(
+            month_year=target_month,
+            status="CONSOLIDATED",
+            actual_pro_labore_paid=Decimal("5000.00"),
+        )
+        nf = NotaFiscal.objects.create(
+            nf_number="104",
+            verification_code="VERIF104",
+            issue_date=target_month,
+            amount_brl=Decimal("1000.00"),
+            is_canceled=False,
+        )
+        cons.status = "CONSOLIDATED"
+        cons.save()
+
+        response = self.client_http.get(reverse("nfse_download_xml", kwargs={"pk": nf.id}))
+        self.assertEqual(response.status_code, 200)
+
+        cons.refresh_from_db()
+        self.assertEqual(cons.status, "CONSOLIDATED")
+

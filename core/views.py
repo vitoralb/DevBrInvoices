@@ -551,57 +551,14 @@ def generate_invoice_pdf(request, pk):
 
 @login_required
 def download_nfse_pdf(request, pk):
+    """Backward-compatible wrapper for downloading an invoice's NFS-e PDF, delegating to nfse_download_pdf."""
     invoice = get_object_or_404(Invoice, pk=pk)
     nf = getattr(invoice, "nota_fiscal", None)
-
     if not nf:
         messages.error(request, "Nenhuma NFS-e associada a esta invoice.")
         return redirect("invoice_detail", pk=invoice.id)
+    return nfse_download_pdf(request, pk=nf.id, redirect_view="invoice_detail")
 
-    # 1. Check if PDF is already stored locally
-    if nf.danfse_pdf:
-        try:
-            if nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
-                return FileResponse(
-                    nf.danfse_pdf.open("rb"),
-                    content_type="application/pdf",
-                    as_attachment=False,
-                    filename=f"NFSe_{nf.nf_number}.pdf",
-                )
-        except Exception as e:
-            logger.warning(
-                "Erro ao acessar arquivo local do PDF da NFS-e para invoice %s: %s",
-                invoice.invoice_number,
-                e,
-            )
-
-    # 2. If not present locally, fetch via provider
-    from core.nfse.provider_factory import get_provider
-    from django.core.files.base import ContentFile
-
-    try:
-        provider = get_provider(invoice)
-        pdf_bytes = provider.baixar_pdf(invoice)
-        if pdf_bytes:
-            nf.danfse_pdf.save(f"NFSe_{nf.nf_number}.pdf", ContentFile(pdf_bytes))
-            return FileResponse(
-                nf.danfse_pdf.open("rb"),
-                content_type="application/pdf",
-                as_attachment=False,
-                filename=f"NFSe_{nf.nf_number}.pdf",
-            )
-    except Exception as e:
-        logger.error(
-            "Erro ao buscar PDF da NFS-e junto ao provedor para invoice %s: %s",
-            invoice.invoice_number,
-            e,
-        )
-
-    messages.warning(
-        request,
-        "O PDF da NFS-e ainda não está disponível para visualização ou download.",
-    )
-    return redirect("invoice_detail", pk=invoice.id)
 
 
 @login_required
@@ -867,6 +824,20 @@ def nfse_detail(request, pk):
 
 @login_required
 @require_POST
+def nfse_refresh(request, pk):
+    from core.services.nfse_services import sync_nota_fiscal
+
+    nf = get_object_or_404(NotaFiscal, pk=pk)
+    success, msg = sync_nota_fiscal(nf)
+    if success:
+        messages.success(request, msg)
+    else:
+        messages.error(request, msg)
+    return redirect("nfse_detail", pk=pk)
+
+
+@login_required
+@require_POST
 def nfse_link_invoice(request, pk):
     nf = get_object_or_404(NotaFiscal, pk=pk)
     invoice_id = request.POST.get("invoice_id")
@@ -924,7 +895,7 @@ def nfse_cancel(request, pk):
 
 
 @login_required
-def nfse_download_pdf(request, pk):
+def nfse_download_pdf(request, pk, redirect_view="nfse_detail"):
     nf = get_object_or_404(NotaFiscal, pk=pk)
 
     if nf.danfse_pdf:
@@ -942,17 +913,21 @@ def nfse_download_pdf(request, pk):
     from core.nfse.provider_factory import get_provider
     from django.core.files.base import ContentFile
 
-    class DummyInvoice:
-        def __init__(self, nota_fiscal):
-            self.nota_fiscal = nota_fiscal
+    target = getattr(nf, "invoice", None)
+    if not target:
+        class DummyInvoice:
+            def __init__(self, nota_fiscal):
+                self.nota_fiscal = nota_fiscal
 
-    dummy = DummyInvoice(nf)
+        target = DummyInvoice(nf)
 
     try:
-        provider = get_provider(dummy)
-        pdf_bytes = provider.baixar_pdf(dummy)
+        provider = get_provider(target)
+        pdf_bytes = provider.baixar_pdf(target)
+
         if pdf_bytes:
-            nf.danfse_pdf.save(f"NFSe_{nf.nf_number}.pdf", ContentFile(pdf_bytes))
+            nf.danfse_pdf.save(f"NFSe_{nf.nf_number}.pdf", ContentFile(pdf_bytes), save=False)
+            nf.save(update_fields=["danfse_pdf", "updated_at"])
             return FileResponse(
                 nf.danfse_pdf.open("rb"),
                 content_type="application/pdf",
@@ -970,7 +945,50 @@ def nfse_download_pdf(request, pk):
         request,
         "O PDF da NFS-e ainda não está disponível para visualização ou download.",
     )
+    if redirect_view == "invoice_detail" and nf.invoice_id:
+        return redirect("invoice_detail", pk=nf.invoice_id)
     return redirect("nfse_detail", pk=pk)
+
+
+
+@login_required
+def nfse_download_xml(request, pk):
+    nf = get_object_or_404(NotaFiscal, pk=pk)
+
+    if nf.xml_autorizacao:
+        try:
+            if nf.xml_autorizacao.storage.exists(nf.xml_autorizacao.name):
+                return FileResponse(
+                    nf.xml_autorizacao.open("rb"),
+                    content_type="application/xml",
+                    as_attachment=False,
+                    filename=f"NFSe_{nf.nf_number}.xml",
+                )
+        except Exception as e:
+            logger.warning("Erro ao acessar XML local da NFS-e %s: %s", nf.nf_number, e)
+
+    from core.services.nfse_services import sync_nota_fiscal
+
+    sync_nota_fiscal(nf)
+    nf.refresh_from_db()
+
+    if nf.xml_autorizacao:
+        try:
+            return FileResponse(
+                nf.xml_autorizacao.open("rb"),
+                content_type="application/xml",
+                as_attachment=False,
+                filename=f"NFSe_{nf.nf_number}.xml",
+            )
+        except Exception as e:
+            logger.error("Erro ao servir XML da NFS-e %s: %s", nf.nf_number, e)
+
+    messages.warning(
+        request,
+        "O XML da NFS-e ainda não está disponível para visualização ou download.",
+    )
+    return redirect("nfse_detail", pk=pk)
+
 
 
 @login_required

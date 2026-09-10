@@ -278,22 +278,7 @@ def import_nfses(
     from django.core.files.base import ContentFile
     from django.db import transaction
     from decimal import Decimal
-    import time
-
-    class RateLimiter:
-        def __init__(self, max_per_second: float = 4.0):
-            self.max_per_second = max_per_second
-            self.interval = 1.0 / max_per_second if max_per_second > 0 else 0.0
-            self.last_call = 0.0
-
-        def wait(self):
-            if self.interval <= 0:
-                return
-            now = time.monotonic()
-            elapsed = now - self.last_call
-            if elapsed < self.interval:
-                time.sleep(self.interval - elapsed)
-            self.last_call = time.monotonic()
+    from core.utils.rate_limiter import RateLimiter
 
     company = CompanySettings.load()
     if not provider_type:
@@ -483,7 +468,10 @@ def fetch_and_save_nfse_pdf(invoice_or_nf, provider, force=False):
         target = invoice_or_nf
     else:
         nf = invoice_or_nf
-        target = invoice_or_nf
+        class DummyInvoice:
+            def __init__(self, nota_fiscal):
+                self.nota_fiscal = nota_fiscal
+        target = DummyInvoice(nf)
 
     if not nf:
         return None
@@ -492,5 +480,109 @@ def fetch_and_save_nfse_pdf(invoice_or_nf, provider, force=False):
     if pdf_bytes:
         if force and nf.danfse_pdf:
             nf.danfse_pdf.delete(save=False)
-        nf.danfse_pdf.save(f"NFS-e_{nf.nf_number}.pdf", ContentFile(pdf_bytes))
+        nf.danfse_pdf.save(f"NFS-e_{nf.nf_number}.pdf", ContentFile(pdf_bytes), save=False)
+        nf.save(update_fields=["danfse_pdf", "updated_at"])
     return pdf_bytes
+
+
+
+def sync_nota_fiscal(nf) -> tuple[bool, str]:
+    """
+    Sincroniza os dados de uma NFS-e local com o provedor/prefeitura.
+    Atualiza status (inclusive cancelamento externo), metadados fiscais,
+    XML de autorização e, se cancelada, atualiza o status da Invoice associada.
+    """
+    from core.nfse.provider_factory import get_provider
+    from django.core.files.base import ContentFile
+    from django.utils import timezone
+    from decimal import Decimal
+
+    provider = get_provider(nf)
+
+    # 1. Consulta dados atualizados na prefeitura
+    try:
+        r = None
+        if nf.provider_type == "PAULISTANA":
+            if nf.nf_number:
+                r = provider.buscar_nfse_por_numero(nf.nf_number)
+        elif nf.provider_type == "NACIONAL":
+            if nf.chave_acesso_nacional:
+                r = provider.buscar_nfse_por_chave(nf.chave_acesso_nacional)
+            elif nf.nf_number:
+                r = provider.buscar_nfse_por_numero(nf.nf_number)
+        else:
+            if nf.nf_number:
+                r = provider.buscar_nfse_por_numero(nf.nf_number)
+            elif nf.chave_acesso_nacional:
+                r = provider.buscar_nfse_por_chave(nf.chave_acesso_nacional)
+    except Exception as ex:
+        logger.exception("Erro ao consultar NFS-e %s junto ao provedor: %s", nf.nf_number, ex)
+        return False, f"Erro ao consultar o provedor: {ex}"
+
+    if not r:
+        return False, f"NFS-e {nf.nf_number} não encontrada junto ao provedor."
+
+    # 2. Atualizar campos cadastrais e fiscais
+    was_canceled_before = nf.is_canceled
+    now_canceled = r.get("is_canceled", False)
+
+    if r.get("verification_code"):
+        nf.verification_code = r["verification_code"]
+    if r.get("chave_acesso_nacional"):
+        nf.chave_acesso_nacional = r["chave_acesso_nacional"]
+    if r.get("amount_brl"):
+        try:
+            nf.amount_brl = Decimal(str(r["amount_brl"]))
+        except Exception:
+            pass
+    if r.get("description"):
+        nf.description = r["description"]
+    if r.get("issue_date"):
+        nf.issue_date = r["issue_date"]
+    if r.get("data_hora_autorizacao"):
+        nf.data_hora_autorizacao = r["data_hora_autorizacao"]
+    if r.get("codigo_servico_municipio"):
+        nf.codigo_servico_municipio = r["codigo_servico_municipio"]
+    if r.get("codigo_tributacao_nacional"):
+        nf.codigo_tributacao_nacional = r["codigo_tributacao_nacional"]
+    if r.get("codigo_nbs"):
+        nf.codigo_nbs = r["codigo_nbs"]
+    if r.get("aliquota_iss") is not None:
+        nf.aliquota_iss = r["aliquota_iss"]
+    if r.get("valor_iss") is not None:
+        nf.valor_iss = r["valor_iss"]
+
+    # 3. Tratamento de cancelamento
+    cancellation_detected = False
+    if now_canceled:
+        nf.is_canceled = True
+        nf.cancelation_date = r.get("cancelation_date") or nf.cancelation_date or timezone.now()
+        if not was_canceled_before:
+            cancellation_detected = True
+
+        # Se houver Invoice vinculada, sincronizar seu status para CANCELED
+        if nf.invoice and nf.invoice.status != "CANCELED":
+            nf.invoice.status = "CANCELED"
+            nf.invoice.save(update_fields=["status", "updated_at"])
+
+    # 4. Atualizar XML se presente
+    if r.get("raw_xml"):
+        nf.xml_autorizacao.save(
+            f"NFSe_{nf.nf_number}.xml",
+            ContentFile(r["raw_xml"].encode("utf-8")),
+            save=False,
+        )
+
+    # 5. Salvar NotaFiscal
+    nf.save()
+
+    # 6. Se cancelamento acabou de ser detectado, tentar atualizar PDF
+    if cancellation_detected:
+        try:
+            fetch_and_save_nfse_pdf(nf, provider, force=True)
+        except Exception as ex:
+            logger.warning("Falha ao atualizar PDF da NFS-e cancelada: %s", ex)
+
+        return True, f"NFS-e {nf.nf_number} sincronizada com sucesso: identificada como CANCELADA na prefeitura."
+
+    return True, f"NFS-e {nf.nf_number} sincronizada com sucesso com o provedor."

@@ -20,6 +20,8 @@ def get_provider(
     if not selected_type and invoice_or_nf is not None:
         if isinstance(invoice_or_nf, NotaFiscal):
             selected_type = invoice_or_nf.provider_type
+        elif hasattr(invoice_or_nf, "nota_fiscal") and invoice_or_nf.nota_fiscal:
+            selected_type = invoice_or_nf.nota_fiscal.provider_type
         elif isinstance(invoice_or_nf, Invoice):
             selected_type = invoice_or_nf.nfse_provider_type
 
