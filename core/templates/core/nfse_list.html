@@ -187,22 +187,14 @@
                         </select>
                     </div>
 
-                    <div id="paulistanaInputs">
-                        <div class="mb-3">
-                            <label for="start_date" class="form-label">Data Início</label>
-                            <input type="date" class="form-control" id="start_date" name="start_date" min="{{ opening_date }}" max="{{ today }}" value="{{ today }}">
-                        </div>
-                        <div class="mb-3">
-                            <label for="end_date" class="form-label">Data Fim</label>
-                            <input type="date" class="form-control" id="end_date" name="end_date" min="{{ opening_date }}" max="{{ today }}" value="{{ today }}">
-                        </div>
+                    <div id="paulistanaInputs" class="alert alert-info py-2 px-3 mb-0 small">
+                        <i class="bi bi-info-circle me-1"></i>
+                        A importação consultará a prefeitura sequencialmente por número de nota fiscal, importando todas as novas notas emitidas e preenchendo eventuais lacunas não cadastradas localmente.
                     </div>
 
-                    <div id="nacionalInputs" style="display: none;">
-                        <div class="mb-3">
-                            <label for="chave_acesso" class="form-label">Chave de Acesso Nacional</label>
-                            <input type="text" class="form-control" id="chave_acesso" name="chave_acesso" placeholder="Ex: 35231012345678000199...">
-                        </div>
+                    <div id="nacionalInputs" class="alert alert-warning py-2 px-3 mb-0 small" style="display: none;">
+                        <i class="bi bi-exclamation-triangle me-1"></i>
+                        A importação automática por número para o Sefin Nacional está temporariamente em desenvolvimento.
                     </div>
                 </div>
                 <div class="modal-footer">

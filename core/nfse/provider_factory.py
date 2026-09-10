@@ -24,7 +24,7 @@ def get_provider(
             selected_type = invoice_or_nf.nfse_provider_type
 
     if not selected_type:
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         selected_type = company.nfse_provider if company else "PAULISTANA"
 
     if selected_type == "NACIONAL":

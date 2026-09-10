@@ -54,7 +54,7 @@ def apply_invoice_macros(text, invoice, language="en"):
     from core.models import CompanySettings
     import re
 
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
     if company and company.cnpj:
         v = re.sub(r"[^0-9a-zA-Z]", "", company.cnpj)
         if len(v) == 14:

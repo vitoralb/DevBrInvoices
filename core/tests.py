@@ -1356,3 +1356,180 @@ class NfseCancelRestrictionTests(TestCase):
         )
         invoice.refresh_from_db()
         self.assertEqual(invoice.status, "FINALIZED")
+
+    @patch("core.nfse.paulistana.client.NFeClient._enviar_soap")
+    @patch("core.nfse.paulistana.client.assinar_xml")
+    def test_paulistana_client_consultar_nfe(self, mock_sign, mock_soap):
+        from core.nfse.paulistana.client import NFeClient
+        from unittest.mock import MagicMock
+
+        mock_sign.side_effect = lambda root, k, c: root
+        mock_soap.return_value = "<xml/>"
+
+        client = NFeClient(b"cert", b"key", "12345678000199", "12345678")
+
+        mock_retorno_sucesso = MagicMock()
+        mock_retorno_sucesso.cabecalho.sucesso = True
+        mock_nfe = MagicMock()
+        mock_nfe.chave_nfe.numero_nfe = "10"
+        mock_nfe.chave_nfe.codigo_verificacao = "ABCDEFGH"
+        mock_retorno_sucesso.nfe = [mock_nfe]
+
+        with patch.object(
+            client.parser, "from_string", return_value=mock_retorno_sucesso
+        ):
+            notas, raw_xml = client.consultar_nfe(10)
+            self.assertEqual(len(notas), 1)
+            self.assertEqual(str(notas[0].chave_nfe.numero_nfe), "10")
+            self.assertEqual(str(notas[0].chave_nfe.codigo_verificacao), "ABCDEFGH")
+
+        # Teste quando nota não é encontrada (alerta 1106)
+        mock_retorno_inexistente = MagicMock()
+        mock_retorno_inexistente.cabecalho.sucesso = True
+        mock_retorno_inexistente.nfe = []
+        mock_retorno_inexistente.erro = []
+        mock_alerta = MagicMock()
+        mock_alerta.codigo = "1106"
+        mock_alerta.descricao = "NFS-e não encontrada."
+        mock_retorno_inexistente.alerta = [mock_alerta]
+
+        with patch.object(
+            client.parser, "from_string", return_value=mock_retorno_inexistente
+        ):
+            notas_vazias, raw_empty = client.consultar_nfe(11)
+            self.assertEqual(len(notas_vazias), 0)
+
+    def test_rate_limiter(self):
+        from scripts.consultar_nfse_paulistana import RateLimiter
+        import time
+
+        limiter = RateLimiter(max_per_second=10.0)  # 10 req/s => 0.1s intervalo
+        t0 = time.monotonic()
+        for _ in range(3):
+            limiter.wait()
+        duracao = time.monotonic() - t0
+        self.assertGreaterEqual(duracao, 0.18)
+
+    @patch("core.nfse.paulistana.client.NFeClient.consultar_nfe")
+    def test_paulistana_provider_buscar_nfse_por_numero(self, mock_consultar):
+        from core.nfse.paulistana.provider import PaulistanaProvider
+        from unittest.mock import MagicMock
+
+        mock_nfe = MagicMock()
+        mock_nfe.chave_nfe.numero_nfe = "10"
+        mock_nfe.chave_nfe.codigo_verificacao = "ABCDEFGH"
+        mock_nfe.chave_nfe.chave_nota_nacional = "12345"
+        mock_nfe.valor_servicos = "250.00"
+        mock_nfe.discriminacao = "Serviços de TI"
+        mock_nfe.data_emissao_nfe = date(2026, 9, 1)
+        mock_nfe.status_nfe = "N"
+        mock_nfe.data_cancelamento = None
+        mock_nfe.codigo_servico = "2668"
+        mock_nfe.aliquota_servicos = "2.00"
+        mock_nfe.valor_iss = "5.00"
+
+        mock_consultar.side_effect = lambda num: (
+            ([mock_nfe], "<xml/>") if str(num) == "10" else ([], "<xml/>")
+        )
+
+        self.company.pfx_cert_pem = b"fake-cert"
+        self.company.pfx_key_pem = b"fake-key"
+        self.company.save()
+
+        with patch("core.nfse.paulistana.provider.to_xml", return_value="<xml/>"):
+            provider = PaulistanaProvider()
+            res = provider.buscar_nfse_por_numero(10)
+            self.assertIsNotNone(res)
+            self.assertEqual(res["nf_number"], "10")
+            self.assertEqual(res["verification_code"], "ABCDEFGH")
+            self.assertEqual(res["amount_brl"], "250.00")
+            self.assertFalse(res["is_canceled"])
+
+            res_none = provider.buscar_nfse_por_numero(11)
+            self.assertIsNone(res_none)
+
+    def test_nacional_provider_buscar_nfse_por_numero_stub(self):
+        from core.nfse.nacional.provider import NacionalProvider
+
+        provider = NacionalProvider()
+        self.assertIsNone(provider.buscar_nfse_por_numero(1))
+
+    @patch("core.nfse.paulistana.provider.PaulistanaProvider.buscar_nfse_por_numero")
+    def test_import_nfses_empty_db(self, mock_buscar):
+        from core.services.nfse_services import import_nfses
+        from core.models import NotaFiscal
+
+        NotaFiscal.objects.all().delete()
+
+        def fake_buscar(num):
+            if num in (1, 2):
+                return {
+                    "nf_number": str(num),
+                    "verification_code": f"COD{num}",
+                    "chave_acesso_nacional": f"CHAVE{num}",
+                    "amount_brl": "100.00",
+                    "description": f"Nota {num}",
+                    "issue_date": date(2026, 9, num),
+                    "is_canceled": False,
+                    "cancelation_date": None,
+                    "raw_xml": "<xml/>",
+                }
+            return None
+
+        mock_buscar.side_effect = fake_buscar
+
+        count, msg = import_nfses("PAULISTANA")
+        self.assertEqual(count, 2)
+        self.assertTrue(NotaFiscal.objects.filter(nf_number="1").exists())
+        self.assertTrue(NotaFiscal.objects.filter(nf_number="2").exists())
+        self.assertFalse(NotaFiscal.objects.filter(nf_number="3").exists())
+
+    @patch("core.nfse.paulistana.provider.PaulistanaProvider.buscar_nfse_por_numero")
+    def test_import_nfses_with_holes_and_newer(self, mock_buscar):
+        from core.services.nfse_services import import_nfses
+        from core.models import NotaFiscal
+
+        NotaFiscal.objects.all().delete()
+        # Seed notas 2, 4 e 5 (buracos são 1 e 3)
+        for num in (2, 4, 5):
+            NotaFiscal.objects.create(
+                nf_number=str(num),
+                verification_code=f"COD{num}",
+                amount_brl=Decimal("100.00"),
+                description=f"Nota {num}",
+                issue_date=date(2026, 9, 1),
+            )
+
+        def fake_buscar(num):
+            # Buracos 1 e 3 existem na prefeitura; 6 existe; 7 retorna None (fim)
+            if num in (1, 3, 6):
+                return {
+                    "nf_number": str(num),
+                    "verification_code": f"COD{num}",
+                    "chave_acesso_nacional": f"CHAVE{num}",
+                    "amount_brl": "150.00",
+                    "description": f"Nota {num}",
+                    "issue_date": date(2026, 9, 2),
+                    "is_canceled": False,
+                    "cancelation_date": None,
+                    "raw_xml": "<xml/>",
+                }
+            return None
+
+        mock_buscar.side_effect = fake_buscar
+
+        count, msg = import_nfses("PAULISTANA")
+        # Deve ter importado 3 notas: 1 e 3 (buracos) + 6 (nova)
+        self.assertEqual(count, 3)
+        self.assertTrue(NotaFiscal.objects.filter(nf_number="1").exists())
+        self.assertTrue(NotaFiscal.objects.filter(nf_number="3").exists())
+        self.assertTrue(NotaFiscal.objects.filter(nf_number="6").exists())
+        self.assertFalse(NotaFiscal.objects.filter(nf_number="7").exists())
+        self.assertEqual(NotaFiscal.objects.count(), 6)
+
+    def test_import_nfses_nacional_stub(self):
+        from core.services.nfse_services import import_nfses
+
+        count, msg = import_nfses("NACIONAL")
+        self.assertEqual(count, 0)
+        self.assertIn("não está disponível", msg)

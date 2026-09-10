@@ -29,7 +29,7 @@ def issue_nfse_task(
     self, invoice_id, exchange_rate, send_to_company=False, send_to_client=False
 ):
     invoice = Invoice.objects.get(id=invoice_id)
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
 
     # Save exchange rate
     invoice.exchange_rate_to_brl = Decimal(str(exchange_rate))
@@ -229,13 +229,11 @@ def fetch_nfse_pdf_task(self, invoice_id=None, nf_id=None, force=False):
 
 
 @shared_task(bind=True)
-def import_nfses_task(
-    self, provider_type, start_date=None, end_date=None, chave_acesso=None
-):
+def import_nfses_task(self, provider_type=None, *args, **kwargs):
     from core.services import import_nfses
 
     try:
-        count, msg = import_nfses(provider_type, start_date, end_date, chave_acesso)
+        count, msg = import_nfses(provider_type)
         return {"count": count, "message": msg}
     except Exception as e:
         logger.exception("Error in import_nfses_task: %s", e)

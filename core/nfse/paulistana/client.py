@@ -248,6 +248,79 @@ class NFeClient:
 
             return retorno_node[0].text
 
+    def consultar_nfe(
+        self,
+        numeros_nfe: int | str | List[int | str],
+    ) -> Tuple[List, str]:
+        """
+        Consulta NFS-e específicas pelo número utilizando a operação ConsultaNFe.
+        Aceita um único número (int ou str) ou uma lista com até 50 números.
+        Retorna (lista_de_notas, xml_retorno).
+        Se a nota não existir (retorno com alerta 1106), retorna lista vazia.
+        """
+        from core.nfse.paulistana.schemas.pedido_consulta_nfe_v02 import (
+            PedidoConsultaNfe,
+        )
+        from core.nfse.paulistana.schemas.tipos_nfe_v02 import TpChaveNfe, TpCpfcnpj
+
+        if isinstance(numeros_nfe, (int, str)):
+            lista_numeros = [str(numeros_nfe)]
+        else:
+            lista_numeros = [str(n) for n in numeros_nfe]
+
+        if not lista_numeros:
+            return [], ""
+
+        if len(lista_numeros) > 50:
+            raise ValueError(
+                "O limite máximo para ConsultaNFe é de 50 documentos por requisição."
+            )
+
+        detalhes = [
+            PedidoConsultaNfe.Detalhe(
+                chave_nfe=TpChaveNfe(
+                    inscricao_prestador=self.inscricao_municipal,
+                    numero_nfe=str(num),
+                )
+            )
+            for num in lista_numeros
+        ]
+
+        pedido = PedidoConsultaNfe(
+            cabecalho=PedidoConsultaNfe.Cabecalho(
+                versao="2",
+                cpfcnpjremetente=TpCpfcnpj(cnpj=self.cnpj),
+            ),
+            detalhe=detalhes,
+            signature=None,
+        )
+
+        xml_str = self.serializer.render(pedido)
+        root = etree.fromstring(xml_str.encode("utf-8"), parser=SAFE_PARSER)
+        signed_xml = assinar_xml(root, self.key_pem, self.cert_pem)
+        signed_xml_str = etree.tostring(signed_xml, encoding="utf-8").decode("utf-8")
+
+        retorno_xml_str = self._enviar_soap(
+            signed_xml_str, "ConsultaNFeRequest", versao_schema="2"
+        )
+        retorno: RetornoConsulta = self.parser.from_string(
+            retorno_xml_str, RetornoConsulta
+        )
+
+        if not retorno.cabecalho.sucesso:
+            if retorno.erro and all(str(e.codigo) == "1106" for e in retorno.erro):
+                return [], retorno_xml_str
+            erros = (
+                " | ".join(f"{e.codigo} - {e.descricao}" for e in retorno.erro)
+                if retorno.erro
+                else "Erro desconhecido na consulta."
+            )
+            raise NFSeProviderError(
+                f"Erro na consulta de NFS-e: {erros}", raw_response=retorno_xml_str
+            )
+
+        return retorno.nfe, retorno_xml_str
+
     def consultar_nfe_emitidas(
         self, dt_inicio: datetime.date, dt_fim: datetime.date, pagina: int = 1
     ):

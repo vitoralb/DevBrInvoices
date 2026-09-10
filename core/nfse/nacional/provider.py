@@ -103,7 +103,7 @@ class NacionalProvider(NFSeProvider):
 
     def _get_cert_pems(self) -> Tuple[bytes, bytes]:
 
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         if not company or not company.pfx_cert_pem or not company.pfx_key_pem:
             raise Exception(
                 "Certificado digital não configurado. Por favor, faça o upload na página Sua Empresa."
@@ -443,7 +443,7 @@ class NacionalProvider(NFSeProvider):
         """Checks if the DPS for this invoice was already issued in Sefin Nacional."""
         if not invoice.document_number:
             return None
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         if not company:
             return None
 
@@ -461,7 +461,7 @@ class NacionalProvider(NFSeProvider):
             return self._consultar_dps(id_dps, base_url, temp_cert_path)
 
     def emitir_nfse(self, invoice: Invoice) -> EmitResult:
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         if not company:
             raise ValueError("CompanySettings not found.")
 
@@ -633,7 +633,7 @@ class NacionalProvider(NFSeProvider):
                 )
 
     def baixar_pdf(self, invoice: Invoice) -> Optional[bytes]:
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         if not company:
             return None
 
@@ -672,7 +672,7 @@ class NacionalProvider(NFSeProvider):
                 return None
 
     def cancelar_nfse(self, invoice: Invoice) -> CancelResult:
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         if not company:
             return CancelResult(sucesso=False, erros=["CompanySettings not found."])
 
@@ -820,13 +820,12 @@ class NacionalProvider(NFSeProvider):
                     erros=err_list,
                 )
 
-    def buscar_nfses_por_periodo(self, start_date, end_date) -> list:
-        raise NotImplementedError(
-            "Busca por período não suportada na API REST do Sefin Nacional."
-        )
+    def buscar_nfse_por_numero(self, numero: str | int) -> Optional[dict]:
+        """Stub: busca de NFS-e por número não implementada no momento para Nacional."""
+        return None
 
     def buscar_nfse_por_chave(self, chave_acesso: str) -> Optional[dict]:
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         if not company:
             return None
 

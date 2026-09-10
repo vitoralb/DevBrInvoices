@@ -33,7 +33,7 @@ class PaulistanaProvider(NFSeProvider):
         return NFeClient(company.pfx_cert_pem, company.pfx_key_pem, cnpj, im), im
 
     def emitir_nfse(self, invoice: Invoice) -> EmitResult:
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         client, im = self._get_client(company)
         client_obj = invoice.client
 
@@ -277,7 +277,7 @@ class PaulistanaProvider(NFSeProvider):
         """Checks if the RPS for this invoice was already converted into an NFe in São Paulo."""
         if not invoice.document_number:
             return None
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         if not company:
             return None
 
@@ -345,7 +345,7 @@ class PaulistanaProvider(NFSeProvider):
         return None
 
     def cancelar_nfse(self, invoice: Invoice) -> CancelResult:
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         if not company:
             return CancelResult(sucesso=False, erros=["CompanySettings not found."])
 
@@ -437,7 +437,7 @@ class PaulistanaProvider(NFSeProvider):
     def baixar_pdf(self, invoice: Invoice) -> bytes:
         from core.nfse.paulistana.client import download_nfse_pdf
 
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         im = company.inscricao_municipal
 
         nf = getattr(invoice, "nota_fiscal", None)
@@ -451,157 +451,128 @@ class PaulistanaProvider(NFSeProvider):
 
         return download_nfse_pdf(im, nf.nf_number, nf.verification_code)
 
-    def buscar_nfses_por_periodo(self, start_date, end_date) -> list:
-        """Fetch NFS-es dividing period in chunks of max 31 days if needed."""
-        company = CompanySettings.objects.first()
+    def _parse_nfe_to_dict(self, nota) -> dict:
+        """Converts a Paulistana TpNfe object to a standardized dictionary."""
+        chave_nac = (
+            getattr(nota.chave_nfe, "chave_nota_nacional", "")
+            if hasattr(nota, "chave_nfe")
+            else ""
+        )
+        nf_num = str(nota.chave_nfe.numero_nfe) if hasattr(nota, "chave_nfe") else ""
+        cod_ver = (
+            str(nota.chave_nfe.codigo_verificacao) if hasattr(nota, "chave_nfe") else ""
+        )
+
+        val = "0.00"
+        if hasattr(nota, "valor_servicos"):
+            val = str(nota.valor_servicos or "0.00")
+        elif hasattr(nota, "valor_nfe"):
+            val = str(nota.valor_nfe or "0.00")
+
+        desc = nota.discriminacao if hasattr(nota, "discriminacao") else ""
+
+        dt_emi = date.today()
+        if hasattr(nota, "data_emissao_nfe") and nota.data_emissao_nfe:
+            try:
+                dt_emi = date(
+                    nota.data_emissao_nfe.year,
+                    nota.data_emissao_nfe.month,
+                    nota.data_emissao_nfe.day,
+                )
+            except Exception:
+                pass
+        elif hasattr(nota, "data_emissao") and nota.data_emissao:
+            try:
+                dt_emi = date(
+                    nota.data_emissao.year,
+                    nota.data_emissao.month,
+                    nota.data_emissao.day,
+                )
+            except Exception:
+                pass
+
+        is_canceled = False
+        if hasattr(nota, "status_nfe"):
+            status_val = getattr(nota.status_nfe, "value", str(nota.status_nfe))
+            if status_val == "C":
+                is_canceled = True
+
+        cancelation_date = None
+        data_cancel = getattr(nota, "data_cancelamento", None)
+        if data_cancel:
+            from django.utils import timezone
+
+            cancelation_date = timezone.make_aware(
+                datetime.datetime(
+                    data_cancel.year,
+                    data_cancel.month,
+                    data_cancel.day,
+                    getattr(data_cancel, "hour", 0),
+                    getattr(data_cancel, "minute", 0),
+                    getattr(data_cancel, "second", 0),
+                )
+            )
+
+        data_hora = getattr(nota, "data_emissao_nfe", None)
+        if data_hora:
+            from django.utils import timezone
+
+            data_hora = timezone.make_aware(
+                datetime.datetime(
+                    data_hora.year,
+                    data_hora.month,
+                    data_hora.day,
+                    getattr(data_hora, "hour", 0),
+                    getattr(data_hora, "minute", 0),
+                    getattr(data_hora, "second", 0),
+                )
+            )
+
+        aliquota_iss_val = getattr(nota, "aliquota_servicos", None)
+        valor_iss_val = getattr(nota, "valor_iss", None)
+
+        def _safe_dec(v):
+            if v is None:
+                return None
+            s = str(v).strip().replace(",", ".")
+            if not s:
+                return None
+            try:
+                return Decimal(s)
+            except Exception:
+                return None
+
+        return {
+            "nf_number": nf_num,
+            "verification_code": cod_ver,
+            "chave_acesso_nacional": chave_nac,
+            "amount_brl": val,
+            "description": desc,
+            "issue_date": dt_emi,
+            "provider": "PAULISTANA",
+            "is_canceled": is_canceled,
+            "cancelation_date": cancelation_date,
+            "raw_xml": to_xml(nota),
+            "data_hora_autorizacao": data_hora,
+            "codigo_servico_municipio": getattr(nota, "codigo_servico", ""),
+            "aliquota_iss": _safe_dec(aliquota_iss_val),
+            "valor_iss": _safe_dec(valor_iss_val),
+        }
+
+    def buscar_nfse_por_numero(self, numero: str | int) -> Optional[dict]:
+        """Fetches a specific NFS-e by number using ConsultaNFe."""
+        company = CompanySettings.load()
         if not company:
-            return []
+            return None
 
         client, _ = self._get_client(company)
-        resultados = []
+        notas, raw_xml = client.consultar_nfe(numero)
+        if not notas:
+            return None
 
-        current_start = start_date
-        while current_start <= end_date:
-            current_end = min(current_start + timedelta(days=30), end_date)
-            try:
-                # The Paulistana API returns parsed objects
-                notas = client.consultar_nfe_emitidas(
-                    dt_inicio=current_start, dt_fim=current_end
-                )
-                if notas:
-                    for nota in notas:
-                        # Extract basic info into dict
-                        chave_nac = (
-                            getattr(nota.chave_nfe, "chave_nota_nacional", "")
-                            if hasattr(nota, "chave_nfe")
-                            else ""
-                        )
-                        nf_num = (
-                            str(nota.chave_nfe.numero_nfe)
-                            if hasattr(nota, "chave_nfe")
-                            else ""
-                        )
-                        cod_ver = (
-                            str(nota.chave_nfe.codigo_verificacao)
-                            if hasattr(nota, "chave_nfe")
-                            else ""
-                        )
-
-                        val = "0.00"
-                        if hasattr(nota, "valor_servicos"):
-                            val = nota.valor_servicos
-                        elif hasattr(nota, "valor_nfe"):
-                            val = nota.valor_nfe
-
-                        desc = (
-                            nota.discriminacao if hasattr(nota, "discriminacao") else ""
-                        )
-
-                        # Date
-                        if hasattr(nota, "data_emissao_nfe") and nota.data_emissao_nfe:
-                            try:
-                                dt_emi = date(
-                                    nota.data_emissao_nfe.year,
-                                    nota.data_emissao_nfe.month,
-                                    nota.data_emissao_nfe.day,
-                                )
-                            except:
-                                dt_emi = current_start
-                        elif hasattr(nota, "data_emissao") and nota.data_emissao:
-                            try:
-                                dt_emi = date(
-                                    nota.data_emissao.year,
-                                    nota.data_emissao.month,
-                                    nota.data_emissao.day,
-                                )
-                            except:
-                                dt_emi = current_start
-                        else:
-                            dt_emi = current_start
-
-                        is_canceled = False
-                        if hasattr(nota, "status_nfe"):
-                            status_val = getattr(
-                                nota.status_nfe, "value", str(nota.status_nfe)
-                            )
-                            if status_val == "C":
-                                is_canceled = True
-
-                        cancelation_date = None
-                        data_cancel = getattr(nota, "data_cancelamento", None)
-                        if data_cancel:
-                            from django.utils import timezone
-
-                            cancelation_date = timezone.make_aware(
-                                datetime.datetime(
-                                    data_cancel.year,
-                                    data_cancel.month,
-                                    data_cancel.day,
-                                    data_cancel.hour,
-                                    data_cancel.minute,
-                                    data_cancel.second,
-                                )
-                            )
-
-                        data_hora = getattr(nota, "data_emissao_nfe", None)
-                        if data_hora:
-                            from django.utils import timezone
-
-                            data_hora = timezone.make_aware(
-                                datetime.datetime(
-                                    data_hora.year,
-                                    data_hora.month,
-                                    data_hora.day,
-                                    data_hora.hour,
-                                    data_hora.minute,
-                                    data_hora.second,
-                                )
-                            )
-
-                        aliquota_iss_val = getattr(nota, "aliquota_servicos", None)
-                        valor_iss_val = getattr(nota, "valor_iss", None)
-
-                        def _safe_dec(v):
-                            if v is None:
-                                return None
-                            s = str(v).strip().replace(",", ".")
-                            if not s:
-                                return None
-                            try:
-                                return Decimal(s)
-                            except Exception:
-                                return None
-
-                        resultados.append(
-                            {
-                                "nf_number": nf_num,
-                                "verification_code": cod_ver,
-                                "chave_acesso_nacional": chave_nac,
-                                "amount_brl": val,
-                                "description": desc,
-                                "issue_date": dt_emi,
-                                "provider": "PAULISTANA",
-                                "is_canceled": is_canceled,
-                                "cancelation_date": cancelation_date,
-                                "raw_xml": to_xml(nota),
-                                "data_hora_autorizacao": data_hora,
-                                "codigo_servico_municipio": getattr(
-                                    nota, "codigo_servico", ""
-                                ),
-                                "aliquota_iss": _safe_dec(aliquota_iss_val),
-                                "valor_iss": _safe_dec(valor_iss_val),
-                            }
-                        )
-            except Exception as e:
-                logger.error(
-                    f"Error fetching paulistana NFS-es from {current_start} to {current_end}: {e}"
-                )
-
-            current_start = current_end + timedelta(days=1)
-
-        return resultados
+        return self._parse_nfe_to_dict(notas[0])
 
     def buscar_nfse_por_chave(self, chave_acesso: str) -> Optional[dict]:
         raise NotImplementedError(
-            "Busca por chave não implementada para Paulistana. Use a busca por período."
+            "Busca por chave não implementada para Paulistana. Use a busca por número."
         )

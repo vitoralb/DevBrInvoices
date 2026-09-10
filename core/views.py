@@ -798,12 +798,9 @@ def nfse_list(request):
 @require_POST
 def nfse_import(request):
     provider = request.POST.get("provider")
-    start_date = request.POST.get("start_date")
-    end_date = request.POST.get("end_date")
-    chave_acesso = request.POST.get("chave_acesso")
 
     # Trigger Celery Task
-    task = import_nfses_task.delay(provider, start_date, end_date, chave_acesso)
+    task = import_nfses_task.delay(provider)
 
     # Return HTMX polling snippet
     return HttpResponse(f"""

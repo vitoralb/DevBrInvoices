@@ -4,7 +4,7 @@ from django.conf import settings
 
 def company_settings(request):
     try:
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         return {"company": company}
     except Exception:
         return {"company": None}

@@ -58,7 +58,7 @@ def calculate_rbt12_and_fator_r(target_month_year):
     For < 12 months of operation, uses the proportional annualization formula.
     For the very first month, uses current month's values × 12.
     """
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
     if not company:
         raise ValueError("Company settings not configured.")
 
@@ -165,7 +165,7 @@ def calculate_ideal_pro_labore(target_month, estimated_current_revenue=None):
     So we need: (sum_payroll_trailing_11 + current_month_pl) / (sum_revenue_trailing_11 + current_month_rev) >= 0.28
     Solving: ideal_pl = 0.28 * (sum_rev_11 + current_rev) - sum_payroll_11
     """
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
     if not company:
         raise ValueError("Company settings not configured.")
 

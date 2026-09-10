@@ -26,14 +26,14 @@ def _format_from_email(sender_name: str) -> str:
 
 def _get_pdf_bytes_for_task(invoice_id):
     invoice = Invoice.objects.get(id=invoice_id)
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
     return generate_pdf_bytes(invoice, company)
 
 
 @shared_task
 def finalize_invoice_task(invoice_id, send_to_client=False, send_to_company=False):
     invoice = Invoice.objects.get(id=invoice_id)
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
 
     invoice.status = "FINALIZED"
     invoice.task_id = ""
@@ -104,7 +104,7 @@ def cancel_invoice_task(self, invoice_id):
                 invoice.save()
 
                 # Send failure email
-                company = CompanySettings.objects.first()
+                company = CompanySettings.load()
                 if company and company.email:
                     short_company_name = " ".join(company.company_name.split()[:3])
                     sender_name = f"{short_company_name} System"
@@ -157,7 +157,7 @@ def email_invoice_task(
     self, invoice_id, send_to_company=False, send_to_client=False, include_nfse=False
 ):
     invoice = Invoice.objects.get(id=invoice_id)
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
 
     if not company:
         return "Company settings not configured."
@@ -254,7 +254,7 @@ def email_invoice_task(
 
 @shared_task
 def process_daily_invoices_task(force=False):
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
     if not company:
         return "Company settings not configured."
     if not company.auto_finalize_invoices and not force:

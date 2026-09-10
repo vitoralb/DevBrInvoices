@@ -147,7 +147,7 @@ def audit_consolidations():
         "total_fixed": 0,
     }
 
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
     if not company:
         return findings
 

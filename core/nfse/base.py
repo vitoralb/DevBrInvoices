@@ -73,10 +73,8 @@ class NFSeProvider(ABC):
         pass
 
     @abstractmethod
-    def buscar_nfses_por_periodo(
-        self, start_date: "datetime.date", end_date: "datetime.date"
-    ) -> List[dict]:
-        """Fetches NFS-es emitted in a period, handling provider pagination/chunking if needed."""
+    def buscar_nfse_por_numero(self, numero: str | int) -> Optional[dict]:
+        """Fetches a specific NFS-e by its number."""
         pass
 
     @abstractmethod

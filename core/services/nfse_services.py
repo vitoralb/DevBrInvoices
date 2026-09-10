@@ -130,7 +130,7 @@ def enviar_nfe_para_prefeitura(invoice):
     from django.core.files.base import ContentFile
     from core.nfse.provider_factory import get_provider
 
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
     provider = get_provider(invoice)
 
     amount_brl, description, _ = _prepare_nf_data(invoice)
@@ -269,100 +269,152 @@ def consultar_nfe_na_prefeitura(invoice):
     return False
 
 
-def import_nfses(provider_type, start_date=None, end_date=None, chave_acesso=None):
+def import_nfses(
+    provider_type: str = "PAULISTANA",
+):
     from core.nfse.paulistana.provider import PaulistanaProvider
     from core.nfse.nacional.provider import NacionalProvider
-    from core.models import NotaFiscal
+    from core.models import NotaFiscal, CompanySettings
     from django.core.files.base import ContentFile
-    import datetime
+    from django.db import transaction
     from decimal import Decimal
+    import time
 
-    if provider_type == "PAULISTANA":
-        provider = PaulistanaProvider()
-        if not start_date or not end_date:
-            return 0, "Datas de início e fim são obrigatórias para Paulistana."
+    class RateLimiter:
+        def __init__(self, max_per_second: float = 4.0):
+            self.max_per_second = max_per_second
+            self.interval = 1.0 / max_per_second if max_per_second > 0 else 0.0
+            self.last_call = 0.0
 
-        # start_date and end_date are strings, convert to date
-        if isinstance(start_date, str):
-            start_date = datetime.date.fromisoformat(start_date)
-        if isinstance(end_date, str):
-            end_date = datetime.date.fromisoformat(end_date)
+        def wait(self):
+            if self.interval <= 0:
+                return
+            now = time.monotonic()
+            elapsed = now - self.last_call
+            if elapsed < self.interval:
+                time.sleep(self.interval - elapsed)
+            self.last_call = time.monotonic()
 
-        resultados = provider.buscar_nfses_por_periodo(start_date, end_date)
-    elif provider_type == "NACIONAL":
-        provider = NacionalProvider()
-        if not chave_acesso:
-            return 0, "Chave de acesso é obrigatória para Sefin Nacional."
+    company = CompanySettings.load()
+    if not provider_type:
+        provider_type = company.nfse_provider if company else "PAULISTANA"
 
-        res = provider.buscar_nfse_por_chave(chave_acesso)
-        resultados = [res] if res else []
-    else:
-        return 0, "Provedor inválido."
+    if provider_type == "NACIONAL":
+        return (
+            0,
+            "A importação automática de NFS-e por número ainda não está disponível para o provedor Sefin Nacional.",
+        )
+    elif provider_type != "PAULISTANA":
+        return 0, f"Provedor {provider_type} não suportado."
+
+    provider = PaulistanaProvider()
+    limiter = RateLimiter(max_per_second=4.0)
+
+    # Identificar notas já existentes no banco de dados local
+    existing_numbers = set()
+    for nf_str in NotaFiscal.objects.values_list("nf_number", flat=True):
+        if nf_str and nf_str.strip().isdigit():
+            existing_numbers.add(int(nf_str.strip()))
 
     count = 0
-    for r in resultados:
+
+    def _salvar_nota(r: dict) -> bool:
+        nonlocal count
         if not r:
-            continue
+            return False
 
-        nf_num = r["nf_number"]
-        chave = r["chave_acesso_nacional"]
+        nf_num = r.get("nf_number")
+        chave = r.get("chave_acesso_nacional")
+        cod_ver = r.get("verification_code")
 
-        # Check if already exists
-        exists = False
-        if chave:
-            exists = NotaFiscal.objects.filter(chave_acesso_nacional=chave).exists()
-        if not exists and nf_num:
-            # Also check by nf_number + verification_code to be safe
-            cod_ver = r.get("verification_code")
-            q = NotaFiscal.objects.filter(nf_number=nf_num)
-            if cod_ver:
-                q = q.filter(verification_code=cod_ver)
-            exists = q.exists()
+        with transaction.atomic():
+            exists = False
+            if chave:
+                exists = NotaFiscal.objects.filter(chave_acesso_nacional=chave).exists()
+            if not exists and nf_num:
+                q = NotaFiscal.objects.filter(nf_number=nf_num)
+                if cod_ver:
+                    q = q.filter(verification_code=cod_ver)
+                exists = q.exists()
 
-        if not exists:
-            with transaction.atomic():
-                # Re-check inside the transaction to avoid race condition
-                if chave:
-                    exists = NotaFiscal.objects.filter(
-                        chave_acesso_nacional=chave
-                    ).exists()
-                if not exists and nf_num:
-                    cod_ver = r.get("verification_code")
-                    q = NotaFiscal.objects.filter(nf_number=nf_num)
-                    if cod_ver:
-                        q = q.filter(verification_code=cod_ver)
-                    exists = q.exists()
-
-                if not exists:
-                    nf = NotaFiscal(
-                        nf_number=nf_num,
-                        verification_code=r.get("verification_code"),
-                        chave_acesso_nacional=chave,
-                        amount_brl=Decimal(r["amount_brl"]),
-                        description=r["description"],
-                        issue_date=r["issue_date"],
-                        is_canceled=r.get("is_canceled", False),
-                        cancelation_date=r.get("cancelation_date"),
-                        is_export=True,
-                        data_hora_autorizacao=r.get("data_hora_autorizacao"),
-                        codigo_tributacao_nacional=r.get(
-                            "codigo_tributacao_nacional", ""
-                        ),
-                        codigo_nbs=r.get("codigo_nbs", ""),
-                        aliquota_iss=r.get("aliquota_iss"),
-                        valor_iss=r.get("valor_iss"),
-                        codigo_servico_municipio=r.get("codigo_servico_municipio", ""),
+            if not exists:
+                nf = NotaFiscal(
+                    nf_number=nf_num,
+                    verification_code=cod_ver,
+                    chave_acesso_nacional=chave or None,
+                    amount_brl=Decimal(str(r["amount_brl"])),
+                    description=r.get("description", ""),
+                    issue_date=r["issue_date"],
+                    is_canceled=r.get("is_canceled", False),
+                    cancelation_date=r.get("cancelation_date"),
+                    is_export=True,
+                    data_hora_autorizacao=r.get("data_hora_autorizacao"),
+                    codigo_tributacao_nacional=r.get("codigo_tributacao_nacional", ""),
+                    codigo_nbs=r.get("codigo_nbs", ""),
+                    aliquota_iss=r.get("aliquota_iss"),
+                    valor_iss=r.get("valor_iss"),
+                    codigo_servico_municipio=r.get("codigo_servico_municipio", ""),
+                )
+                if r.get("raw_xml"):
+                    nf.xml_autorizacao.save(
+                        f"NFSe_{nf_num}.xml",
+                        ContentFile(r["raw_xml"].encode("utf-8")),
+                        save=False,
                     )
-                    if r.get("raw_xml"):
-                        nf.xml_autorizacao.save(
-                            f"NFSe_{nf_num}.xml",
-                            ContentFile(r["raw_xml"].encode("utf-8")),
-                            save=False,
-                        )
-                    nf.save()
-                    count += 1
+                nf.save()
+                count += 1
+                return True
+            else:
+                # Sincroniza cancelamento se foi cancelada na prefeitura
+                if r.get("is_canceled") and nf_num:
+                    nf_obj = NotaFiscal.objects.filter(nf_number=nf_num).first()
+                    if nf_obj and not nf_obj.is_canceled:
+                        nf_obj.is_canceled = True
+                        nf_obj.cancelation_date = r.get("cancelation_date")
+                        nf_obj.save(update_fields=["is_canceled", "cancelation_date"])
+                return False
 
-    return count, f"Foram importadas {count} NFS-es com sucesso."
+    # 1. Caso haja buracos nas notas já cadastradas (1 até max_num)
+    if existing_numbers:
+        max_num = max(existing_numbers)
+        holes = [i for i in range(1, max_num) if i not in existing_numbers]
+        for h in holes:
+            limiter.wait()
+            try:
+                res = provider.buscar_nfse_por_numero(h)
+                if res:
+                    _salvar_nota(res)
+            except Exception as ex:
+                logger.error(f"Erro ao buscar nota fiscal {h} na prefeitura: {ex}")
+
+        start_newer = max_num + 1
+    else:
+        # Caso não existam notas cadastradas, procurar todas a partir da 1
+        start_newer = 1
+
+    # 2. Procurar notas mais novas a partir de start_newer até encontrar nota inexistente (retorno 0 notas)
+    curr_nfe = start_newer
+    while True:
+        limiter.wait()
+        try:
+            res = provider.buscar_nfse_por_numero(curr_nfe)
+        except Exception as ex:
+            logger.error(f"Erro ao buscar nota fiscal {curr_nfe} na prefeitura: {ex}")
+            break
+
+        if res:
+            _salvar_nota(res)
+            curr_nfe += 1
+        else:
+            # Nota inexistente (0 notas retornadas para X). Encerra busca.
+            break
+
+    if count == 0:
+        return (
+            0,
+            "Nenhuma nova NFS-e encontrada para importação. A base já está atualizada.",
+        )
+    return count, f"Foram importadas {count} NFS-e(s) com sucesso."
 
 
 def cancel_nota_fiscal(invoice):

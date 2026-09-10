@@ -290,7 +290,7 @@ class Invoice(models.Model):
     def nfse_provider_type(self):
         if hasattr(self, "nota_fiscal") and self.nota_fiscal:
             return self.nota_fiscal.provider_type
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         return company.nfse_provider if company else "PAULISTANA"
 
     @property
@@ -440,7 +440,7 @@ class NotaFiscal(models.Model):
             return "PAULISTANA"
         if self.chave_acesso_nacional:
             return "NACIONAL"
-        company = CompanySettings.objects.first()
+        company = CompanySettings.load()
         return company.nfse_provider if company else "PAULISTANA"
 
     def __str__(self):
