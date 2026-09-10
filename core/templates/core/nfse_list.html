@@ -1,56 +1,169 @@
 {% extends 'core/base.html' %}
+{% load humanize %}
 {% block title %}NFS-es - {{ PROJECT_NAME }}{% endblock %}
+
+{% block extra_head %}
+<style>
+.clickable-row {
+    cursor: pointer;
+    transition: background-color 0.15s ease-in-out;
+}
+.clickable-row:hover .row-chevron {
+    color: var(--bs-primary) !important;
+    transform: translateX(2px);
+}
+.row-chevron {
+    transition: transform 0.15s ease-in-out, color 0.15s ease-in-out;
+}
+</style>
+{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4 flex-column flex-sm-row gap-2">
-    <h2>Notas Fiscais de Serviço Eletrônica (NFS-e)</h2>
     <div>
-        <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#importModal">
-            Importar NFS-e
+        <h2 class="mb-0">Notas Fiscais de Serviço Eletrônica (NFS-e)</h2>
+        <div class="text-muted small mt-1">
+            Total de <strong>{{ page_obj.paginator.count }}</strong> nota{{ page_obj.paginator.count|pluralize:" fiscal,s fiscais" }}
+            {% if query %}&bull; filtrado por "<em>{{ query }}</em>"{% endif %}
+        </div>
+    </div>
+    <div>
+        <button type="button" class="btn btn-success d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#importModal">
+            <i class="bi bi-cloud-arrow-down"></i>
+            <span>Importar NFS-e</span>
         </button>
     </div>
 </div>
 
 <div class="card shadow-sm mb-4">
+    <div class="card-header py-3">
+        <div class="row g-2 align-items-center justify-content-between">
+            <div class="col-12 col-sm-7 col-md-5">
+                <form method="GET" action="{% url 'nfse_list' %}">
+                    <div class="input-group input-group-sm">
+                        <span class="input-group-text bg-body-tertiary text-muted border-end-0">
+                            <i class="bi bi-search"></i>
+                        </span>
+                        <input type="text" name="q" value="{{ query }}" class="form-control border-start-0 ps-0" placeholder="Buscar por número, chave ou descrição...">
+                        {% if query %}
+                        <a href="{% url 'nfse_list' %}" class="btn btn-outline-secondary" title="Limpar busca">
+                            <i class="bi bi-x-lg"></i>
+                        </a>
+                        {% endif %}
+                        <button class="btn btn-outline-secondary" type="submit">Buscar</button>
+                    </div>
+                </form>
+            </div>
+        </div>
+    </div>
     <div class="card-body p-0">
         <div class="table-responsive">
-            <table class="table table-hover align-middle mb-0">
+            <table class="table table-hover align-middle mb-0" id="nfseTable">
                 <thead>
                     <tr>
-                        <th scope="col">Número NF / Chave</th>
-                        <th scope="col">Data Emissão</th>
-                        <th scope="col">Valor BRL</th>
-                        <th scope="col">Provedor</th>
-                        <th scope="col">Ações</th>
+                        <th scope="col" class="ps-3 py-3">Número NF</th>
+                        <th scope="col" class="py-3">Data Emissão</th>
+                        <th scope="col" class="text-end py-3">Valor (BRL)</th>
+                        <th scope="col" class="text-end pe-3 py-3" style="width: 48px;"></th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for nf in notas %}
-                    <tr>
-                        <td>{{ nf.nf_number }}{% if nf.chave_acesso_nacional %}<br><small class="text-muted">{{ nf.chave_acesso_nacional }}</small>{% endif %}</td>
-                        <td>{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</td>
-                        <td>R$ {{ nf.amount_brl }}</td>
-                        <td>
-                            <span class="badge bg-info text-dark mb-1 d-block">
-                                {{ nf.provider_type }}
-                            </span>
+                    <tr class="clickable-row{% if nf.is_canceled %} text-body-secondary{% endif %}" data-href="{% url 'nfse_detail' nf.id %}">
+                        <td class="ps-3 py-3">
+                            <div class="d-flex align-items-center gap-2">
+                                <a href="{% url 'nfse_detail' nf.id %}" class="fw-semibold text-decoration-none text-body">
+                                    #{{ nf.nf_number }}
+                                </a>
+                                {% if nf.is_canceled %}
+                                <span class="badge bg-danger">Cancelada</span>
+                                {% endif %}
+                            </div>
+                        </td>
+                        <td class="py-3">{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</td>
+                        <td class="text-end fw-semibold py-3">
                             {% if nf.is_canceled %}
-                            <span class="badge bg-danger">Cancelada</span>
+                            <span class="text-decoration-line-through text-body-secondary" title="Nota cancelada">
+                                R$ {{ nf.amount_brl|floatformat:2|intcomma }}
+                            </span>
+                            {% else %}
+                            <span>
+                                R$ {{ nf.amount_brl|floatformat:2|intcomma }}
+                            </span>
                             {% endif %}
                         </td>
-                        <td>
-                            <a href="{% url 'nfse_detail' nf.id %}" class="btn btn-sm btn-outline-primary">Detalhes</a>
+                        <td class="text-end pe-3 py-3 text-body-secondary">
+                            <i class="bi bi-chevron-right small row-chevron"></i>
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="6" class="text-center py-4 text-muted">Nenhuma NFS-e encontrada.</td>
+                        <td colspan="4" class="text-center py-5 text-muted">
+                            {% if query %}
+                            <i class="bi bi-search display-6 d-block mb-2 text-secondary"></i>
+                            Nenhuma NFS-e encontrada para "{{ query }}".
+                            <div class="mt-2">
+                                <a href="{% url 'nfse_list' %}" class="btn btn-sm btn-outline-secondary">Limpar busca</a>
+                            </div>
+                            {% else %}
+                            <i class="bi bi-receipt display-6 d-block mb-2 text-secondary"></i>
+                            Nenhuma NFS-e encontrada.
+                            {% endif %}
+                        </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
         </div>
     </div>
+    {% if page_obj.has_other_pages %}
+    <div class="card-footer py-3">
+        <div class="d-flex justify-content-between align-items-center flex-column flex-sm-row gap-2">
+            <div class="text-body-secondary small">
+                Mostrando <strong>{{ page_obj.start_index }}</strong> a <strong>{{ page_obj.end_index }}</strong> de <strong>{{ page_obj.paginator.count }}</strong> notas
+            </div>
+            <nav aria-label="Navegação de páginas">
+                <ul class="pagination pagination-sm mb-0">
+                    {% if page_obj.has_previous %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if query %}&q={{ query }}{% endif %}" aria-label="Anterior">
+                            <span aria-hidden="true">&laquo;</span>
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link" aria-hidden="true">&laquo;</span>
+                    </li>
+                    {% endif %}
+
+                    {% for num in page_obj.paginator.page_range %}
+                        {% if page_obj.number == num %}
+                        <li class="page-item active" aria-current="page">
+                            <span class="page-link">{{ num }}</span>
+                        </li>
+                        {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
+                        <li class="page-item">
+                            <a class="page-link" href="?page={{ num }}{% if query %}&q={{ query }}{% endif %}">{{ num }}</a>
+                        </li>
+                        {% endif %}
+                    {% endfor %}
+
+                    {% if page_obj.has_next %}
+                    <li class="page-item">
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if query %}&q={{ query }}{% endif %}" aria-label="Próxima">
+                            <span aria-hidden="true">&raquo;</span>
+                        </a>
+                    </li>
+                    {% else %}
+                    <li class="page-item disabled">
+                        <span class="page-link" aria-hidden="true">&raquo;</span>
+                    </li>
+                    {% endif %}
+                </ul>
+            </nav>
+        </div>
+    </div>
+    {% endif %}
 </div>
 
 <!-- Import Modal -->
@@ -102,6 +215,19 @@
 </div>
 
 <script>
+document.addEventListener("DOMContentLoaded", () => {
+    const rows = document.querySelectorAll(".clickable-row");
+  
+    rows.forEach(row => {
+        row.addEventListener("click", (e) => {
+            if (e.target.closest("a, button, input, select, textarea")) {
+                return;
+            }
+            window.location.href = row.dataset.href;
+        });
+    });
+});
+
 function toggleProviderInputs() {
     var provider = document.getElementById('provider').value;
     if (provider === 'PAULISTANA') {
@@ -114,4 +240,3 @@ function toggleProviderInputs() {
 }
 </script>
 {% endblock %}
-

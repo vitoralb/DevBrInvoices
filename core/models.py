@@ -1,4 +1,5 @@
 import uuid
+from datetime import datetime, timedelta
 from decimal import Decimal
 from django.db import models
 from core.fields import EncryptedTextField
@@ -278,6 +279,14 @@ class Invoice(models.Model):
         return self.status == "CANCELED"
 
     @property
+    def can_be_canceled(self):
+        if self.status in ["CANCELED", "DRAFT", "PROCESSING"]:
+            return False
+        if hasattr(self, "nota_fiscal") and self.nota_fiscal:
+            return self.nota_fiscal.can_be_canceled
+        return True
+
+    @property
     def nfse_provider_type(self):
         if hasattr(self, "nota_fiscal") and self.nota_fiscal:
             return self.nota_fiscal.provider_type
@@ -408,6 +417,22 @@ class NotaFiscal(models.Model):
         indexes = [
             models.Index(fields=["issue_date", "is_canceled"]),
         ]
+
+    @property
+    def can_be_canceled(self):
+        if self.is_canceled:
+            return False
+        auth_time = self.data_hora_autorizacao or self.created_at
+        if not auth_time and self.issue_date:
+            auth_time = timezone.make_aware(
+                datetime.combine(self.issue_date, datetime.min.time())
+            )
+        if auth_time:
+            if timezone.is_naive(auth_time):
+                auth_time = timezone.make_aware(auth_time)
+            if timezone.now() - auth_time > timedelta(hours=24):
+                return False
+        return True
 
     @property
     def provider_type(self):

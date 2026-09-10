@@ -10,8 +10,9 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
+from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import Sum
+from django.db.models import F, Q, Sum
 from django.db.models.functions import Coalesce
 from django.http import (
     HttpResponse,
@@ -212,6 +213,7 @@ def invoice_list(request):
     year = (
         request.GET.get("year", "") if "year" in request.GET else str(date.today().year)
     )
+    company = CompanySettings.load()
 
     invoices = Invoice.objects.select_related("client").all()
 
@@ -244,6 +246,7 @@ def invoice_list(request):
             "selected_client": client_id,
             "selected_status": status,
             "selected_year": year,
+            "debug_mode": company.debug_mode,
         },
     )
 
@@ -289,7 +292,7 @@ def invoice_create(request):
 def invoice_detail(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
     item_form = InvoiceItemForm()
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
 
     suggested_exchange_rate = None
     if invoice.status == "FINALIZED" and (
@@ -465,6 +468,17 @@ def cancel_invoice(request, pk):
         )
         return redirect("invoice_detail", pk=invoice.id)
 
+    if (
+        hasattr(invoice, "nota_fiscal")
+        and invoice.nota_fiscal
+        and not invoice.nota_fiscal.can_be_canceled
+    ):
+        messages.error(
+            request,
+            "A NFS-e vinculada a esta invoice foi autorizada há mais de 24 horas e não pode ser cancelada diretamente pelo sistema.",
+        )
+        return redirect("invoice_detail", pk=invoice.id)
+
     invoice.status = "PROCESSING"
     from .tasks import cancel_invoice_task
 
@@ -520,7 +534,7 @@ def issue_nfse(request, pk):
 @login_required
 def generate_invoice_pdf(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
 
     if not company:
         messages.error(
@@ -619,7 +633,7 @@ def clone_invoice(request, pk):
 @require_POST
 def email_invoice(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
-    company = CompanySettings.objects.first()
+    company = CompanySettings.load()
 
     send_to_company = request.POST.get("send_to_company") == "on"
     send_to_client = request.POST.get("send_to_client") == "on"
@@ -742,14 +756,33 @@ from .tasks import import_nfses_task
 
 @login_required
 def nfse_list(request):
-    notas = NotaFiscal.objects.all().order_by("-issue_date", "-created_at")
-    company = CompanySettings.objects.first()
+    query = request.GET.get("q", "").strip()
+    notas_qs = NotaFiscal.objects.all().order_by(
+        F("data_hora_autorizacao").desc(nulls_last=True),
+        "-issue_date",
+        "-created_at",
+    )
+    if query:
+        notas_qs = notas_qs.filter(
+            Q(nf_number__icontains=query)
+            | Q(chave_acesso_nacional__icontains=query)
+            | Q(verification_code__icontains=query)
+            | Q(description__icontains=query)
+        )
+
+    paginator = Paginator(notas_qs, 10)
+    page_number = request.GET.get("page")
+    page_obj = paginator.get_page(page_number)
+
+    company = CompanySettings.load()
     today = timezone.now().date()
     return render(
         request,
         "core/nfse_list.html",
         {
-            "notas": notas,
+            "page_obj": page_obj,
+            "notas": page_obj,
+            "query": query,
             "today": today.isoformat(),
             "company": company,
             "opening_date": (
@@ -859,6 +892,13 @@ def nfse_cancel(request, pk):
 
     if nf.is_canceled:
         messages.error(request, "Esta NFS-e já está cancelada.")
+        return redirect("nfse_detail", pk=pk)
+
+    if not nf.can_be_canceled:
+        messages.error(
+            request,
+            "Esta NFS-e foi autorizada há mais de 24 horas e não pode ser cancelada diretamente pelo sistema.",
+        )
         return redirect("nfse_detail", pk=pk)
 
     if nf.invoice:

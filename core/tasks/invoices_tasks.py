@@ -65,6 +65,10 @@ def cancel_invoice_task(self, invoice_id):
     invoice = Invoice.objects.get(id=invoice_id)
 
     if hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
+        if not invoice.nota_fiscal.can_be_canceled:
+            raise Exception(
+                f"NFS-e {invoice.nota_fiscal.nf_number} foi autorizada há mais de 24 horas e não pode ser cancelada."
+            )
         provider = get_provider(invoice)
         try:
             cancel_result = provider.cancelar_nfse(invoice)

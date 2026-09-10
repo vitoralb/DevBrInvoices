@@ -1264,3 +1264,95 @@ class InvoiceBankDetailsTests(TestCase):
 
     def test_company_settings_has_no_bank_details_raw(self):
         self.assertFalse(hasattr(self.company, "bank_details_raw"))
+
+
+class NfseCancelRestrictionTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "admin@test.com", "pass")
+        self.client_http = HttpClient()
+        self.client_http.force_login(self.user)
+        self.company = CompanySettings.objects.create(
+            company_name="Test Company",
+            cnpj="00.000.000/0001-00",
+            opening_date=date(2024, 1, 1),
+            inscricao_municipal="123456",
+            email="test@test.com",
+        )
+        self.client_obj = Client.objects.create(
+            name="Client A",
+            email="client@example.com",
+        )
+
+    def test_nfse_authorized_less_than_24h_can_be_canceled(self):
+        from django.utils import timezone
+
+        nf = NotaFiscal.objects.create(
+            nf_number="1001",
+            issue_date=timezone.now().date(),
+            amount_brl=Decimal("500.00"),
+            data_hora_autorizacao=timezone.now() - timedelta(hours=2),
+        )
+        self.assertTrue(nf.can_be_canceled)
+
+        response = self.client_http.get(reverse("nfse_detail", kwargs={"pk": nf.id}))
+        self.assertContains(response, "Cancelar NFS-e")
+
+    def test_nfse_authorized_more_than_24h_cannot_be_canceled(self):
+        from django.utils import timezone
+
+        nf = NotaFiscal.objects.create(
+            nf_number="1002",
+            issue_date=timezone.now().date(),
+            amount_brl=Decimal("500.00"),
+            data_hora_autorizacao=timezone.now() - timedelta(hours=25),
+        )
+        self.assertFalse(nf.can_be_canceled)
+
+        # UI must not display cancel button
+        response = self.client_http.get(reverse("nfse_detail", kwargs={"pk": nf.id}))
+        self.assertNotContains(response, "Cancelar NFS-e")
+
+        # POST to cancel must be rejected
+        post_response = self.client_http.post(
+            reverse("nfse_cancel", kwargs={"pk": nf.id})
+        )
+        self.assertRedirects(
+            post_response, reverse("nfse_detail", kwargs={"pk": nf.id})
+        )
+        nf.refresh_from_db()
+        self.assertFalse(nf.is_canceled)
+
+    def test_invoice_with_old_nfse_cannot_be_canceled(self):
+        from django.utils import timezone
+
+        invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-24H",
+            issue_date=timezone.now().date(),
+            currency="USD",
+            status="FINALIZED",
+        )
+        NotaFiscal.objects.create(
+            invoice=invoice,
+            nf_number="1003",
+            issue_date=timezone.now().date(),
+            amount_brl=Decimal("500.00"),
+            data_hora_autorizacao=timezone.now() - timedelta(hours=26),
+        )
+        self.assertFalse(invoice.can_be_canceled)
+
+        # UI must not display cancel button
+        response = self.client_http.get(
+            reverse("invoice_detail", kwargs={"pk": invoice.id})
+        )
+        self.assertNotContains(response, "Cancelar Invoice")
+
+        # POST to cancel must be rejected
+        post_response = self.client_http.post(
+            reverse("cancel_invoice", kwargs={"pk": invoice.id})
+        )
+        self.assertRedirects(
+            post_response, reverse("invoice_detail", kwargs={"pk": invoice.id})
+        )
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "FINALIZED")

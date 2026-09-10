@@ -55,7 +55,7 @@
                     </a>
                     {% endif %}
                     
-                    {% if not nf.is_canceled %}
+                    {% if nf.can_be_canceled %}
                     <form method="POST" action="{% url 'nfse_cancel' nf.id %}" onsubmit="return confirm('Tem certeza que deseja CANCELAR esta NFS-e na prefeitura? Isso não pode ser desfeito.');" class="ms-auto">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-danger">

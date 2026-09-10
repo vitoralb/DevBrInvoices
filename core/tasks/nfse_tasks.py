@@ -256,6 +256,10 @@ def cancel_nfse_standalone_task(self, nf_id):
     nf = NotaFiscal.objects.get(id=nf_id)
     if nf.is_canceled:
         return f"NFSe {nf_id} already canceled."
+    if not nf.can_be_canceled:
+        raise Exception(
+            f"NFS-e {nf.nf_number} foi autorizada há mais de 24 horas e não pode ser cancelada."
+        )
 
     class DummyInvoice:
         # provider.cancelar_nfse expects an invoice with a nota_fiscal

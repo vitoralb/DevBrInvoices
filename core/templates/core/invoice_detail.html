@@ -44,7 +44,7 @@
                     
                     {% if invoice.status == 'FINALIZED' %}
                     <button type="button" class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#emailModal">E-mail</button>
-                    {% if invoice.nota_fiscal %}
+                    {% if invoice.can_be_canceled %}
                     <form method="POST" action="{% url 'cancel_invoice' invoice.id %}" class="d-inline">
                         {% csrf_token %}
                         <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Tem certeza que deseja cancelar esta invoice e sua respectiva NFS-e, se houver?');">Cancelar Invoice</button>
