@@ -1080,6 +1080,123 @@ class NFSeProviderAbstractionTests(TestCase):
                     str(ctx.exception),
                 )
 
+    def test_prepare_nf_data_uses_export_rates_and_ideal_pro_labore(self):
+        from core.services import _prepare_nf_data
+
+        target_month = date(2025, 6, 1)
+
+        # Fictional export client and invoice
+        export_client = Client.objects.create(
+            name="Foreign Test Client LLC",
+            address_country_code="US",
+            address_neighborhood="Downtown",
+            address_city="New York",
+        )
+        invoice = Invoice.objects.create(
+            client=export_client,
+            invoice_number="INV-EXP-TEST-001",
+            issue_date=target_month,
+            exchange_rate_to_brl=Decimal("5.0000"),
+            currency="USD",
+        )
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            description="Consulting services",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("2000.00"),
+        )
+
+        # Create past 12 months with synthetic RBT12 = R$ 120,000 (Annex III Bracket 1)
+        # All months have 0 actual pro-labore paid, which tests that ideal pro-labore is used
+        for i in range(1, 13):
+            m = target_month - relativedelta(months=i)
+            MonthlyConsolidation.objects.update_or_create(
+                month_year=m,
+                defaults={
+                    "total_revenue_export": Decimal("10000.00"),
+                    "total_revenue_internal": Decimal("0.00"),
+                    "actual_pro_labore_paid": Decimal("0.00"),
+                    "status": "CONSOLIDATED",
+                },
+            )
+
+        amount_brl, desc, eff_rate = _prepare_nf_data(invoice)
+        self.assertEqual(amount_brl, Decimal("10000.00"))
+        # Bracket 1 Annex III export rate (3.05%) vs domestic rate (6.00%) or Annex V export (10.67%)
+        self.assertEqual(eff_rate, Decimal("3.05"))
+        self.assertIn("3,05%", desc)
+
+    def test_prepare_nf_data_uses_internal_rates_for_domestic_client(self):
+        from core.services import _prepare_nf_data
+
+        target_month = date(2025, 6, 1)
+
+        # Fictional domestic client and invoice
+        domestic_client = Client.objects.create(
+            name="Domestic Test Client Ltda",
+            address_country_code="BR",
+            address_neighborhood="Centro",
+            address_city="São Paulo",
+        )
+        invoice = Invoice.objects.create(
+            client=domestic_client,
+            invoice_number="INV-DOM-TEST-001",
+            issue_date=target_month,
+            exchange_rate_to_brl=Decimal("1.0000"),
+            currency="BRL",
+        )
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            description="Domestic consulting services",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("10000.00"),
+        )
+
+        for i in range(1, 13):
+            m = target_month - relativedelta(months=i)
+            MonthlyConsolidation.objects.update_or_create(
+                month_year=m,
+                defaults={
+                    "total_revenue_export": Decimal("10000.00"),
+                    "total_revenue_internal": Decimal("0.00"),
+                    "actual_pro_labore_paid": Decimal("0.00"),
+                    "status": "CONSOLIDATED",
+                },
+            )
+
+        amount_brl, desc, eff_rate = _prepare_nf_data(invoice)
+        self.assertEqual(amount_brl, Decimal("10000.00"))
+        # Bracket 1 Annex III internal rate is 6.00%
+        self.assertEqual(eff_rate, Decimal("6.00"))
+        self.assertIn("6,00%", desc)
+
+    def test_calculate_rbt12_and_fator_r_use_ideal_pro_labore_flag(self):
+        target_month = date(2025, 6, 1)
+        for i in range(1, 13):
+            m = target_month - relativedelta(months=i)
+            MonthlyConsolidation.objects.update_or_create(
+                month_year=m,
+                defaults={
+                    "total_revenue_export": Decimal("10000.00"),
+                    "total_revenue_internal": Decimal("0.00"),
+                    "actual_pro_labore_paid": Decimal("0.00"),
+                    "status": "CONSOLIDATED",
+                },
+            )
+
+        # Without flag: payroll is 0, Fator R is 0%
+        rbt12, fator_r_normal, pl_norm, _ = calculate_rbt12_and_fator_r(
+            target_month, use_ideal_pro_labore=False
+        )
+        self.assertEqual(fator_r_normal, Decimal("0.00"))
+
+        # With flag: Fator R is at least 28.00%
+        rbt12, fator_r_ideal, pl_ideal, _ = calculate_rbt12_and_fator_r(
+            target_month, use_ideal_pro_labore=True
+        )
+        self.assertGreaterEqual(fator_r_ideal, Decimal("28.00"))
+        self.assertGreater(pl_ideal, Decimal("0.00"))
+
 
 class InvoiceBankDetailsTests(TestCase):
     def setUp(self):
@@ -1755,4 +1872,5 @@ class NfseCancelRestrictionTests(TestCase):
 
         cons.refresh_from_db()
         self.assertEqual(cons.status, "CONSOLIDATED")
+
 

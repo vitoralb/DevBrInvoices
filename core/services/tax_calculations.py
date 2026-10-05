@@ -51,7 +51,7 @@ def calculate_irrf(pro_labore_amount, reference_date):
         return Decimal("0.00")
 
 
-def calculate_rbt12_and_fator_r(target_month_year):
+def calculate_rbt12_and_fator_r(target_month_year, use_ideal_pro_labore=False):
     """Calculate trailing 12-month revenue (RBT12) and Fator R for a given month.
 
     Fator R for Month X is based on payroll and revenue of the 12 preceding months (X-12 to X-1).
@@ -136,6 +136,14 @@ def calculate_rbt12_and_fator_r(target_month_year):
     elif 0 < months_active < 12:
         pl_sum = (pl_sum / months_active) * 12
         cpp_sum = (cpp_sum / months_active) * 12
+
+    if use_ideal_pro_labore and sum_revenue > 0:
+        target_payroll = (sum_revenue * Decimal("0.28")).quantize(
+            Decimal("0.01"), rounding=ROUND_HALF_UP
+        )
+        if sum_payroll < target_payroll:
+            pl_sum += target_payroll - sum_payroll
+            sum_payroll = target_payroll
 
     if sum_revenue > 0:
         fator_r = ((sum_payroll / sum_revenue) * Decimal("100")).quantize(

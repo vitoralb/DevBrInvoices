@@ -85,11 +85,22 @@ def _prepare_nf_data(invoice):
 
     try:
         rbt12, fator_r, _, _ = calculate_rbt12_and_fator_r(
-            invoice.issue_date.replace(day=1)
+            invoice.issue_date.replace(day=1),
+            use_ideal_pro_labore=True,
         )
         annex = "ANNEX_III" if fator_r >= Decimal("28.00") else "ANNEX_V"
+
+        is_export = True
+        if hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
+            is_export = invoice.nota_fiscal.is_export
+        elif invoice.client and invoice.client.address_country_code:
+            is_export = invoice.client.address_country_code.upper() != "BR"
+
+        rev_internal = Decimal("0.00") if is_export else amount_brl
+        rev_export = amount_brl if is_export else Decimal("0.00")
+
         das_tax, _ = calculate_simples_tax(
-            amount_brl, Decimal("0.00"), rbt12, annex, invoice.issue_date
+            rev_internal, rev_export, rbt12, annex, invoice.issue_date
         )
         effective_rate_pct = (
             (das_tax / amount_brl * Decimal("100")).quantize(
