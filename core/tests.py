@@ -1874,3 +1874,246 @@ class NfseCancelRestrictionTests(TestCase):
         self.assertEqual(cons.status, "CONSOLIDATED")
 
 
+class ProcessDailyInvoicesTaskTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "admin@test.com", "pass")
+        self.company = CompanySettings.objects.create(
+            company_name="Acme Services Inc",
+            cnpj="00.000.000/0001-00",
+            opening_date=date(2024, 1, 1),
+            email="accounting@acmetest.com",
+            auto_finalize_invoices=True,
+            auto_send_emails=False,
+            auto_emit_nfse=False,
+            auto_invoice_hour=9,
+        )
+        self.client_obj = Client.objects.create(
+            name="Foreign Test Client LLC",
+            email="client@foreigntest.com",
+            address_country_code="US",
+        )
+
+    def test_auto_finalization_disabled(self):
+        self.company.auto_finalize_invoices = False
+        self.company.save()
+        from core.tasks.invoices_tasks import process_daily_invoices_task
+
+        result = process_daily_invoices_task(force=False)
+        self.assertEqual(result, "Auto finalization disabled.")
+
+    def test_not_configured_hour(self):
+        from core.tasks.invoices_tasks import process_daily_invoices_task
+        from django.utils import timezone
+
+        current_hour = timezone.localtime(timezone.now()).hour
+        self.company.auto_invoice_hour = (current_hour + 1) % 24
+        self.company.save()
+
+        result = process_daily_invoices_task(force=False)
+        self.assertIn("Not the configured hour", result)
+
+    @patch("core.tasks.invoices_tasks.finalize_invoice_task.si")
+    @patch("core.tasks.invoices_tasks.fetch_exchange_rate")
+    def test_processes_draft_with_date_today_auto_emit_nfse_false(
+        self, mock_fetch_rate, mock_finalize_si
+    ):
+        from core.tasks.invoices_tasks import process_daily_invoices_task
+        from django.utils import timezone
+
+        today = timezone.localdate()
+        mock_fetch_rate.return_value = Decimal("5.0000")
+
+        inv_today = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-TEST-001",
+            issue_date=today,
+            currency="USD",
+            status="DRAFT",
+        )
+        InvoiceItem.objects.create(
+            invoice=inv_today,
+            description="Service",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("1000.00"),
+        )
+        inv_yesterday = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-TEST-002",
+            issue_date=today - timedelta(days=1),
+            currency="USD",
+            status="DRAFT",
+        )
+
+        mock_sig = MagicMock()
+        mock_sig.delay.return_value.id = "mock-task-id-1"
+        mock_finalize_si.return_value = mock_sig
+
+        res = process_daily_invoices_task(force=True)
+        self.assertEqual(res, "Processed 1 daily invoices.")
+
+        inv_today.refresh_from_db()
+        self.assertEqual(inv_today.status, "PROCESSING")
+        mock_sig.delay.assert_called_once()
+
+        inv_yesterday.refresh_from_db()
+        self.assertEqual(inv_yesterday.status, "DRAFT")
+
+    @patch("core.tasks.invoices_tasks.chain")
+    @patch("core.tasks.nfse_tasks.issue_nfse_task.si")
+    @patch("core.tasks.invoices_tasks.finalize_invoice_task.si")
+    @patch("core.tasks.invoices_tasks.fetch_exchange_rate")
+    def test_processes_draft_with_auto_emit_nfse_chains_tasks(
+        self, mock_fetch_rate, mock_finalize_si, mock_issue_si, mock_chain
+    ):
+        self.company.auto_emit_nfse = True
+        self.company.save()
+
+        from core.tasks.invoices_tasks import process_daily_invoices_task
+        from django.utils import timezone
+
+        today = timezone.localdate()
+        mock_fetch_rate.return_value = Decimal("5.0000")
+
+        inv = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-TEST-003",
+            issue_date=today,
+            currency="USD",
+            status="DRAFT",
+        )
+        InvoiceItem.objects.create(
+            invoice=inv,
+            description="Service",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("1000.00"),
+        )
+
+        mock_final_sig = MagicMock()
+        mock_issue_sig = MagicMock()
+        mock_finalize_si.return_value = mock_final_sig
+        mock_issue_si.return_value = mock_issue_sig
+
+        mock_chained = MagicMock()
+        mock_chained.delay.return_value.id = "mock-task-id-2"
+        mock_chain.return_value = mock_chained
+
+        res = process_daily_invoices_task(force=True)
+        self.assertEqual(res, "Processed 1 daily invoices.")
+
+        mock_finalize_si.assert_called_once_with(
+            inv.id,
+            send_to_client=False,
+            send_to_company=False,
+        )
+        mock_issue_si.assert_called_once_with(
+            inv.id,
+            "5.0000",
+            send_to_company=False,
+            send_to_client=False,
+        )
+        mock_chain.assert_called_once_with(mock_final_sig, mock_issue_sig)
+        mock_chained.delay.assert_called_once()
+
+    @patch("core.tasks.invoices_tasks.send_email_with_debug")
+    @patch("core.tasks.invoices_tasks.finalize_invoice_task.si")
+    @patch("core.tasks.invoices_tasks.fetch_exchange_rate")
+    def test_failsafe_triggered_aborts_nfse_and_sends_email(
+        self, mock_fetch_rate, mock_finalize_si, mock_send_email
+    ):
+        self.company.auto_emit_nfse = True
+        self.company.save()
+
+        from core.tasks.invoices_tasks import process_daily_invoices_task
+        from django.utils import timezone
+
+        today = timezone.localdate()
+        mock_fetch_rate.return_value = Decimal("5.0000")
+
+        inv = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-TEST-004",
+            issue_date=today,
+            currency="USD",
+            status="DRAFT",
+        )
+        InvoiceItem.objects.create(
+            invoice=inv,
+            description="High value project",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("25000.00"),
+        )
+
+        mock_final_sig = MagicMock()
+        mock_final_sig.delay.return_value.id = "mock-task-id-3"
+        mock_finalize_si.return_value = mock_final_sig
+
+        res = process_daily_invoices_task(force=True)
+        self.assertEqual(res, "Processed 1 daily invoices.")
+
+        mock_final_sig.delay.assert_called_once()
+        mock_send_email.assert_called_once()
+
+    def test_legacy_task_alias_calls_process_daily_invoices_task(self):
+        from core.tasks.invoices_tasks import legacy_process_daily_invoices_task
+
+        self.company.auto_finalize_invoices = False
+        self.company.save()
+        res = legacy_process_daily_invoices_task(force=False)
+        self.assertEqual(res, "Auto finalization disabled.")
+
+
+class CompanySettingsAutoEmitNfseTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin", "admin@test.com", "pass")
+        self.client_http = HttpClient()
+        self.client_http.force_login(self.user)
+        self.company = CompanySettings.objects.create(
+            company_name="Acme Services Inc",
+            cnpj="12.345.678/0001-95",
+            opening_date=date(2024, 1, 1),
+            inscricao_municipal="123456",
+            email="test@test.com",
+            address_line1="Main St",
+            address_city_ibge="3550308",
+            nfse_provider="PAULISTANA",
+            next_document_number=1,
+            document_series="1",
+            default_codigo_tributacao_nacional="010101",
+            auto_finalize_invoices=False,
+            auto_emit_nfse=False,
+        )
+
+    def test_company_settings_view_renders_auto_emit_nfse(self):
+        response = self.client_http.get(reverse("company_settings"))
+        self.assertEqual(response.status_code, 200)
+        self.assertContains(response, 'name="auto_emit_nfse"')
+        self.assertContains(response, 'Emitir NFS-e Automaticamente')
+
+    def test_company_settings_view_saves_auto_emit_nfse(self):
+        data = {
+            "company_name": self.company.company_name,
+            "cnpj": self.company.cnpj,
+            "opening_date": self.company.opening_date.strftime("%d/%m/%Y"),
+            "inscricao_municipal": self.company.inscricao_municipal,
+            "email": self.company.email,
+            "address_line1": self.company.address_line1,
+            "address_city_ibge": self.company.address_city_ibge,
+            "nfse_provider": self.company.nfse_provider,
+            "next_document_number": self.company.next_document_number,
+            "document_series": self.company.document_series,
+            "default_codigo_tributacao_nacional": self.company.default_codigo_tributacao_nacional,
+            "auto_invoice_hour": 8,
+            "auto_finalize_invoices": "on",
+            "auto_send_emails": "on",
+            "auto_emit_nfse": "on",
+        }
+        response = self.client_http.post(reverse("company_settings"), data=data)
+        self.assertEqual(response.status_code, 302)
+
+        self.company.refresh_from_db()
+        self.assertTrue(self.company.auto_finalize_invoices)
+        self.assertTrue(self.company.auto_send_emails)
+        self.assertTrue(self.company.auto_emit_nfse)
+
+
+

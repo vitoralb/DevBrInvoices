@@ -1,6 +1,6 @@
 from decimal import Decimal
 from dateutil.relativedelta import relativedelta
-from celery import shared_task
+from celery import chain, shared_task
 from celery.utils.log import get_task_logger
 from django.conf import settings
 from django.utils import timezone
@@ -252,7 +252,7 @@ def email_invoice_task(
     return f"Emails sent for invoice {invoice_id}."
 
 
-@shared_task
+@shared_task(name="core.tasks.invoices_tasks.process_daily_invoices_task")
 def process_daily_invoices_task(force=False):
     company = CompanySettings.load()
     if not company:
@@ -289,13 +289,6 @@ def process_daily_invoices_task(force=False):
                     exchange_rate = None
                     exchange_rate_error = f"Erro ao obter taxa de câmbio: {str(e)}"
 
-        # Finalize the invoice first and send client email right away
-        finalize_invoice_task.delay(
-            invoice.id,
-            send_to_client=company.auto_send_emails,
-            send_to_company=company.auto_send_emails,
-        )
-
         # Check failsafes for NFS-e
         failsafe_triggered = False
         failsafe_reason = ""
@@ -331,16 +324,43 @@ def process_daily_invoices_task(force=False):
                     )
                 except Exception:
                     pass
-        elif company.auto_emit_nfse:
+
+        finalize_sig = finalize_invoice_task.si(
+            invoice.id,
+            send_to_client=company.auto_send_emails,
+            send_to_company=company.auto_send_emails,
+        )
+
+        if not failsafe_triggered and company.auto_emit_nfse:
             from .nfse_tasks import issue_nfse_task
 
-            issue_nfse_task.delay(
+            issue_sig = issue_nfse_task.si(
                 invoice.id,
                 str(exchange_rate),
                 send_to_company=company.auto_send_emails,
                 send_to_client=False,
             )
+            async_task = chain(finalize_sig, issue_sig).delay()
+            invoice.task_id = (
+                str(async_task.id)
+                if async_task and getattr(async_task, "id", None)
+                else ""
+            )
+            invoice.save()
+        else:
+            async_task = finalize_sig.delay()
+            invoice.task_id = (
+                str(async_task.id)
+                if async_task and getattr(async_task, "id", None)
+                else ""
+            )
+            invoice.save()
 
         count += 1
 
     return f"Processed {count} daily invoices."
+
+
+@shared_task(name="core.tasks.process_daily_invoices_task")
+def legacy_process_daily_invoices_task(force=False):
+    return process_daily_invoices_task(force=force)

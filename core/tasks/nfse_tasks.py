@@ -33,6 +33,9 @@ def issue_nfse_task(
 
     # Save exchange rate
     invoice.exchange_rate_to_brl = Decimal(str(exchange_rate))
+    invoice.status = "PROCESSING"
+    if self.request and self.request.id:
+        invoice.task_id = self.request.id
     invoice.save()
 
     try:
@@ -165,6 +168,7 @@ def issue_nfse_task(
 
             raise e
         else:
+            invoice.status = "PROCESSING"
             invoice.task_retry_count = self.request.retries + 1
             invoice.save()
             raise e

@@ -231,6 +231,18 @@ class CompanySettingsForm(forms.ModelForm):
             "address_neighborhood": "Bairro",
             "address_uf": "UF",
             "address_city": "Cidade",
+            "auto_finalize_invoices": "Finalizar Invoices Automaticamente",
+            "auto_send_emails": "Enviar E-mails Automaticamente",
+            "auto_emit_nfse": "Emitir NFS-e Automaticamente",
+            "auto_invoice_hour": "Hora do Processamento Automático",
+            "debug_email": "E-mail de Depuração",
+        }
+        help_texts = {
+            "auto_finalize_invoices": "Finaliza automaticamente invoices em rascunho na data de emissão.",
+            "auto_send_emails": "Envia e-mails automaticamente após a finalização da invoice.",
+            "auto_emit_nfse": "Emite a NFS-e automaticamente após a finalização da invoice.",
+            "auto_invoice_hour": "Hora do dia (0 a 23) para executar o processamento automático.",
+            "debug_email": "Se preenchido, todos os e-mails são redirecionados para este endereço de teste.",
         }
         widgets = {
             "company_name": forms.TextInput(

@@ -190,7 +190,7 @@ CELERY_TIMEZONE = TIME_ZONE
 
 CELERY_BEAT_SCHEDULE = {
     "process_daily_invoices": {
-        "task": "core.tasks.process_daily_invoices_task",
+        "task": "core.tasks.invoices_tasks.process_daily_invoices_task",
         "schedule": crontab(minute=0, hour="*"),
     },
 }

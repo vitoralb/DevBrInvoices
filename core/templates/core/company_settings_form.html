@@ -162,7 +162,7 @@
                 {% if form.auto_invoice_hour.help_text %}<small class="form-text text-muted">{{ form.auto_invoice_hour.help_text }}</small>{% endif %}
                 {{ form.auto_invoice_hour.errors }}
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <div class="form-check mt-4">
                     {{ form.auto_finalize_invoices }}
                     {{ form.auto_finalize_invoices.label_tag }}
@@ -170,12 +170,20 @@
                     {{ form.auto_finalize_invoices.errors }}
                 </div>
             </div>
-            <div class="col-md-6">
+            <div class="col-md-4">
                 <div class="form-check mt-4">
                     {{ form.auto_send_emails }}
                     {{ form.auto_send_emails.label_tag }}
                     {% if form.auto_send_emails.help_text %}<small class="form-text text-muted d-block">{{ form.auto_send_emails.help_text }}</small>{% endif %}
                     {{ form.auto_send_emails.errors }}
+                </div>
+            </div>
+            <div class="col-md-4">
+                <div class="form-check mt-4">
+                    {{ form.auto_emit_nfse }}
+                    {{ form.auto_emit_nfse.label_tag }}
+                    {% if form.auto_emit_nfse.help_text %}<small class="form-text text-muted d-block">{{ form.auto_emit_nfse.help_text }}</small>{% endif %}
+                    {{ form.auto_emit_nfse.errors }}
                 </div>
             </div>
         </div>
