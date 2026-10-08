@@ -86,6 +86,7 @@ MIDDLEWARE = [
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",
+    "core.middleware.ProxyHeaderAuthenticationMiddleware",
     "django.contrib.messages.middleware.MessageMiddleware",
     "django.middleware.clickjacking.XFrameOptionsMiddleware",
     "django_htmx.middleware.HtmxMiddleware",
@@ -178,10 +179,49 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 MEDIA_URL = "/media/"
 MEDIA_ROOT = BASE_DIR / "media"
 
+# Authentication Backends
+AUTHENTICATION_BACKENDS = [
+    "core.backends.ProxyHeaderBackend",
+    "django.contrib.auth.backends.ModelBackend",
+]
+
 # Authentication URLs
 LOGIN_URL = "login"
 LOGIN_REDIRECT_URL = "/"
-LOGOUT_REDIRECT_URL = "login"
+LOGOUT_REDIRECT_URL = os.environ.get("LOGOUT_REDIRECT_URL", "login")
+
+# Reverse Proxy Authentication Configuration
+PROXY_AUTH_ENABLED = os.environ.get("PROXY_AUTH_ENABLED", "True") == "True"
+PROXY_AUTH_USERNAME_HEADER = os.environ.get(
+    "PROXY_AUTH_USERNAME_HEADER", "X-Auth-Request-Preferred-Username"
+)
+PROXY_AUTH_EMAIL_HEADER = os.environ.get(
+    "PROXY_AUTH_EMAIL_HEADER", "X-Auth-Request-Email"
+)
+PROXY_AUTH_GROUPS_HEADER = os.environ.get(
+    "PROXY_AUTH_GROUPS_HEADER", "X-Auth-Request-Groups"
+)
+PROXY_AUTH_AUTO_CREATE_USER = (
+    os.environ.get("PROXY_AUTH_AUTO_CREATE_USER", "True") == "True"
+)
+PROXY_AUTH_TRUSTED_PROXIES = [
+    cidr.strip()
+    for cidr in os.environ.get("PROXY_AUTH_TRUSTED_PROXIES", "").split(",")
+    if cidr.strip()
+]
+PROXY_AUTH_STAFF_GROUPS = [
+    g.strip()
+    for g in os.environ.get("PROXY_AUTH_STAFF_GROUPS", "").split(",")
+    if g.strip()
+]
+PROXY_AUTH_SUPERUSER_GROUPS = [
+    g.strip()
+    for g in os.environ.get("PROXY_AUTH_SUPERUSER_GROUPS", "").split(",")
+    if g.strip()
+]
+PROXY_AUTH_DEFAULT_IS_STAFF = (
+    os.environ.get("PROXY_AUTH_DEFAULT_IS_STAFF", "False") == "True"
+)
 
 # Email Configuration (Django 6+ MAILERS)
 DEFAULT_FROM_EMAIL = os.environ.get(

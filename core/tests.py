@@ -2165,3 +2165,224 @@ class SecuritySettingsTests(TestCase):
                 "/accounts/login/", HTTP_ORIGIN="https://malicious.example.com"
             )
             self.assertFalse(mw._origin_verified(untrusted_request))
+
+
+class ProxyHeaderAuthTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username="existing_testuser",
+            email="existing@example.com",
+            password="testpassword123",
+        )
+        CompanySettings.objects.create(
+            company_name="Test Company Ltd",
+            cnpj="00.000.000/0001-91",
+            email="test@example.com",
+            opening_date=date(2024, 1, 1),
+        )
+
+    def test_parse_groups_header_variations(self):
+        from core.backends import parse_groups_header
+
+        # Comma-separated
+        self.assertEqual(
+            parse_groups_header("group1, group2, group3"),
+            ["group1", "group2", "group3"],
+        )
+        # Semicolon-separated
+        self.assertEqual(
+            parse_groups_header("group1; group2"),
+            ["group1", "group2"],
+        )
+        # JSON array
+        self.assertEqual(
+            parse_groups_header('["group_a", "group_b"]'),
+            ["group_a", "group_b"],
+        )
+        # Empty and None
+        self.assertEqual(parse_groups_header(""), [])
+        self.assertEqual(parse_groups_header(None), [])
+        self.assertEqual(parse_groups_header("   "), [])
+        # Deduplication and max length
+        long_name = "x" * 200
+        parsed = parse_groups_header(f"{long_name}, {long_name}")
+        self.assertEqual(len(parsed), 1)
+        self.assertEqual(len(parsed[0]), 150)
+
+    def test_backend_authenticate_existing_user(self):
+        from core.backends import ProxyHeaderBackend
+
+        backend = ProxyHeaderBackend()
+        rf = RequestFactory()
+        request = rf.get("/")
+
+        user = backend.authenticate(
+            request,
+            remote_user="existing_testuser",
+            email="updated_email@example.com",
+            groups=["test_group_alpha"],
+        )
+        self.assertIsNotNone(user)
+        self.assertEqual(user.username, "existing_testuser")
+        self.assertEqual(user.email, "updated_email@example.com")
+        self.assertTrue(user.groups.filter(name="test_group_alpha").exists())
+
+    def test_backend_authenticate_creates_new_user(self):
+        from core.backends import ProxyHeaderBackend
+
+        backend = ProxyHeaderBackend()
+        rf = RequestFactory()
+        request = rf.get("/")
+
+        user = backend.authenticate(
+            request,
+            remote_user="synthetic_new_user",
+            email="synthetic_new@example.com",
+            groups=["group1", "group2"],
+        )
+        self.assertIsNotNone(user)
+        self.assertEqual(user.username, "synthetic_new_user")
+        self.assertEqual(user.email, "synthetic_new@example.com")
+        self.assertEqual(user.groups.count(), 2)
+
+    def test_backend_auto_create_disabled(self):
+        from core.backends import ProxyHeaderBackend
+
+        backend = ProxyHeaderBackend()
+        rf = RequestFactory()
+        request = rf.get("/")
+
+        with override_settings(PROXY_AUTH_AUTO_CREATE_USER=False):
+            user = backend.authenticate(
+                request,
+                remote_user="non_existent_user",
+                email="none@example.com",
+            )
+            self.assertIsNone(user)
+
+    def test_backend_staff_and_superuser_groups(self):
+        from core.backends import ProxyHeaderBackend
+
+        backend = ProxyHeaderBackend()
+        rf = RequestFactory()
+        request = rf.get("/")
+
+        with override_settings(
+            PROXY_AUTH_STAFF_GROUPS=["staff_role_group"],
+            PROXY_AUTH_SUPERUSER_GROUPS=["admin_role_group"],
+        ):
+            # Staff group grants is_staff
+            u1 = backend.authenticate(
+                request,
+                remote_user="staff_test_user",
+                groups=["staff_role_group"],
+            )
+            self.assertTrue(u1.is_staff)
+            self.assertFalse(u1.is_superuser)
+
+            # Superuser group grants both is_staff and is_superuser
+            u2 = backend.authenticate(
+                request,
+                remote_user="admin_test_user",
+                groups=["admin_role_group"],
+            )
+            self.assertTrue(u2.is_staff)
+            self.assertTrue(u2.is_superuser)
+
+    def test_middleware_skips_login_screen_for_incoming_headers(self):
+        # Requesting /accounts/login/ with proxy headers should redirect to /
+        resp = self.client.get(
+            "/accounts/login/",
+            HTTP_X_AUTH_REQUEST_PREFERRED_USERNAME="existing_testuser",
+            HTTP_X_AUTH_REQUEST_EMAIL="existing@example.com",
+            HTTP_X_AUTH_REQUEST_GROUPS="test_group",
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "/")
+
+    def test_middleware_skips_login_screen_with_next_param(self):
+        # Requesting /accounts/login/?next=/invoices/ should redirect to /invoices/
+        resp = self.client.get(
+            "/accounts/login/?next=/invoices/",
+            HTTP_X_AUTH_REQUEST_PREFERRED_USERNAME="existing_testuser",
+        )
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, "/invoices/")
+
+    def test_middleware_access_protected_view_directly(self):
+        # Accessing dashboard directly with proxy headers should authenticate and succeed
+        resp = self.client.get(
+            "/",
+            HTTP_X_AUTH_REQUEST_PREFERRED_USERNAME="existing_testuser",
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    def test_middleware_without_headers_shows_login_screen(self):
+        # Accessing /accounts/login/ without proxy headers shows the standard login form
+        resp = self.client.get("/accounts/login/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, "Acesso ao Sistema")
+
+    def test_middleware_user_switch(self):
+        # First request as user 1
+        resp1 = self.client.get(
+            "/",
+            HTTP_X_AUTH_REQUEST_PREFERRED_USERNAME="existing_testuser",
+        )
+        self.assertEqual(resp1.status_code, 200)
+
+        # Second request with a different user header switches the session
+        User.objects.create_user(username="second_testuser")
+        resp2 = self.client.get(
+            "/",
+            HTTP_X_AUTH_REQUEST_PREFERRED_USERNAME="second_testuser",
+        )
+        self.assertEqual(resp2.status_code, 200)
+        self.assertEqual(
+            self.client.session["_auth_user_id"],
+            str(User.objects.get(username="second_testuser").pk),
+        )
+
+    def test_logout_redirects_to_configured_url(self):
+        # Login first
+        self.client.force_login(self.user)
+        logout_target = "https://auth.example.com/oauth2/sign_out?rd=https://sso.example.com/ui/logout"
+        with override_settings(LOGOUT_REDIRECT_URL=logout_target):
+            resp = self.client.post("/accounts/logout/")
+            self.assertEqual(resp.status_code, 302)
+            self.assertEqual(resp.url, logout_target)
+
+    def test_is_trusted_proxy_helper(self):
+        from core.backends import is_trusted_proxy
+
+        cidrs = ["127.0.0.1/32", "10.0.0.0/8", "172.16.0.0/12", "192.168.1.50"]
+        self.assertTrue(is_trusted_proxy("127.0.0.1", cidrs))
+        self.assertTrue(is_trusted_proxy("10.50.2.1", cidrs))
+        self.assertTrue(is_trusted_proxy("172.19.0.1", cidrs))
+        self.assertTrue(is_trusted_proxy("192.168.1.50", cidrs))
+        self.assertFalse(is_trusted_proxy("192.168.1.51", cidrs))
+        self.assertFalse(is_trusted_proxy("203.0.113.1", cidrs))
+        self.assertFalse(is_trusted_proxy("", cidrs))
+        self.assertFalse(is_trusted_proxy("invalid-ip", cidrs))
+        self.assertFalse(is_trusted_proxy("10.0.0.1", []))
+
+    def test_middleware_trusted_proxy_cidr_enforcement(self):
+        with override_settings(PROXY_AUTH_TRUSTED_PROXIES=["10.0.0.0/8"]):
+            # Allowed from trusted CIDR
+            resp_trusted = self.client.get(
+                "/",
+                REMOTE_ADDR="10.2.3.4",
+                HTTP_X_AUTH_REQUEST_PREFERRED_USERNAME="existing_testuser",
+            )
+            self.assertEqual(resp_trusted.status_code, 200)
+
+            # Untrusted IP should have headers ignored and redirect to login
+            self.client.logout()
+            resp_untrusted = self.client.get(
+                "/",
+                REMOTE_ADDR="198.51.100.99",
+                HTTP_X_AUTH_REQUEST_PREFERRED_USERNAME="existing_testuser",
+            )
+            self.assertEqual(resp_untrusted.status_code, 302)
+            self.assertTrue(resp_untrusted.url.startswith("/accounts/login/"))
+
