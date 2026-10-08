@@ -27,6 +27,45 @@ ALLOWED_HOSTS = [h.strip() for h in allowed_hosts_env.split(",") if h.strip()]
 if not ALLOWED_HOSTS:
     ALLOWED_HOSTS = ["*"] if DEBUG else ["localhost", "127.0.0.1"]
 
+def get_csrf_trusted_origins(allowed_hosts, debug=False):
+    origins = []
+    for host in allowed_hosts:
+        if host == "*":
+            if debug:
+                for dev_origin in (
+                    "http://localhost",
+                    "http://127.0.0.1",
+                    "http://localhost:8080",
+                    "http://127.0.0.1:8080",
+                    "http://localhost:8000",
+                    "http://127.0.0.1:8000",
+                ):
+                    if dev_origin not in origins:
+                        origins.append(dev_origin)
+            continue
+
+        clean_host = host.split("://")[-1]
+        for scheme in ("https://", "http://"):
+            if clean_host.startswith("*."):
+                generated = [f"{scheme}{clean_host}", f"{scheme}{clean_host[2:]}"]
+            elif clean_host.startswith("."):
+                generated = [f"{scheme}*{clean_host}", f"{scheme}{clean_host[1:]}"]
+            else:
+                generated = [f"{scheme}{clean_host}"]
+
+            for origin in generated:
+                if origin not in origins:
+                    origins.append(origin)
+    return origins
+
+
+# Derive CSRF_TRUSTED_ORIGINS directly from ALLOWED_HOSTS
+CSRF_TRUSTED_ORIGINS = get_csrf_trusted_origins(ALLOWED_HOSTS, DEBUG)
+
+# Reverse proxy support (SSL termination via Nginx/Traefik/Caddy/Cloudflare)
+SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+USE_X_FORWARDED_HOST = True
+
 # Application definition
 INSTALLED_APPS = [
     "django.contrib.admin",

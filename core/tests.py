@@ -9,9 +9,12 @@ from cryptography.hazmat.primitives import hashes, serialization
 from cryptography.hazmat.primitives.asymmetric import rsa
 from cryptography.x509.oid import NameOID
 from dateutil.relativedelta import relativedelta
+from django.conf import settings
+from config.settings import get_csrf_trusted_origins
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.test import Client as HttpClient, TestCase
+from django.middleware.csrf import CsrfViewMiddleware
+from django.test import Client as HttpClient, RequestFactory, TestCase, override_settings
 from django.urls import reverse
 
 from core.models import (
@@ -2116,4 +2119,49 @@ class CompanySettingsAutoEmitNfseTests(TestCase):
         self.assertTrue(self.company.auto_emit_nfse)
 
 
+class SecuritySettingsTests(TestCase):
+    def test_csrf_trusted_origins_configured(self):
+        self.assertTrue(len(settings.CSRF_TRUSTED_ORIGINS) > 0)
+        for origin in settings.CSRF_TRUSTED_ORIGINS:
+            self.assertTrue(
+                origin.startswith("http://") or origin.startswith("https://"),
+                f"Origin {origin} must have a scheme",
+            )
 
+    def test_get_csrf_trusted_origins_derivation(self):
+        origins = get_csrf_trusted_origins(
+            ["app.example.com", ".sub.example.com", "*.wildcard.example.com"]
+        )
+        self.assertIn("https://app.example.com", origins)
+        self.assertIn("http://app.example.com", origins)
+        self.assertIn("https://*.sub.example.com", origins)
+        self.assertIn("https://sub.example.com", origins)
+        self.assertIn("https://*.wildcard.example.com", origins)
+        self.assertIn("https://wildcard.example.com", origins)
+
+    def test_get_csrf_trusted_origins_wildcard_debug(self):
+        origins = get_csrf_trusted_origins(["*"], debug=True)
+        self.assertIn("http://localhost", origins)
+        self.assertIn("http://localhost:8080", origins)
+
+    def test_secure_proxy_ssl_header_configured(self):
+        self.assertEqual(
+            settings.SECURE_PROXY_SSL_HEADER, ("HTTP_X_FORWARDED_PROTO", "https")
+        )
+        self.assertTrue(settings.USE_X_FORWARDED_HOST)
+
+        rf = RequestFactory()
+        request = rf.get("/", HTTP_X_FORWARDED_PROTO="https")
+        self.assertTrue(request.is_secure())
+
+    def test_csrf_origin_verification_with_trusted_origin(self):
+        rf = RequestFactory()
+        with override_settings(CSRF_TRUSTED_ORIGINS=["https://app.example.com"]):
+            mw = CsrfViewMiddleware(lambda req: None)
+            request = rf.post("/accounts/login/", HTTP_ORIGIN="https://app.example.com")
+            self.assertTrue(mw._origin_verified(request))
+
+            untrusted_request = rf.post(
+                "/accounts/login/", HTTP_ORIGIN="https://malicious.example.com"
+            )
+            self.assertFalse(mw._origin_verified(untrusted_request))
