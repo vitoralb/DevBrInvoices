@@ -20,16 +20,33 @@ def send_email_with_debug(
     final_to = list(to_emails)
     final_cc = list(cc_emails) if cc_emails else []
 
-    if company and company.debug_mode and company.debug_email:
+    is_debug = bool(
+        (company and company.debug_mode)
+        or getattr(settings, "FORCE_DEBUG_MODE", False)
+    )
+    if is_debug:
+        debug_destination = (
+            (company.debug_email.strip() if company and company.debug_email else "")
+            or (company.email.strip() if company and company.email else "")
+            or getattr(settings, "DEFAULT_FROM_EMAIL", "").strip()
+        )
         debug_info = (
-            f"\n\n--- DEBUG INFO ---\n"
+            f"\n\n--- DEBUG INFO (DEV/DEBUG MODE ACTIVE) ---\n"
             f"Original To: {', '.join(to_emails)}\n"
             f"Original CC: {', '.join(cc_emails) if cc_emails else 'None'}\n"
-            f"------------------\n"
+            f"Redirected To: {debug_destination}\n"
+            f"-----------------------------------------\n"
         )
         body = debug_info + body
-        final_to = [company.debug_email]
+        final_to = [debug_destination] if debug_destination else []
         final_cc = []
+
+        if not final_to:
+            logger.warning(
+                "Debug mode is active but no debug recipient email could be resolved. Email dropped: '%s'",
+                subject,
+            )
+            return
 
     email_msg = EmailMessage(
         subject=subject,

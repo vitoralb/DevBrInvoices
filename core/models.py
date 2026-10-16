@@ -2,6 +2,7 @@ import uuid
 from datetime import datetime, timedelta
 from decimal import Decimal
 from django.db import models
+from django.conf import settings
 from core.fields import EncryptedTextField
 from django.core.exceptions import ValidationError
 from django.core.validators import MinValueValidator, MaxValueValidator, RegexValidator
@@ -126,9 +127,14 @@ class CompanySettings(models.Model):
 
     @classmethod
     def load(cls):
-        return cls.objects.first()
+        instance = cls.objects.first()
+        if instance and getattr(settings, "FORCE_DEBUG_MODE", False):
+            instance.debug_mode = True
+        return instance
 
     def save(self, *args, **kwargs):
+        if getattr(settings, "FORCE_DEBUG_MODE", False):
+            self.debug_mode = True
         super().save(*args, **kwargs)
         from django.core.cache import cache
 

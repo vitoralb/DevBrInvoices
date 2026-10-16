@@ -1,3 +1,5 @@
+name: notas
+
 services:
   db:
     image: postgres:16-alpine
@@ -22,11 +24,13 @@ services:
     build: .
     command: python manage.py runserver 0.0.0.0:8080
     volumes:
-      - .:/app
+      - ./media:/app/media
     ports:
       - "8080:8080"
     env_file:
       - .env
+    environment:
+      - ENVIRONMENT=prod
     depends_on:
       db:
         condition: service_healthy
@@ -38,9 +42,11 @@ services:
     build: .
     command: celery -A config worker -l INFO
     volumes:
-      - .:/app
+      - ./media:/app/media
     env_file:
       - .env
+    environment:
+      - ENVIRONMENT=prod
     depends_on:
       db:
         condition: service_healthy
@@ -50,11 +56,13 @@ services:
 
   celery-beat:
     build: .
-    command: celery -A config beat -l INFO
+    command: celery -A config beat -l INFO -s /tmp/celerybeat-schedule
     volumes:
-      - .:/app
+      - ./media:/app/media
     env_file:
       - .env
+    environment:
+      - ENVIRONMENT=prod
     depends_on:
       db:
         condition: service_healthy

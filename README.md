@@ -13,11 +13,12 @@ Uma aplicação Django para gerenciamento de invoices de serviços para o exteri
 
 ## Principais Features e Decisões de Design (Code Highlights)
 
-- **Backend em Django & HTMX:** Escolhidos para fornecer um painel seguro e interações de frontend dinâmicas sem a complexidade de manter uma Single Page Application.
-- **Assinatura de Notas Fiscais Integrada:** O código realiza as assinaturas XML do padrão ABRASF localmente (usando o certificado A1 embutido `.pfx`) através das bibliotecas `cryptography` e `signxml`, removendo a dependência de serviços externos caros de mensageria e emissão.
-- **Integração SOAP e REST:** Lida com as idiossincrasias das prefeituras construindo envelopes SOAP manualmente e utilizando a biblioteca `xsdata` para parsing XML (Prefeitura SP), além de clientes HTTP RESTful tradicionais para o Emissor Nacional.
-- **Trabalhadores Assíncronos (Celery):** Processamento em background fundamental para não bloquear a interface do usuário durante a comunicação muitas vezes instável com as APIs de emissão ou com a API do BCB (Banco Central).
+- **Backend em Django & HTMX:** Painel seguro e interações de frontend dinâmicas sem a complexidade de manter uma Single Page Application.
+- **Assinatura de Notas Fiscais Integrada:** Assinaturas XML do padrão ABRASF localmente (usando o certificado A1 embutido `.pfx`) através das bibliotecas `cryptography` e `signxml`, removendo a dependência de serviços externos caros de mensageria.
+- **Integração SOAP e REST:** Lida com as prefeituras construindo envelopes SOAP manualmente e utilizando a biblioteca `xsdata` para parsing XML (Prefeitura SP), além de clientes HTTP RESTful tradicionais para o Emissor Nacional.
+- **Trabalhadores Assíncronos (Celery):** Processamento em background fundamental para não bloquear a interface do usuário durante a comunicação com as APIs de emissão ou com a API do BCB (Banco Central).
 - **WeasyPrint para PDFs:** Geração nativa (sem depender de APIs externas) e em alta qualidade de PDFs das invoices enviadas aos clientes estrangeiros.
+- **Ambientes Isolados de Produção e Desenvolvimento:** Produção roda a partir de imagens imutáveis (imune a edições de código durante o desenvolvimento). O ambiente de desenvolvimento pode ser criado sob demanda com dados reais clonados, travas estritas de segurança em modo debug e destruído após o término.
 
 ## Arquitetura & Stack Tecnológica
 
@@ -27,7 +28,9 @@ Uma aplicação Django para gerenciamento de invoices de serviços para o exteri
 - **Geração de PDF:** WeasyPrint
 - **Integrações Fiscais:** Clientes REST (Emissor Nacional) e SOAP (Prefeitura de São Paulo) para NFS-e com assinatura via certificado digital (A1 PKCS#12 / PFX) usando `cryptography` e `signxml`
 
-## Começando
+---
+
+## Começando em Produção
 
 ### 1. Pré-requisitos
 - Docker e Docker Compose instalados.
@@ -44,35 +47,81 @@ Preencha as variáveis de configuração no `.env`:
 - `POSTGRES_*`: Credenciais do banco de dados (nome, usuário, senha, host, porta).
 - `CELERY_BROKER_URL`: URL de conexão com o Redis.
 
-### 3. Executando com Docker Compose
-Construa e inicie todos os serviços (PostgreSQL, Redis, Web, Celery Worker, Celery Beat):
+### 3. Executando Produção com Docker Compose
+Construa e inicie todos os serviços de produção (PostgreSQL, Redis, Web, Celery Worker, Celery Beat):
 ```bash
 docker compose up -d --build
 ```
+A produção será disponibilizada na porta **8080** (`http://localhost:8080`).
 
 ### 4. Migrações do Banco de Dados
-Aplique as migrações do banco de dados:
+Aplique as migrações no container de produção:
 ```bash
-docker compose exec web python manage.py migrate
+docker exec notas-web-1 python manage.py migrate --noinput
 ```
 
 ### 5. Criar Superusuário & Configuração da Empresa
 Crie uma conta de administrador:
 ```bash
-docker compose exec web python manage.py createsuperuser
+docker exec -it notas-web-1 python manage.py createsuperuser
 ```
-Acesse a aplicação em `http://localhost:8080/` e defina os detalhes de **Sua Empresa** (Company Settings), como dados cadastrais, informações bancárias e série/número de RPS a ser utilizado.
+Acesse a aplicação em `http://localhost:8080/` e configure **Sua Empresa** (Company Settings), como dados cadastrais, informações bancárias e série/número de RPS.
 
 ### 6. Coletar Arquivos Estáticos (Produção)
 ```bash
-docker compose exec web python manage.py collectstatic --no-input
+docker exec notas-web-1 python manage.py collectstatic --noinput
 ```
 
-## Executando Testes
-Rode a suíte de testes dentro do container web:
+---
+
+## Fluxo de Desenvolvimento (Dev vs Prod)
+
+Para desenvolver novas funcionalidades sem riscos para o ambiente de produção nem poluição de arquivos reais, utilize o fluxo de desenvolvimento isolado via `Makefile`:
+
+### 1. Criar um Ambiente de Desenvolvimento (Dev)
+Gera uma stack de desenvolvimento completa (`notas-dev`) na porta **8081**, clonando o banco de dados e arquivos de mídia da produção atual para `./dev_data/`:
 ```bash
-docker compose exec web python manage.py test core -v2
+make dev-spawn
 ```
+- **Live Reload:** O código local é montado em tempo real no container de desenvolvimento.
+- **Travas de Segurança:** `debug_mode` é travado em `True`, `auto_finalize_invoices` é desativado para evitar disparos acidentais, todos os e-mails são redirecionados e as emissões de NFS-e são direcionadas para endpoints de teste/homologação.
+- **Regra de Instância Única:** Apenas **um** ambiente de desenvolvimento pode estar ativo por vez.
+
+### 2. Executar a Suíte de Testes
+Os testes devem ser executados **obrigatoriamente** no ambiente de desenvolvimento:
+```bash
+make dev-test
+# ou simplesmente:
+make test
+```
+*O test runner isola automaticamente o diretório de mídia em uma pasta temporária que é excluída ao final dos testes, garantindo que nenhum PDF ou XML fictício de teste permaneça no disco.*
+
+### 3. Reiniciar os Workers no Desenvolvimento
+Caso altere tarefas Celery ou models:
+```bash
+make dev-restart
+```
+
+### 4. Destruir o Ambiente de Desenvolvimento
+Quando terminar a funcionalidade ou testes:
+```bash
+make dev-destroy
+```
+Isso remove todos os containers de desenvolvimento e exclui completamente a pasta `./dev_data/`.
+
+### 5. Atualizar a Produção
+Após finalizar a funcionalidade, testar em Dev e mesclar o código na branch principal (`master`):
+```bash
+make prod-upgrade
+```
+O comando reconstrói a imagem Docker de produção, recria os containers de produção e executa as migrações pendentes.
+
+### 6. Verificar o Status dos Ambientes
+```bash
+make status
+```
+
+---
 
 ## Lógica de Negócio Principal
 

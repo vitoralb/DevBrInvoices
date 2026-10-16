@@ -1,3 +1,4 @@
+from django.conf import settings
 from django.contrib import admin
 from .models import (
     CompanySettings,
@@ -50,6 +51,13 @@ class CompanySettingsAdmin(admin.ModelAdmin):
 
     def has_delete_permission(self, request, obj=None):
         return False
+
+    def get_readonly_fields(self, request, obj=None):
+        readonly = list(super().get_readonly_fields(request, obj) or [])
+        if getattr(settings, "FORCE_DEBUG_MODE", False):
+            if "debug_mode" not in readonly:
+                readonly.append("debug_mode")
+        return readonly
 
 
 @admin.register(Client)

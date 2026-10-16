@@ -54,3 +54,4 @@ staticfiles/
 
 # Database
 postgres_data/
+dev_data/

@@ -19,5 +19,6 @@ COPY requirements.txt /app/
 RUN pip install --no-cache-dir --upgrade pip && pip install --no-cache-dir -r requirements.txt
 
 COPY . /app/
+RUN SECRET_KEY=build-temp-key python manage.py collectstatic --noinput
 
 EXPOSE 8080

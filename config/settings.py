@@ -1,4 +1,5 @@
 import os
+import sys
 import datetime
 from pathlib import Path
 from celery.schedules import crontab
@@ -7,8 +8,14 @@ from django.core.exceptions import ImproperlyConfigured
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+ENVIRONMENT = os.environ.get("ENVIRONMENT", "prod").lower()
+is_testing = "test" in sys.argv
+FORCE_DEBUG_MODE = (
+    False if is_testing else os.environ.get("FORCE_DEBUG_MODE", "False") == "True"
+)
+
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.environ.get("DEBUG", "False") == "True"
+DEBUG = os.environ.get("DEBUG", "False") == "True" or FORCE_DEBUG_MODE
 
 # SECURITY WARNING: keep the secret key used in production secret!
 SECRET_KEY = os.environ.get("SECRET_KEY")
@@ -37,6 +44,8 @@ def get_csrf_trusted_origins(allowed_hosts, debug=False):
                     "http://127.0.0.1",
                     "http://localhost:8080",
                     "http://127.0.0.1:8080",
+                    "http://localhost:8081",
+                    "http://127.0.0.1:8081",
                     "http://localhost:8000",
                     "http://127.0.0.1:8000",
                 ):
@@ -56,11 +65,22 @@ def get_csrf_trusted_origins(allowed_hosts, debug=False):
             for origin in generated:
                 if origin not in origins:
                     origins.append(origin)
+
+    # Allow custom trusted origins via environment variable
+    custom_origins = os.environ.get("CSRF_TRUSTED_ORIGINS", "")
+    for co in custom_origins.split(","):
+        co = co.strip()
+        if co and co not in origins:
+            origins.append(co)
+
     return origins
 
 
 # Derive CSRF_TRUSTED_ORIGINS directly from ALLOWED_HOSTS
 CSRF_TRUSTED_ORIGINS = get_csrf_trusted_origins(ALLOWED_HOSTS, DEBUG)
+
+# Test runner with isolated temporary media directory
+TEST_RUNNER = "core.test_runner.TempMediaTestRunner"
 
 # Reverse proxy support (SSL termination via Nginx/Traefik/Caddy/Cloudflare)
 SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
@@ -102,7 +122,7 @@ if not DEBUG:
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = os.environ.get("SECURE_SSL_REDIRECT", "False") == "True"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
