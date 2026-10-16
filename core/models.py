@@ -128,6 +128,18 @@ class CompanySettings(models.Model):
     def load(cls):
         return cls.objects.first()
 
+    def save(self, *args, **kwargs):
+        super().save(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.delete("company_settings_exists")
+
+    def delete(self, *args, **kwargs):
+        super().delete(*args, **kwargs)
+        from django.core.cache import cache
+
+        cache.delete("company_settings_exists")
+
     def __str__(self):
         return self.company_name
 

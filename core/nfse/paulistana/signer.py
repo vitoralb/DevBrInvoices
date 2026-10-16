@@ -1,8 +1,4 @@
-import os
 import logging
-import datetime
-from cryptography.hazmat.primitives.serialization import pkcs12
-from cryptography.hazmat.primitives import serialization
 from signxml import XMLSigner, methods
 
 logger = logging.getLogger(__name__)
@@ -12,9 +8,6 @@ class XMLSignerComSHA1(XMLSigner):
     def check_deprecated_methods(self):
         # Passa ignorando o bloqueio do SHA-1 (exigência estrita da Prefeitura de SP)
         pass
-
-
-from core.nfse.cert import carregar_certificado_pfx
 
 
 def assinar_xml(xml_root, key_pem, cert_pem):

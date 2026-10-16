@@ -1,25 +1,31 @@
+import functools
 import json
 import os
 from decimal import Decimal
 from datetime import datetime
 
 
-def load_tax_tables(tax_type=None):
+@functools.lru_cache(maxsize=16)
+def _load_tax_tables_cached(tax_type=None):
     base_dir = os.path.dirname(os.path.abspath(__file__))
     if tax_type:
         json_path = os.path.join(base_dir, f"tax_tables_{tax_type}.json")
         if not os.path.exists(json_path):
-            return []
+            return ()
         with open(json_path, "r", encoding="utf-8") as f:
-            return json.load(f)
+            return tuple(json.load(f))
 
     # if no tax_type, load all (for api_taxes_view maybe)
     data = []
-    for f_name in os.listdir(base_dir):
+    for f_name in sorted(os.listdir(base_dir)):
         if f_name.startswith("tax_tables_") and f_name.endswith(".json"):
             with open(os.path.join(base_dir, f_name), "r", encoding="utf-8") as f:
                 data.extend(json.load(f))
-    return data
+    return tuple(data)
+
+
+def load_tax_tables(tax_type=None):
+    return list(_load_tax_tables_cached(tax_type))
 
 
 def parse_date(date_str):

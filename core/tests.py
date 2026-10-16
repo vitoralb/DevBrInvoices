@@ -756,21 +756,17 @@ class NFSeProviderAbstractionTests(TestCase):
     </ChaveNFeRPS>
 </RetornoEnvioLoteRPS>"""
 
-        with patch(
-            "core.nfse.paulistana.client.carregar_certificado_pfx",
-            return_value=(b"key", b"cert"),
-        ):
-            client = NFeClient(b"cert_pem", b"key_pem", "00000000000191", "00000000")
-            retorno = client.parser.from_string(sample_xml, RetornoEnvioLoteRpsV1)
-            self.assertTrue(retorno.cabecalho.sucesso)
-            self.assertEqual(len(retorno.chave_nfe_rps), 1)
-            chave = retorno.chave_nfe_rps[0]
-            self.assertEqual(chave.chave_nfe.numero_nfe, "54")
-            self.assertEqual(chave.chave_nfe.codigo_verificacao, "AAAAAAAA")
-            self.assertEqual(
-                chave.chave_nfe.chave_nota_nacional,
-                "35503081200000000000191000000000005426097092595485",
-            )
+        client = NFeClient(b"cert_pem", b"key_pem", "00000000000191", "00000000")
+        retorno = client.parser.from_string(sample_xml, RetornoEnvioLoteRpsV1)
+        self.assertTrue(retorno.cabecalho.sucesso)
+        self.assertEqual(len(retorno.chave_nfe_rps), 1)
+        chave = retorno.chave_nfe_rps[0]
+        self.assertEqual(chave.chave_nfe.numero_nfe, "54")
+        self.assertEqual(chave.chave_nfe.codigo_verificacao, "AAAAAAAA")
+        self.assertEqual(
+            chave.chave_nfe.chave_nota_nacional,
+            "35503081200000000000191000000000005426097092595485",
+        )
 
     @patch("core.nfse.paulistana.client.NFeClient.enviar_lote_rps")
     def test_paulistana_emitir_nfse_extracts_list_and_national_key(self, mock_enviar):
@@ -811,22 +807,18 @@ class NFSeProviderAbstractionTests(TestCase):
         self.invoice.save()
 
         with patch(
-            "core.nfse.paulistana.client.carregar_certificado_pfx",
-            return_value=(b"key", b"cert"),
+            "core.nfse.paulistana.provider.assinar_rps_v1", return_value="fake-sig"
         ):
-            with patch(
-                "core.nfse.paulistana.provider.assinar_rps_v1", return_value="fake-sig"
-            ):
-                provider = PaulistanaProvider()
-                result = provider.emitir_nfse(self.invoice)
+            provider = PaulistanaProvider()
+            result = provider.emitir_nfse(self.invoice)
 
-                self.assertTrue(result.sucesso)
-                self.assertEqual(result.numero_nf, "54")
-                self.assertEqual(result.codigo_verificacao, "AAAAAAAA")
-                self.assertEqual(
-                    result.chave_acesso_nacional,
-                    "35503081200000000000191000000000005426097092595485",
-                )
+            self.assertTrue(result.sucesso)
+            self.assertEqual(result.numero_nf, "54")
+            self.assertEqual(result.codigo_verificacao, "AAAAAAAA")
+            self.assertEqual(
+                result.chave_acesso_nacional,
+                "35503081200000000000191000000000005426097092595485",
+            )
 
     @patch("core.nfse.paulistana.client.NFeClient.consultar_nfe_emitidas")
     def test_paulistana_consultar_nfse_date_range(self, mock_consultar):
@@ -855,28 +847,24 @@ class NFSeProviderAbstractionTests(TestCase):
         )
         mock_consultar.return_value = [mock_nota]
 
-        with patch(
-            "core.nfse.paulistana.client.carregar_certificado_pfx",
-            return_value=(b"key", b"cert"),
-        ):
-            with patch("core.nfse.paulistana.provider.to_xml", return_value="<xml/>"):
-                provider = PaulistanaProvider()
-                result = provider.consultar_nfse(self.invoice)
+        with patch("core.nfse.paulistana.provider.to_xml", return_value="<xml/>"):
+            provider = PaulistanaProvider()
+            result = provider.consultar_nfse(self.invoice)
 
-                self.assertIsNotNone(result)
-                self.assertTrue(result.sucesso)
-                self.assertEqual(result.numero_nf, "54")
-                self.assertEqual(result.codigo_verificacao, "AAAAAAAA")
-                self.assertEqual(
-                    result.chave_acesso_nacional,
-                    "35503081200000000000191000000000005426097092595485",
-                )
+            self.assertIsNotNone(result)
+            self.assertTrue(result.sucesso)
+            self.assertEqual(result.numero_nf, "54")
+            self.assertEqual(result.codigo_verificacao, "AAAAAAAA")
+            self.assertEqual(
+                result.chave_acesso_nacional,
+                "35503081200000000000191000000000005426097092595485",
+            )
 
-                mock_consultar.assert_called_once()
-                call_kwargs = mock_consultar.call_args[1]
-                dt_inicio = call_kwargs["dt_inicio"]
-                dt_fim = call_kwargs["dt_fim"]
-                self.assertLessEqual((dt_fim - dt_inicio).days, 30)
+            mock_consultar.assert_called_once()
+            call_kwargs = mock_consultar.call_args[1]
+            dt_inicio = call_kwargs["dt_inicio"]
+            dt_fim = call_kwargs["dt_fim"]
+            self.assertLessEqual((dt_fim - dt_inicio).days, 30)
 
     @patch("core.utils.http.requests.post")
     def test_paulistana_soap_fault_logged_properly(self, mock_post):
@@ -903,19 +891,15 @@ class NFSeProviderAbstractionTests(TestCase):
         self.company.save()
 
         with patch(
-            "core.nfse.paulistana.client.carregar_certificado_pfx",
-            return_value=(b"key", b"cert"),
+            "core.nfse.paulistana.provider.assinar_rps_v1",
+            return_value="FAKE_SIGNATURE",
         ):
             with patch(
-                "core.nfse.paulistana.provider.assinar_rps_v1",
-                return_value="FAKE_SIGNATURE",
+                "core.nfse.paulistana.client.assinar_xml",
+                side_effect=lambda root, *a, **kw: root,
             ):
-                with patch(
-                    "core.nfse.paulistana.client.assinar_xml",
-                    side_effect=lambda root, *a, **kw: root,
-                ):
-                    success = enviar_nfe_para_prefeitura(self.invoice)
-                    self.assertFalse(success)
+                success = enviar_nfe_para_prefeitura(self.invoice)
+                self.assertFalse(success)
 
         log = (
             NfseLog.objects.filter(invoice=self.invoice).order_by("-created_at").first()
@@ -949,19 +933,15 @@ class NFSeProviderAbstractionTests(TestCase):
         self.company.save()
 
         with patch(
-            "core.nfse.paulistana.client.carregar_certificado_pfx",
-            return_value=(b"key", b"cert"),
+            "core.nfse.paulistana.provider.assinar_rps_v1",
+            return_value="FAKE_SIGNATURE",
         ):
             with patch(
-                "core.nfse.paulistana.provider.assinar_rps_v1",
-                return_value="FAKE_SIGNATURE",
+                "core.nfse.paulistana.client.assinar_xml",
+                side_effect=lambda root, *a, **kw: root,
             ):
-                with patch(
-                    "core.nfse.paulistana.client.assinar_xml",
-                    side_effect=lambda root, *a, **kw: root,
-                ):
-                    success = enviar_nfe_para_prefeitura(self.invoice)
-                    self.assertFalse(success)
+                success = enviar_nfe_para_prefeitura(self.invoice)
+                self.assertFalse(success)
 
         log = (
             NfseLog.objects.filter(invoice=self.invoice).order_by("-created_at").first()
@@ -2056,14 +2036,6 @@ class ProcessDailyInvoicesTaskTests(TestCase):
         mock_final_sig.delay.assert_called_once()
         mock_send_email.assert_called_once()
 
-    def test_legacy_task_alias_calls_process_daily_invoices_task(self):
-        from core.tasks.invoices_tasks import legacy_process_daily_invoices_task
-
-        self.company.auto_finalize_invoices = False
-        self.company.save()
-        res = legacy_process_daily_invoices_task(force=False)
-        self.assertEqual(res, "Auto finalization disabled.")
-
 
 class CompanySettingsAutoEmitNfseTests(TestCase):
     def setUp(self):
@@ -2169,6 +2141,11 @@ class SecuritySettingsTests(TestCase):
 
 class ProxyHeaderAuthTests(TestCase):
     def setUp(self):
+        # Ensure tests are not blocked by host environment's PROXY_AUTH_TRUSTED_PROXIES
+        self._settings_ctx = override_settings(PROXY_AUTH_TRUSTED_PROXIES=[])
+        self._settings_ctx.enable()
+        self.addCleanup(self._settings_ctx.disable)
+
         self.user = User.objects.create_user(
             username="existing_testuser",
             email="existing@example.com",

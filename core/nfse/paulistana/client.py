@@ -1,10 +1,8 @@
 import datetime
 import logging
 import os
-import tempfile
 from decimal import Decimal
 from typing import List, Optional, Tuple
-from contextlib import contextmanager
 
 import requests
 from django.conf import settings
@@ -16,6 +14,7 @@ from xsdata.formats.dataclass.serializers import XmlSerializer
 from xsdata.formats.dataclass.serializers.config import SerializerConfig
 
 from core.nfse.base import NFSeProviderError
+from core.nfse.cert import SAFE_PARSER, _temp_cert_file
 from core.nfse.paulistana.schemas.pedido_consulta_nfe_periodo_v02 import (
     PedidoConsultaNfePeriodo,
 )
@@ -31,28 +30,9 @@ from core.nfse.paulistana.schemas_v1.tipos_nfe_v01 import (
     TpCpfcnpj as TpCpfcnpjV1,
     TpRps as TpRpsV1,
 )
-from .signer import assinar_xml, carregar_certificado_pfx
+from .signer import assinar_xml
 
 logger = logging.getLogger(__name__)
-
-SAFE_PARSER = etree.XMLParser(resolve_entities=False, no_network=True)
-
-
-@contextmanager
-def _temp_cert_file(cert_pem: bytes, key_pem: bytes):
-    """Context manager that writes cert/key to a short-lived temp file,
-    yields the path, then securely deletes it."""
-    fd, path = tempfile.mkstemp(suffix=".pem")
-    try:
-        os.chmod(path, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(cert_pem + b"\n" + key_pem)
-        yield path
-    finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
 
 
 def extract_soap_fault(content: str | bytes) -> Optional[str]:

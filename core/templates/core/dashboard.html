@@ -80,39 +80,6 @@
     </div>
 </div>
 
-{% if audit_findings %}
-<div class="alert {% if audit_findings.total_fixed > 0 %}alert-warning{% else %}alert-success{% endif %} mb-4 shadow-sm">
-    <h6 class="alert-heading mb-2">🔍 Resultados da Auditoria</h6>
-    {% if audit_findings.total_fixed == 0 %}
-        <p class="mb-0">✅ Nenhuma inconsistência encontrada. Todos os meses estão consolidados e atualizados.</p>
-    {% else %}
-        <p class="mb-1"><strong>{{ audit_findings.total_fixed }}</strong> problema{{ audit_findings.total_fixed|pluralize:'s' }} corrigido{{ audit_findings.total_fixed|pluralize:'s' }}:</p>
-        <ul class="mb-0">
-            {% if audit_findings.missing_months %}
-            <li class="mb-1"><strong>{{ audit_findings.missing_months|length }}</strong> consolidaç{{ audit_findings.missing_months|length|pluralize:'ão,ões' }} ausente{{ audit_findings.missing_months|length|pluralize:'s' }} criada{{ audit_findings.missing_months|length|pluralize:'s' }}:
-                {% for m in audit_findings.missing_months %}{{ m|date:"M Y" }}{% if not forloop.last %}, {% endif %}{% endfor %}
-            </li>
-            {% endif %}
-            
-            {% if audit_findings.differences %}
-            <li class="mb-1"><strong>{{ audit_findings.differences|length }}</strong> m{{ audit_findings.differences|length|pluralize:'ês,eses' }} existente{{ audit_findings.differences|length|pluralize:'s' }} recalculado{{ audit_findings.differences|length|pluralize:'s' }} e corrigido{{ audit_findings.differences|length|pluralize:'s' }}:
-                <ul class="mt-1 small">
-                {% for diff in audit_findings.differences %}
-                    <li class="mb-1"><strong>{{ diff.month|date:"M Y" }}</strong>:
-                        <ul class="mb-0">
-                        {% for change in diff.changes %}
-                            <li>{{ change }}</li>
-                        {% endfor %}
-                        </ul>
-                    </li>
-                {% endfor %}
-                </ul>
-            </li>
-            {% endif %}
-        </ul>
-    {% endif %}
-</div>
-{% endif %}
 
 
 <div class="card shadow-sm">

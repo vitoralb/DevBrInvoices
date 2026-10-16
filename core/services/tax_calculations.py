@@ -292,17 +292,6 @@ def calculate_simples_tax(
 
     # Calculate CPP portion
     cpp_allocation = bracket.cpp_allocation / Decimal("100")
-    cpp_tax_internal = tax_internal * cpp_allocation
-    # Assuming export revenue still pays CPP. The CPP allocation is based on the normal effective_rate, not export.
-    # Actually, the percentage is applied to the gross tax before deductions?
-    # Usually the Simples apportionment applies the percentage to the tax collected.
-    cpp_tax_export = (
-        tax_export * (cpp_allocation / (Decimal("1.00") - export_exemptions))
-        if export_exemptions < 1
-        else Decimal("0.00")
-    )
-    # Wait, it's easier: CPP allocation is a fixed % of the full tax amount before export deductions, but export just exempts some other taxes.
-    # So CPP is collected on both at the same nominal rate? No, the formula is: revenue * effective_rate * cpp_allocation.
     cpp_tax = (
         (revenue_internal + revenue_export) * effective_rate * cpp_allocation
     ).quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)

@@ -1,27 +1,18 @@
 from django import template
 import re
+from core.utils.formatters import format_cnpj, format_cep
 
 register = template.Library()
 
 
 @register.filter
 def cnpj_format(value):
-    if not value:
-        return ""
-    v = re.sub(r"[^0-9a-zA-Z]", "", str(value))
-    if len(v) == 14:
-        return f"{v[:2]}.{v[2:5]}.{v[5:8]}/{v[8:12]}-{v[12:]}"
-    return value
+    return format_cnpj(value)
 
 
 @register.filter
 def cep_format(value):
-    if not value:
-        return ""
-    v = re.sub(r"[^0-9a-zA-Z]", "", str(value))
-    if len(v) == 8:
-        return f"{v[:5]}-{v[5:]}"
-    return value
+    return format_cep(value)
 
 
 # a smart title case filter that handles pt-BR words and keeps them lowercase, also keep a list of full uppercase words that should remain uppercase (like acronyms)

@@ -1,7 +1,16 @@
 import logging
+from django.conf import settings
 from django.core.mail import EmailMessage
 
 logger = logging.getLogger(__name__)
+
+
+def _format_from_email(sender_name: str) -> str:
+    """Returns DEFAULT_FROM_EMAIL formatted with display name."""
+    addr = getattr(settings, "DEFAULT_FROM_EMAIL", "webmaster@localhost")
+    if "<" not in addr:
+        addr = f"{sender_name} <{addr}>"
+    return addr
 
 
 def send_email_with_debug(

@@ -1,8 +1,8 @@
 from dateutil.relativedelta import relativedelta
+from core.utils.formatters import format_money_pt_br, format_cnpj
 
-
-def _format_money_pt_br(value):
-    return f"{value:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+# Backward compatibility alias
+_format_money_pt_br = format_money_pt_br
 
 
 PT_BR_MONTHS = {
@@ -52,22 +52,15 @@ def apply_invoice_macros(text, invoice, language="en"):
     }
 
     from core.models import CompanySettings
-    import re
 
     company = CompanySettings.load()
     if company and company.cnpj:
-        v = re.sub(r"[^0-9a-zA-Z]", "", company.cnpj)
-        if len(v) == 14:
-            replacements["{{ company_cnpj }}"] = (
-                f"{v[:2]}.{v[2:5]}.{v[5:8]}/{v[8:12]}-{v[12:]}"
-            )
-        else:
-            replacements["{{ company_cnpj }}"] = v
+        replacements["{{ company_cnpj }}"] = format_cnpj(company.cnpj)
 
     try:
         val = invoice.total_foreign if invoice.total_foreign is not None else 0.0
         if language == "pt-br":
-            replacements["{{ value_original }}"] = _format_money_pt_br(val)
+            replacements["{{ value_original }}"] = format_money_pt_br(val)
         else:
             replacements["{{ value_original }}"] = f"{val:,.2f}"
     except:

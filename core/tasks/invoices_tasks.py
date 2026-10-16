@@ -11,17 +11,9 @@ from ..services import (
     fetch_exchange_rate,
 )
 from ..pdf_service import generate_pdf_bytes
-from ..email_service import send_email_with_debug
+from ..email_service import send_email_with_debug, _format_from_email
 
 logger = get_task_logger(__name__)
-
-
-def _format_from_email(sender_name: str) -> str:
-    """Returns DEFAULT_FROM_EMAIL formatted with display name."""
-    addr = settings.DEFAULT_FROM_EMAIL
-    if "<" not in addr:
-        addr = f"{sender_name} <{addr}>"
-    return addr
 
 
 def _get_pdf_bytes_for_task(invoice_id):
@@ -54,36 +46,18 @@ def finalize_invoice_task(invoice_id, send_to_client=False, send_to_company=Fals
 @shared_task(
     bind=True,
     autoretry_for=(Exception,),
-    retry_backoff=20,
+    retry_backoff=60,
     retry_backoff_max=3600,
     max_retries=10,
 )
 def cancel_invoice_task(self, invoice_id):
-    from core.models import NfseLog
-    from core.nfse.provider_factory import get_provider
+    from core.services.nfse_services import cancel_nota_fiscal
 
     invoice = Invoice.objects.get(id=invoice_id)
 
     if hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
-        if not invoice.nota_fiscal.can_be_canceled:
-            raise Exception(
-                f"NFS-e {invoice.nota_fiscal.nf_number} foi autorizada há mais de 24 horas e não pode ser cancelada."
-            )
-        provider = get_provider(invoice)
         try:
-            cancel_result = provider.cancelar_nfse(invoice)
-            NfseLog.objects.create(
-                invoice=invoice,
-                origem="System / Celery Cancel",
-                payload_enviado=cancel_result.xml_enviado,
-                payload_retorno=cancel_result.xml_retorno,
-                erro_mensagem=(
-                    " | ".join(cancel_result.erros)
-                    if not cancel_result.sucesso
-                    else None
-                ),
-            )
-
+            cancel_result = cancel_nota_fiscal(invoice, origem="System / Celery Cancel")
             if not cancel_result.sucesso:
                 raise Exception(
                     f"Falha ao cancelar NFS-e: {' | '.join(cancel_result.erros)}"
@@ -135,14 +109,12 @@ def cancel_invoice_task(self, invoice_id):
                 invoice.task_retry_count = self.request.retries + 1
                 invoice.save()
                 raise e
+    else:
+        invoice.status = "CANCELED"
 
     invoice.task_id = ""
     invoice.task_retry_count = 0
-    invoice.status = "CANCELED"
     invoice.save()
-    if hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
-        invoice.nota_fiscal.is_canceled = True
-        invoice.nota_fiscal.save()
     return f"Invoice {invoice_id} canceled."
 
 
@@ -176,8 +148,8 @@ def email_invoice_task(
         if nf.danfse_pdf:
             try:
                 if nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
-                    nf.danfse_pdf.open("rb")
-                    nfse_pdf = nf.danfse_pdf.read()
+                    with nf.danfse_pdf.open("rb") as f:
+                        nfse_pdf = f.read()
             except Exception as e:
                 logger.warning("Error reading local danfse_pdf in email task: %s", e)
                 nfse_pdf = None
@@ -199,7 +171,7 @@ def email_invoice_task(
 
         if nfse_pdf:
             company_attachments.append(
-                (f"NFSe_{nf.nf_number}.pdf", nfse_pdf, "application/pdf")
+                (f"NFS-e_{nf.nf_number}.pdf", nfse_pdf, "application/pdf")
             )
 
     # get first 3 words of company name for email display
@@ -359,8 +331,3 @@ def process_daily_invoices_task(force=False):
         count += 1
 
     return f"Processed {count} daily invoices."
-
-
-@shared_task(name="core.tasks.process_daily_invoices_task")
-def legacy_process_daily_invoices_task(force=False):
-    return process_daily_invoices_task(force=force)

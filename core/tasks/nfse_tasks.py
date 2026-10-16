@@ -11,11 +11,10 @@ from ..services import (
     fetch_exchange_rate,
 )
 from ..pdf_service import generate_pdf_bytes
-from ..email_service import send_email_with_debug
+from ..email_service import send_email_with_debug, _format_from_email
+from .invoices_tasks import _get_pdf_bytes_for_task
 
 logger = get_task_logger(__name__)
-
-from .invoices_tasks import _format_from_email, _get_pdf_bytes_for_task
 
 
 @shared_task(
@@ -130,7 +129,7 @@ def issue_nfse_task(
                     from_email_addr,
                     [
                         (
-                            f"NFSe_{nf.nf_number}.pdf",
+                            f"NFS-e_{nf.nf_number}.pdf",
                             pdf_bytes,
                             "application/pdf",
                         )
@@ -209,11 +208,7 @@ def fetch_nfse_pdf_task(self, invoice_id=None, nf_id=None, force=False):
     if not force and nf.danfse_pdf and nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
         return f"PDF already saved for NF {nf.nf_number}."
 
-    class DummyInvoice:
-        def __init__(self, nota_fiscal):
-            self.nota_fiscal = nota_fiscal
-
-    target = invoice if invoice else DummyInvoice(nf)
+    target = invoice if invoice else nf
 
     from core.services.nfse_services import fetch_and_save_nfse_pdf
 
@@ -252,36 +247,16 @@ def import_nfses_task(self, provider_type=None, *args, **kwargs):
     max_retries=10,
 )
 def cancel_nfse_standalone_task(self, nf_id):
-    from core.models import NotaFiscal, NfseLog
-    from core.nfse.provider_factory import get_provider
+    from core.models import NotaFiscal
+    from core.services.nfse_services import cancel_nota_fiscal
 
     nf = NotaFiscal.objects.get(id=nf_id)
     if nf.is_canceled:
         return f"NFSe {nf_id} already canceled."
-    if not nf.can_be_canceled:
-        raise Exception(
-            f"NFS-e {nf.nf_number} foi autorizada há mais de 24 horas e não pode ser cancelada."
-        )
 
-    class DummyInvoice:
-        # provider.cancelar_nfse expects an invoice with a nota_fiscal
-        def __init__(self, nota_fiscal):
-            self.nota_fiscal = nota_fiscal
-
-    dummy = DummyInvoice(nf)
-    provider = get_provider(dummy)
-
-    cancel_result = provider.cancelar_nfse(dummy)
-
-    # We don't have a real invoice for NfseLog, but we can bypass or just not log it
-    # NfseLog requires invoice. Since there's no invoice, we might skip NfseLog for standalone
-    # Or change NfseLog to allow null invoice.
-    # But wait, NfseLog invoice is a ForeignKey(Invoice, null=False).
-    # For standalone NFS-es, we don't have an Invoice. We'll skip it for now.
+    cancel_result = cancel_nota_fiscal(nf, origem="System / Celery Cancel Standalone")
 
     if not cancel_result.sucesso:
         raise Exception(f"Falha ao cancelar NFS-e: {' | '.join(cancel_result.erros)}")
 
-    nf.is_canceled = True
-    nf.save()
     return f"NFSe {nf_id} canceled successfully."

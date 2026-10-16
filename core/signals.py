@@ -19,15 +19,6 @@ def set_consolidation_in_progress(value: bool):
     _state.consolidation_in_progress = value
 
 
-# Module-level backward-compatible proxy object
-class _ConsolidationGuard:
-    def __bool__(self):
-        return is_consolidation_in_progress()
-
-
-_consolidation_in_progress = _ConsolidationGuard()
-
-
 def flag_months_outdated(target_date):
     """Flag the target month and the next 12 months as OUTDATED.
 

@@ -8,31 +8,11 @@ import ssl  # noqa: F401 - reserved for future in-memory SSL adapter
 import tempfile
 from contextlib import contextmanager
 from decimal import Decimal
-from typing import Optional, Tuple, List
+from typing import Optional, Tuple, List, Union
 
 import requests
 
 from core.utils.http import logged_get as _logged_get, logged_post as _logged_post
-
-
-@contextmanager
-def _temp_cert_file(cert_pem: bytes, key_pem: bytes):
-    """Context manager that writes cert/key to a short-lived temp file,
-    yields the path, then securely deletes it. Using a temp file is unavoidable
-    for requests mTLS, but we minimize the window and ensure cleanup."""
-    fd, path = tempfile.mkstemp(suffix=".pem")
-    try:
-        os.chmod(path, 0o600)
-        with os.fdopen(fd, "wb") as f:
-            f.write(cert_pem + b"\n" + key_pem)
-        yield path
-    finally:
-        try:
-            os.remove(path)
-        except OSError:
-            pass
-
-
 from django.conf import settings
 from django.db import transaction
 from lxml import etree
@@ -40,9 +20,15 @@ from signxml import XMLSigner, methods, namespaces
 from xsdata.formats.dataclass.serializers import XmlSerializer
 from xsdata.formats.dataclass.serializers.config import SerializerConfig
 
-from core.models import CompanySettings, Invoice
-from core.nfse.base import CancelResult, EmitResult, NFSeProvider, NFSeProviderError
-from core.nfse.cert import carregar_certificado_pfx
+from core.models import CompanySettings, Invoice, NotaFiscal
+from core.nfse.base import (
+    CancelResult,
+    EmitResult,
+    NFSeProvider,
+    NFSeProviderError,
+    extract_nota_fiscal,
+)
+from core.nfse.cert import _temp_cert_file
 
 from .schemas.v1_01.dps_v1_01 import Dps
 from .schemas.v1_01.tipos_complexos_v1_01 import (
@@ -73,6 +59,77 @@ BACEN_CURRENCY_MAP = {
     "GBP": "470",
     "BRL": "790",
 }
+
+
+def _decompress_gzip_b64(b64_str: str) -> Optional[str]:
+    """Decompresses base64-encoded gzip content to string."""
+    if not b64_str:
+        return None
+    try:
+        return gzip.decompress(base64.b64decode(b64_str)).decode("utf-8")
+    except Exception as ex:
+        logger.warning("Error decompressing base64 gzip XML: %s", ex)
+        return None
+
+
+def _parse_decompressed_nfse_xml(decompressed_xml: str) -> dict:
+    """Extracts common fields from Sefin Nacional NFS-e XML."""
+    data = {
+        "numero_nf": "",
+        "data_hora_autorizacao": None,
+        "codigo_tributacao_nacional": "",
+        "codigo_nbs": "",
+        "codigo_servico_municipio": "",
+        "aliquota_iss": None,
+        "valor_iss": None,
+    }
+    if not decompressed_xml:
+        return data
+
+    match = re.search(r"<nNFSe>(\d+)</nNFSe>", decompressed_xml)
+    if match:
+        data["numero_nf"] = match.group(1)
+
+    match_dh = re.search(r"<dhProc>([^<]+)</dhProc>", decompressed_xml)
+    if not match_dh:
+        match_dh = re.search(r"<dhEmi>([^<]+)</dhEmi>", decompressed_xml)
+    if match_dh:
+        try:
+            data["data_hora_autorizacao"] = datetime.datetime.fromisoformat(
+                match_dh.group(1).replace("Z", "+00:00")
+            )
+        except Exception:
+            pass
+
+    c_trib_nac = re.search(r"<cTribNac>([^<]+)</cTribNac>", decompressed_xml)
+    if c_trib_nac:
+        data["codigo_tributacao_nacional"] = c_trib_nac.group(1)
+
+    c_nbs = re.search(r"<cNBS>([^<]+)</cNBS>", decompressed_xml)
+    if c_nbs:
+        data["codigo_nbs"] = c_nbs.group(1)
+
+    c_trib_mun = re.search(r"<cTribMun>([^<]+)</cTribMun>", decompressed_xml)
+    if c_trib_mun:
+        data["codigo_servico_municipio"] = c_trib_mun.group(1)
+
+    p_aliq = re.search(r"<pAliq>([^<]+)</pAliq>", decompressed_xml)
+    if not p_aliq:
+        p_aliq = re.search(r"<pAliqAplic>([^<]+)</pAliqAplic>", decompressed_xml)
+    if p_aliq:
+        try:
+            data["aliquota_iss"] = Decimal(p_aliq.group(1))
+        except Exception:
+            pass
+
+    v_iss = re.search(r"<vISSQN>([^<]+)</vISSQN>", decompressed_xml)
+    if v_iss:
+        try:
+            data["valor_iss"] = Decimal(v_iss.group(1))
+        except Exception:
+            pass
+
+    return data
 
 
 class NacionalProvider(NFSeProvider):
@@ -374,44 +431,11 @@ class NacionalProvider(NFSeProvider):
                 if nfse_resp.status_code == 200:
                     nfse_data = nfse_resp.json()
                     nfse_b64 = nfse_data.get("nfseXmlGZipB64")
-                    if nfse_b64:
-                        try:
-                            decompressed_xml = gzip.decompress(
-                                base64.b64decode(nfse_b64)
-                            ).decode("utf-8")
-                            match = re.search(r"<nNFSe>(\d+)</nNFSe>", decompressed_xml)
-                            if match:
-                                numero_nf = match.group(1)
-                        except Exception as ex:
-                            logger.warning(
-                                "Error decompressing NFS-e XML on recovery: %s", ex
-                            )
+                    decompressed_xml = _decompress_gzip_b64(nfse_b64) or ""
+                    parsed = _parse_decompressed_nfse_xml(decompressed_xml)
+                    numero_nf = parsed["numero_nf"]
                 if not numero_nf:
                     numero_nf = chave_acesso[-15:].lstrip("0")
-
-                dh_proc = None
-                match_dh = re.search(r"<dhProc>([^<]+)</dhProc>", decompressed_xml)
-                if match_dh:
-                    try:
-                        dh_proc = datetime.datetime.fromisoformat(
-                            match_dh.group(1).replace("Z", "+00:00")
-                        )
-                    except Exception:
-                        pass
-
-                c_trib_nac = re.search(
-                    r"<cTribNac>([^<]+)</cTribNac>", decompressed_xml
-                )
-                c_nbs = re.search(r"<cNBS>([^<]+)</cNBS>", decompressed_xml)
-                c_trib_mun = re.search(
-                    r"<cTribMun>([^<]+)</cTribMun>", decompressed_xml
-                )
-                p_aliq = re.search(r"<pAliq>([^<]+)</pAliq>", decompressed_xml)
-                if not p_aliq:
-                    p_aliq = re.search(
-                        r"<pAliqAplic>([^<]+)</pAliqAplic>", decompressed_xml
-                    )
-                v_iss = re.search(r"<vISSQN>([^<]+)</vISSQN>", decompressed_xml)
 
                 return EmitResult(
                     sucesso=True,
@@ -419,14 +443,12 @@ class NacionalProvider(NFSeProvider):
                     codigo_verificacao=chave_acesso,
                     numero_nf=numero_nf,
                     xml_retorno=decompressed_xml or nfse_resp.text,
-                    data_hora_autorizacao=dh_proc,
-                    codigo_tributacao_nacional=(
-                        c_trib_nac.group(1) if c_trib_nac else ""
-                    ),
-                    codigo_nbs=c_nbs.group(1) if c_nbs else "",
-                    codigo_servico_municipio=c_trib_mun.group(1) if c_trib_mun else "",
-                    aliquota_iss=Decimal(p_aliq.group(1)) if p_aliq else None,
-                    valor_iss=Decimal(v_iss.group(1)) if v_iss else None,
+                    data_hora_autorizacao=parsed["data_hora_autorizacao"],
+                    codigo_tributacao_nacional=parsed["codigo_tributacao_nacional"],
+                    codigo_nbs=parsed["codigo_nbs"],
+                    codigo_servico_municipio=parsed["codigo_servico_municipio"],
+                    aliquota_iss=parsed["aliquota_iss"],
+                    valor_iss=parsed["valor_iss"],
                 )
         elif resp.status_code == 404:
             # 404 means the DPS was NOT issued yet (expected on first emission)
@@ -439,10 +461,26 @@ class NacionalProvider(NFSeProvider):
                 status_code=resp.status_code,
             )
 
-    def consultar_nfse(self, invoice: Invoice) -> Optional[EmitResult]:
-        """Checks if the DPS for this invoice was already issued in Sefin Nacional."""
-        if not invoice.document_number:
-            return None
+    def consultar_nfse(
+        self, invoice_or_nf: Union[Invoice, NotaFiscal]
+    ) -> Optional[EmitResult]:
+        """Checks if the DPS for this invoice or nota fiscal was already issued in Sefin Nacional."""
+        from core.nfse.base import extract_nota_fiscal
+
+        if isinstance(invoice_or_nf, Invoice):
+            if not invoice_or_nf.document_number:
+                return None
+            doc_number = invoice_or_nf.document_number
+            doc_series = invoice_or_nf.document_series
+        else:
+            nf = extract_nota_fiscal(invoice_or_nf)
+            if not nf or not nf.nf_number:
+                return None
+            doc_number = (
+                int(nf.nf_number) if str(nf.nf_number).isdigit() else nf.nf_number
+            )
+            doc_series = getattr(nf, "document_series", "1")
+
         company = CompanySettings.load()
         if not company:
             return None
@@ -450,9 +488,9 @@ class NacionalProvider(NFSeProvider):
         cnpj_prestador = re.sub(r"[^0-9a-zA-Z]", "", company.cnpj)
         cod_mun = company.address_city_ibge
         serie_formatada = str(
-            invoice.document_series or company.document_series or "1"
+            doc_series or company.document_series or "1"
         ).zfill(5)
-        numero_dps_formatado = str(invoice.document_number).zfill(15)
+        numero_dps_formatado = str(doc_number).zfill(15)
         id_dps = f"DPS{cod_mun}2{cnpj_prestador}{serie_formatada}{numero_dps_formatado}"
 
         base_url, _ = self._get_urls(company.debug_mode)
@@ -541,64 +579,17 @@ class NacionalProvider(NFSeProvider):
                     result.codigo_verificacao = result.chave_acesso_nacional
 
                     nfse_b64 = data.get("nfseXmlGZipB64")
-                    if nfse_b64:
-                        try:
-                            decompressed_xml = gzip.decompress(
-                                base64.b64decode(nfse_b64)
-                            ).decode("utf-8")
-                            result.xml_retorno = decompressed_xml
-
-                            # Extract nNFSe
-                            match = re.search(r"<nNFSe>(\d+)</nNFSe>", decompressed_xml)
-                            if match:
-                                result.numero_nf = match.group(1)
-
-                            dh_proc = None
-                            match_dh = re.search(
-                                r"<dhProc>([^<]+)</dhProc>", decompressed_xml
-                            )
-                            if match_dh:
-                                try:
-                                    dh_proc = datetime.datetime.fromisoformat(
-                                        match_dh.group(1).replace("Z", "+00:00")
-                                    )
-                                except Exception:
-                                    pass
-
-                            c_trib_nac = re.search(
-                                r"<cTribNac>([^<]+)</cTribNac>", decompressed_xml
-                            )
-                            c_nbs = re.search(r"<cNBS>([^<]+)</cNBS>", decompressed_xml)
-                            c_trib_mun = re.search(
-                                r"<cTribMun>([^<]+)</cTribMun>", decompressed_xml
-                            )
-                            p_aliq = re.search(
-                                r"<pAliq>([^<]+)</pAliq>", decompressed_xml
-                            )
-                            if not p_aliq:
-                                p_aliq = re.search(
-                                    r"<pAliqAplic>([^<]+)</pAliqAplic>",
-                                    decompressed_xml,
-                                )
-                            v_iss = re.search(
-                                r"<vISSQN>([^<]+)</vISSQN>", decompressed_xml
-                            )
-
-                            result.data_hora_autorizacao = dh_proc
-                            if c_trib_nac:
-                                result.codigo_tributacao_nacional = c_trib_nac.group(1)
-                            if c_nbs:
-                                result.codigo_nbs = c_nbs.group(1)
-                            if c_trib_mun:
-                                result.codigo_servico_municipio = c_trib_mun.group(1)
-                            if p_aliq:
-                                result.aliquota_iss = Decimal(p_aliq.group(1))
-                            if v_iss:
-                                result.valor_iss = Decimal(v_iss.group(1))
-                        except Exception as ex:
-                            logger.warning(
-                                "Error decompressing returned NFSe XML: %s", ex
-                            )
+                    decompressed_xml = _decompress_gzip_b64(nfse_b64)
+                    if decompressed_xml:
+                        result.xml_retorno = decompressed_xml
+                        parsed = _parse_decompressed_nfse_xml(decompressed_xml)
+                        result.numero_nf = parsed["numero_nf"]
+                        result.data_hora_autorizacao = parsed["data_hora_autorizacao"]
+                        result.codigo_tributacao_nacional = parsed["codigo_tributacao_nacional"]
+                        result.codigo_nbs = parsed["codigo_nbs"]
+                        result.codigo_servico_municipio = parsed["codigo_servico_municipio"]
+                        result.aliquota_iss = parsed["aliquota_iss"]
+                        result.valor_iss = parsed["valor_iss"]
 
                     if not result.numero_nf:
                         # Fallback to document number or part of chave de acesso
@@ -632,12 +623,14 @@ class NacionalProvider(NFSeProvider):
                     erros=err_list,
                 )
 
-    def baixar_pdf(self, invoice: Invoice) -> Optional[bytes]:
+    def baixar_pdf(
+        self, invoice_or_nf: Union[Invoice, NotaFiscal]
+    ) -> Optional[bytes]:
         company = CompanySettings.load()
         if not company:
             return None
 
-        nf = getattr(invoice, "nota_fiscal", None)
+        nf = extract_nota_fiscal(invoice_or_nf)
         chave_acesso = getattr(nf, "chave_acesso_nacional", None) or getattr(
             nf, "verification_code", None
         )
@@ -671,12 +664,14 @@ class NacionalProvider(NFSeProvider):
                 logger.warning("Error downloading DANFSe PDF: %s", e)
                 return None
 
-    def cancelar_nfse(self, invoice: Invoice) -> CancelResult:
+    def cancelar_nfse(
+        self, invoice_or_nf: Union[Invoice, NotaFiscal]
+    ) -> CancelResult:
         company = CompanySettings.load()
         if not company:
             return CancelResult(sucesso=False, erros=["CompanySettings not found."])
 
-        nf = getattr(invoice, "nota_fiscal", None)
+        nf = extract_nota_fiscal(invoice_or_nf)
         chave_acesso = getattr(nf, "chave_acesso_nacional", None) or getattr(
             nf, "verification_code", None
         )
@@ -691,13 +686,13 @@ class NacionalProvider(NFSeProvider):
         cnpj_prestador = re.sub(r"[^0-9a-zA-Z]", "", company.cnpj)
 
         # Build PedRegEvento for cancelation (E101101)
-        from core.nfse.nacional.schemas.v1_00.ped_reg_evento_v1_00 import PedRegEvento
-        from core.nfse.nacional.schemas.v1_00.tipos_eventos_v1_00 import (
+        from core.nfse.nacional.schemas.v1_01.ped_reg_evento_v1_01 import PedRegEvento
+        from core.nfse.nacional.schemas.v1_01.tipos_eventos_v1_01 import (
             TcinfPedReg,
             Te101101,
             Te101101XDesc,
         )
-        from core.nfse.nacional.schemas.v1_00.tipos_simples_v1_00 import (
+        from core.nfse.nacional.schemas.v1_01.tipos_simples_v1_01 import (
             TstipoAmbiente,
             TscodJustCanc,
         )
@@ -842,81 +837,56 @@ class NacionalProvider(NFSeProvider):
             if resp.status_code == 200:
                 data = resp.json()
                 nfse_b64 = data.get("nfseXmlGZipB64")
-                if nfse_b64:
-                    try:
-                        decompressed_xml = gzip.decompress(
-                            base64.b64decode(nfse_b64)
-                        ).decode("utf-8")
-                        # Basic extraction
-                        numero_nf = chave_acesso[-15:].lstrip("0")
-                        match = re.search(r"<nNFSe>(\d+)</nNFSe>", decompressed_xml)
-                        if match:
-                            numero_nf = match.group(1)
+                decompressed_xml = _decompress_gzip_b64(nfse_b64)
+                if decompressed_xml:
+                    parsed = _parse_decompressed_nfse_xml(decompressed_xml)
+                    numero_nf = (
+                        parsed["numero_nf"]
+                        or chave_acesso[-15:].lstrip("0")
+                    )
+                    dt_emi = (
+                        parsed["data_hora_autorizacao"].date()
+                        if parsed["data_hora_autorizacao"]
+                        else datetime.date.today()
+                    )
 
-                        dt_emi = datetime.date.today()
-                        dt_match = re.search(
-                            r"<dhProc>([^<]+)</dhProc>", decompressed_xml
+                    val = "0.00"
+                    val_match = re.search(
+                        r"<vServ>([^<]+)</vServ>", decompressed_xml
+                    )
+                    if val_match:
+                        val = val_match.group(1)
+
+                    desc = ""
+                    desc_match = re.search(
+                        r"<xDescServ>([^<]+)</xDescServ>", decompressed_xml
+                    )
+                    if desc_match:
+                        desc = desc_match.group(1)
+
+                    # In Sefin Nacional, cancellation is usually represented by an attached event
+                    # like <e101101> or <xDesc>Cancelamento de NFS-e</xDesc>.
+                    is_canceled = False
+                    if (
+                        re.search(
+                            r"Cancelamento\s+de\s+NFS-e",
+                            decompressed_xml,
+                            re.IGNORECASE,
                         )
-                        if dt_match:
-                            try:
-                                dt_emi = datetime.datetime.fromisoformat(
-                                    dt_match.group(1)
-                                ).date()
-                            except:
-                                pass
+                        or "<e101101>" in decompressed_xml
+                    ):
+                        is_canceled = True
 
-                        # Fallback to dhEmi (DPS emission date) if dhProc is missing
-                        if not dt_match:
-                            dt_match_dhemi = re.search(
-                                r"<dhEmi>([^<]+)</dhEmi>", decompressed_xml
-                            )
-                            if dt_match_dhemi:
-                                try:
-                                    dt_emi = datetime.datetime.fromisoformat(
-                                        dt_match_dhemi.group(1)
-                                    ).date()
-                                except:
-                                    pass
-
-                        val = "0.00"
-                        val_match = re.search(
-                            r"<vServ>([^<]+)</vServ>", decompressed_xml
-                        )
-                        if val_match:
-                            val = val_match.group(1)
-
-                        desc = ""
-                        desc_match = re.search(
-                            r"<xDescServ>([^<]+)</xDescServ>", decompressed_xml
-                        )
-                        if desc_match:
-                            desc = desc_match.group(1)
-
-                        # In Sefin Nacional, cancellation is usually represented by an attached event
-                        # like <e101101> or <xDesc>Cancelamento de NFS-e</xDesc>.
-                        is_canceled = False
-                        if (
-                            re.search(
-                                r"Cancelamento\s+de\s+NFS-e",
-                                decompressed_xml,
-                                re.IGNORECASE,
-                            )
-                            or "<e101101>" in decompressed_xml
-                        ):
-                            is_canceled = True
-
-                        return {
-                            "nf_number": numero_nf,
-                            "verification_code": chave_acesso,
-                            "chave_acesso_nacional": chave_acesso,
-                            "amount_brl": val,
-                            "description": desc,
-                            "issue_date": dt_emi,
-                            "provider": "NACIONAL",
-                            "is_canceled": is_canceled,
-                            "raw_xml": decompressed_xml,
-                        }
-                    except Exception as ex:
-                        logger.warning(f"Error decompressing Nacional XML: {ex}")
+                    return {
+                        "nf_number": numero_nf,
+                        "verification_code": chave_acesso,
+                        "chave_acesso_nacional": chave_acesso,
+                        "amount_brl": val,
+                        "description": desc,
+                        "issue_date": dt_emi,
+                        "provider": "NACIONAL",
+                        "is_canceled": is_canceled,
+                        "raw_xml": decompressed_xml,
+                    }
 
             return None

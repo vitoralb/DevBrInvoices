@@ -137,8 +137,55 @@ def _prepare_nf_data(invoice):
     return amount_brl, description, effective_rate_pct
 
 
-def enviar_nfe_para_prefeitura(invoice):
+def _create_nf_from_emit_result(invoice, result, provider) -> NotaFiscal:
+    """Creates and persists a NotaFiscal from an EmitResult, saves the XML authorization,
+    and attempts to download the NFS-e PDF."""
     from django.core.files.base import ContentFile
+
+    amount_brl, description, _ = _prepare_nf_data(invoice)
+    nf = NotaFiscal.objects.create(
+        invoice=invoice,
+        nf_number=result.numero_nf,
+        issue_date=invoice.issue_date,
+        amount_brl=amount_brl,
+        is_export=True,
+        description=description.replace("\r", "").strip(),
+        verification_code=result.codigo_verificacao,
+        chave_acesso_nacional=result.chave_acesso_nacional,
+        data_hora_autorizacao=result.data_hora_autorizacao,
+        codigo_tributacao_nacional=result.codigo_tributacao_nacional,
+        codigo_nbs=result.codigo_nbs,
+        aliquota_iss=result.aliquota_iss,
+        valor_iss=result.valor_iss,
+        codigo_servico_municipio=result.codigo_servico_municipio,
+    )
+
+    xml_content = result.xml_retorno or result.xml_enviado
+    if xml_content:
+        file_bytes = (
+            xml_content.encode("utf-8")
+            if isinstance(xml_content, str)
+            else xml_content
+        )
+        nf.xml_autorizacao.save(
+            f"NFS-e_{nf.nf_number}.xml",
+            ContentFile(file_bytes),
+        )
+
+    invoice.nota_fiscal = nf
+    pdf_bytes = fetch_and_save_nfse_pdf(invoice, provider)
+    if not pdf_bytes:
+        try:
+            from core.tasks.nfse_tasks import fetch_nfse_pdf_task
+
+            fetch_nfse_pdf_task.delay(invoice_id=invoice.id)
+        except Exception as task_ex:
+            logger.warning("Could not dispatch fetch_nfse_pdf_task: %s", task_ex)
+
+    return nf
+
+
+def enviar_nfe_para_prefeitura(invoice):
     from core.nfse.provider_factory import get_provider
 
     company = CompanySettings.load()
@@ -175,47 +222,8 @@ def enviar_nfe_para_prefeitura(invoice):
     log_entry.payload_retorno = result.xml_retorno
 
     if result.sucesso:
-        # Save NF
-        nf = NotaFiscal.objects.create(
-            invoice=invoice,
-            nf_number=result.numero_nf,
-            issue_date=invoice.issue_date,
-            amount_brl=amount_brl,
-            is_export=True,
-            description=description.replace("\r", "").strip(),
-            verification_code=result.codigo_verificacao,
-            chave_acesso_nacional=result.chave_acesso_nacional,
-            data_hora_autorizacao=result.data_hora_autorizacao,
-            codigo_tributacao_nacional=result.codigo_tributacao_nacional,
-            codigo_nbs=result.codigo_nbs,
-            aliquota_iss=result.aliquota_iss,
-            valor_iss=result.valor_iss,
-            codigo_servico_municipio=result.codigo_servico_municipio,
-        )
-
-        # Save XML return
-        if result.xml_retorno:
-            nf.xml_autorizacao.save(
-                f"NFSe_{nf.nf_number}.xml",
-                ContentFile(result.xml_retorno.encode("utf-8")),
-            )
-        elif result.xml_enviado:
-            nf.xml_autorizacao.save(
-                f"NFSe_{nf.nf_number}.xml",
-                ContentFile(result.xml_enviado.encode("utf-8")),
-            )
-
-        # Try to download PDF
-        invoice.nota_fiscal = nf  # For the provider to access it
-        pdf_bytes = fetch_and_save_nfse_pdf(invoice, provider)
-        if not pdf_bytes:
-            try:
-                from core.tasks import fetch_nfse_pdf_task
-
-                fetch_nfse_pdf_task.delay(invoice.id)
-            except Exception as task_ex:
-                logger.warning("Could not dispatch fetch_nfse_pdf_task: %s", task_ex)
-
+        nf = _create_nf_from_emit_result(invoice, result, provider)
+        log_entry.nota_fiscal = nf
         log_entry.save()
         return True
     else:
@@ -230,7 +238,6 @@ def enviar_nfe_para_prefeitura(invoice):
 
 def consultar_nfe_na_prefeitura(invoice):
     """Checks with the configured NFS-e provider if the invoice was already emitted."""
-    from django.core.files.base import ContentFile
     from core.nfse.provider_factory import get_provider
 
     if hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
@@ -244,37 +251,7 @@ def consultar_nfe_na_prefeitura(invoice):
     # emission is aborted to avoid duplicate emissions.
     result = provider.consultar_nfse(invoice)
     if result and result.sucesso:
-        amount_brl, description, _ = _prepare_nf_data(invoice)
-        nf = NotaFiscal.objects.create(
-            invoice=invoice,
-            nf_number=result.numero_nf,
-            issue_date=invoice.issue_date,
-            amount_brl=amount_brl,
-            is_export=True,
-            description=description.replace("\r", "").strip(),
-            verification_code=result.codigo_verificacao,
-            chave_acesso_nacional=result.chave_acesso_nacional,
-            data_hora_autorizacao=result.data_hora_autorizacao,
-            codigo_tributacao_nacional=result.codigo_tributacao_nacional,
-            codigo_nbs=result.codigo_nbs,
-            aliquota_iss=result.aliquota_iss,
-            valor_iss=result.valor_iss,
-            codigo_servico_municipio=result.codigo_servico_municipio,
-        )
-        if result.xml_retorno:
-            nf.xml_autorizacao.save(
-                f"NFSe_{nf.nf_number}.xml",
-                ContentFile(result.xml_retorno.encode("utf-8")),
-            )
-        elif result.xml_enviado:
-            nf.xml_autorizacao.save(
-                f"NFSe_{nf.nf_number}.xml",
-                ContentFile(result.xml_enviado.encode("utf-8")),
-            )
-
-        # Try to download PDF
-        invoice.nota_fiscal = nf
-        fetch_and_save_nfse_pdf(invoice, provider)
+        _create_nf_from_emit_result(invoice, result, provider)
         return True
 
     return False
@@ -353,7 +330,7 @@ def import_nfses(
                 )
                 if r.get("raw_xml"):
                     nf.xml_autorizacao.save(
-                        f"NFSe_{nf_num}.xml",
+                        f"NFS-e_{nf_num}.xml",
                         ContentFile(r["raw_xml"].encode("utf-8")),
                         save=False,
                     )
@@ -413,33 +390,61 @@ def import_nfses(
     return count, f"Foram importadas {count} NFS-e(s) com sucesso."
 
 
-def cancel_nota_fiscal(invoice):
-    from core.nfse.provider_factory import get_provider
+def cancel_nota_fiscal(invoice_or_nf, origem="System"):
+    """Cancels a NotaFiscal with the tax authority and synchronizes local records and logs."""
     from django.core.files.base import ContentFile
+    from django.utils import timezone
+    from core.models import Invoice, NotaFiscal, NfseLog
+    from core.nfse.base import extract_nota_fiscal
+    from core.nfse.provider_factory import get_provider
 
-    provider = get_provider(invoice)
-    result = provider.cancelar_nfse(invoice)
+    invoice = None
+    nf = None
+    if isinstance(invoice_or_nf, Invoice):
+        invoice = invoice_or_nf
+        nf = getattr(invoice, "nota_fiscal", None)
+    elif isinstance(invoice_or_nf, NotaFiscal):
+        nf = invoice_or_nf
+        invoice = getattr(nf, "invoice", None)
+    else:
+        nf = extract_nota_fiscal(invoice_or_nf)
+        invoice = getattr(invoice_or_nf, "invoice", None) if hasattr(invoice_or_nf, "invoice") else None
+
+    if nf and not nf.can_be_canceled:
+        raise Exception(
+            f"NFS-e {nf.nf_number} foi autorizada há mais de 24 horas e não pode ser cancelada."
+        )
+
+    provider = get_provider(invoice or nf)
+    result = provider.cancelar_nfse(invoice or nf)
+
+    # Always log cancellation attempt
+    NfseLog.objects.create(
+        invoice=invoice,
+        nota_fiscal=nf,
+        origem=origem,
+        payload_enviado=result.xml_enviado or "",
+        payload_retorno=result.xml_retorno or "",
+        erro_mensagem=" | ".join(result.erros) if not result.sucesso else "",
+    )
 
     if result.sucesso:
-        invoice.status = "CANCELED"
-        invoice.save()
+        if invoice:
+            invoice.status = "CANCELED"
+            invoice.save(update_fields=["status"])
 
-        nf = invoice.nota_fiscal
         if nf:
             nf.is_canceled = True
-            if result.cancelation_date:
-                nf.cancelation_date = result.cancelation_date
+            nf.cancelation_date = result.cancelation_date or timezone.now()
 
             xml_to_save = result.xml_retorno
             if not xml_to_save:
                 try:
-                    consult_res = provider.consultar_nfse(invoice)
+                    consult_res = provider.consultar_nfse(invoice or nf)
                     if consult_res and consult_res.xml_retorno:
                         xml_to_save = consult_res.xml_retorno
                 except Exception as e:
-                    import logging
-
-                    logging.getLogger(__name__).warning(
+                    logger.warning(
                         "Failed to fetch updated XML for canceled NFS-e: %s", e
                     )
 
@@ -452,9 +457,8 @@ def cancel_nota_fiscal(invoice):
                     if isinstance(xml_to_save, str)
                     else xml_to_save
                 )
-
                 nf.xml_autorizacao.save(
-                    f"NFSe_{nf.nf_number}.xml",
+                    f"NFS-e_{nf.nf_number}.xml",
                     ContentFile(file_content),
                     save=False,
                 )
@@ -463,7 +467,11 @@ def cancel_nota_fiscal(invoice):
 
             from core.tasks.nfse_tasks import fetch_nfse_pdf_task
 
-            fetch_nfse_pdf_task.delay(invoice_id=invoice.id, force=True)
+            fetch_nfse_pdf_task.delay(
+                invoice_id=invoice.id if invoice else None,
+                nf_id=nf.id if nf else None,
+                force=True,
+            )
 
     return result
 
@@ -473,21 +481,13 @@ def fetch_and_save_nfse_pdf(invoice_or_nf, provider, force=False):
     Returns the pdf bytes if successful, None if not yet ready.
     """
     from django.core.files.base import ContentFile
+    from core.nfse.base import extract_nota_fiscal
 
-    if hasattr(invoice_or_nf, "nota_fiscal"):
-        nf = invoice_or_nf.nota_fiscal
-        target = invoice_or_nf
-    else:
-        nf = invoice_or_nf
-        class DummyInvoice:
-            def __init__(self, nota_fiscal):
-                self.nota_fiscal = nota_fiscal
-        target = DummyInvoice(nf)
-
+    nf = extract_nota_fiscal(invoice_or_nf)
     if not nf:
         return None
 
-    pdf_bytes = provider.baixar_pdf(target)
+    pdf_bytes = provider.baixar_pdf(invoice_or_nf)
     if pdf_bytes:
         if force and nf.danfse_pdf:
             nf.danfse_pdf.delete(save=False)
@@ -579,7 +579,7 @@ def sync_nota_fiscal(nf) -> tuple[bool, str]:
     # 4. Atualizar XML se presente
     if r.get("raw_xml"):
         nf.xml_autorizacao.save(
-            f"NFSe_{nf.nf_number}.xml",
+            f"NFS-e_{nf.nf_number}.xml",
             ContentFile(r["raw_xml"].encode("utf-8")),
             save=False,
         )

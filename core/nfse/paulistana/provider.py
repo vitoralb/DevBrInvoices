@@ -3,7 +3,7 @@ import os
 import datetime
 from datetime import date, timedelta
 from decimal import Decimal
-from typing import Optional
+from typing import Optional, Union
 
 from dateutil.relativedelta import relativedelta
 from django.conf import settings
@@ -15,7 +15,7 @@ from .client import NFeClient, extract_paulistana_xml_errors
 import core.nfse.paulistana.schemas_v1.tipos_nfe_v01 as v1
 from xsdata.models.datatype import XmlDate
 from core.services import _prepare_nf_data
-from .models import assinar_rps_v1
+from .rps_signer import assinar_rps_v1
 from .utils import to_xml
 
 logger = logging.getLogger(__name__)
@@ -344,15 +344,17 @@ class PaulistanaProvider(NFSeProvider):
                 )
         return None
 
-    def cancelar_nfse(self, invoice: Invoice) -> CancelResult:
+    def cancelar_nfse(self, invoice_or_nf: Union[Invoice, NotaFiscal]) -> CancelResult:
         company = CompanySettings.load()
         if not company:
             return CancelResult(sucesso=False, erros=["CompanySettings not found."])
 
-        nf = getattr(invoice, "nota_fiscal", None)
+        from core.nfse.base import extract_nota_fiscal
+
+        nf = extract_nota_fiscal(invoice_or_nf)
         if not nf or not nf.nf_number or not nf.verification_code:
             return CancelResult(
-                sucesso=False, erros=["NFS-e não encontrada para esta invoice."]
+                sucesso=False, erros=["NFS-e não encontrada para cancelamento."]
             )
 
         client, im = self._get_client(company)
@@ -434,20 +436,20 @@ class PaulistanaProvider(NFSeProvider):
                 sucesso=False, erros=[f"Erro inesperado no cancelamento: {e}"]
             )
 
-    def baixar_pdf(self, invoice: Invoice) -> bytes:
+    def baixar_pdf(
+        self, invoice_or_nf: Union[Invoice, NotaFiscal]
+    ) -> Optional[bytes]:
         from core.nfse.paulistana.client import download_nfse_pdf
+        from core.nfse.base import extract_nota_fiscal
 
         company = CompanySettings.load()
-        im = company.inscricao_municipal
-
-        nf = getattr(invoice, "nota_fiscal", None)
-        if not nf or not nf.nf_number or not nf.verification_code:
+        if not company or not company.inscricao_municipal:
             return None
 
-        if company and company.debug_mode:
-            # We return dummy bytes since we can't fetch real PDFs in Paulistana debug mode sometimes
-            # or we rely on the implementation inside download_nfse_pdf
-            pass
+        im = company.inscricao_municipal
+        nf = extract_nota_fiscal(invoice_or_nf)
+        if not nf or not nf.nf_number or not nf.verification_code:
+            return None
 
         return download_nfse_pdf(im, nf.nf_number, nf.verification_code)
 

@@ -1,6 +1,6 @@
 from abc import ABC, abstractmethod
 from dataclasses import dataclass, field
-from typing import List, Optional
+from typing import List, Optional, Union
 import datetime
 from decimal import Decimal
 from core.models import Invoice, NotaFiscal
@@ -51,6 +51,17 @@ class NFSeProviderError(Exception):
         self.raw_request = raw_request
 
 
+def extract_nota_fiscal(
+    invoice_or_nf: Optional[Union[Invoice, NotaFiscal, object]]
+) -> Optional[NotaFiscal]:
+    """Helper to extract a NotaFiscal instance from either an Invoice, NotaFiscal, or adapter object."""
+    if invoice_or_nf is None:
+        return None
+    if isinstance(invoice_or_nf, NotaFiscal):
+        return invoice_or_nf
+    return getattr(invoice_or_nf, "nota_fiscal", None)
+
+
 class NFSeProvider(ABC):
     @abstractmethod
     def emitir_nfse(self, invoice: Invoice) -> EmitResult:
@@ -58,17 +69,23 @@ class NFSeProvider(ABC):
         pass
 
     @abstractmethod
-    def consultar_nfse(self, invoice: Invoice) -> Optional[EmitResult]:
-        """Checks if the NFS-e for the given invoice was already emitted by the tax authority."""
+    def consultar_nfse(
+        self, invoice_or_nf: Union[Invoice, NotaFiscal]
+    ) -> Optional[EmitResult]:
+        """Checks if the NFS-e for the given invoice or nota fiscal was already emitted by the tax authority."""
         pass
 
     @abstractmethod
-    def cancelar_nfse(self, invoice: Invoice) -> CancelResult:
+    def cancelar_nfse(
+        self, invoice_or_nf: Union[Invoice, NotaFiscal]
+    ) -> CancelResult:
         """Cancels an existing NFS-e."""
         pass
 
     @abstractmethod
-    def baixar_pdf(self, invoice: Invoice) -> Optional[bytes]:
+    def baixar_pdf(
+        self, invoice_or_nf: Union[Invoice, NotaFiscal]
+    ) -> Optional[bytes]:
         """Downloads the PDF representation of the NFS-e."""
         pass
 

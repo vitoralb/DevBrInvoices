@@ -48,9 +48,6 @@ from .pdf_service import generate_pdf_bytes
 from .services import (
     audit_consolidations,
     attach_recommended_pl,
-    calculate_ideal_pro_labore,
-    calculate_rbt12_and_fator_r,
-    calculate_simples_tax,
     fetch_exchange_rate,
     reconsolidate_with_prior,
 )
@@ -125,14 +122,6 @@ def dashboard_view(request):
     if today.year not in available_years:
         available_years.insert(0, today.year)
 
-    # Calculate ideal pró-labore for next month
-    current_month = today.replace(day=1)
-    ideal_pro_labore = None
-    try:
-        ideal_pro_labore = calculate_ideal_pro_labore(current_month)
-    except Exception as e:
-        logger.debug("Could not calculate ideal pro labore for next month: %s", e)
-
     return render(
         request,
         "core/dashboard.html",
@@ -146,8 +135,6 @@ def dashboard_view(request):
             "quick_filter": quick_filter,
             "start_date": start_date_val,
             "end_date": end_date_val,
-            "ideal_pro_labore": ideal_pro_labore,
-            "current_month": current_month,
         },
     )
 
@@ -186,8 +173,6 @@ def htmx_reconsolidate_month(request, pk):
 @staff_member_required
 @require_POST
 def run_audit(request):
-    from core.services import audit_consolidations
-
     try:
         findings = audit_consolidations()
         fixed = findings.get("total_fixed", 0)
@@ -246,7 +231,7 @@ def invoice_list(request):
             "selected_client": client_id,
             "selected_status": status,
             "selected_year": year,
-            "debug_mode": company.debug_mode,
+            "debug_mode": company.debug_mode if company else False,
         },
     )
 
@@ -732,7 +717,6 @@ def nfse_list(request):
     page_obj = paginator.get_page(page_number)
 
     company = CompanySettings.load()
-    today = timezone.now().date()
     return render(
         request,
         "core/nfse_list.html",
@@ -740,13 +724,7 @@ def nfse_list(request):
             "page_obj": page_obj,
             "notas": page_obj,
             "query": query,
-            "today": today.isoformat(),
             "company": company,
-            "opening_date": (
-                company.opening_date.isoformat()
-                if company and company.opening_date
-                else ""
-            ),
         },
     )
 
@@ -810,8 +788,16 @@ def htmx_import_status(request, task_id):
 
 @login_required
 def nfse_detail(request, pk):
-    nf = get_object_or_404(NotaFiscal, pk=pk)
-    invoices = Invoice.objects.all().order_by("-issue_date")
+    nf = get_object_or_404(
+        NotaFiscal.objects.select_related("invoice", "invoice__client"), pk=pk
+    )
+    invoices = (
+        Invoice.objects.filter(nota_fiscal__isnull=True)
+        .select_related("client")
+        .order_by("-issue_date")
+        if not nf.invoice
+        else []
+    )
     return render(
         request,
         "core/nfse_detail.html",
@@ -838,16 +824,18 @@ def nfse_refresh(request, pk):
 
 @login_required
 @require_POST
+@transaction.atomic
 def nfse_link_invoice(request, pk):
     nf = get_object_or_404(NotaFiscal, pk=pk)
     invoice_id = request.POST.get("invoice_id")
     if invoice_id:
         # Check if already linked
-        existing_nf = getattr(Invoice.objects.get(pk=invoice_id), "nota_fiscal", None)
+        invoice = get_object_or_404(Invoice, pk=invoice_id)
+        existing_nf = getattr(invoice, "nota_fiscal", None)
         if existing_nf and existing_nf.pk != nf.pk:
             messages.error(request, "Esta invoice já possui uma NFS-e vinculada.")
         else:
-            nf.invoice_id = invoice_id
+            nf.invoice = invoice
             nf.save()
             messages.success(request, "Invoice vinculada com sucesso.")
     return redirect("nfse_detail", pk=pk)
@@ -905,34 +893,26 @@ def nfse_download_pdf(request, pk, redirect_view="nfse_detail"):
                     nf.danfse_pdf.open("rb"),
                     content_type="application/pdf",
                     as_attachment=False,
-                    filename=f"NFSe_{nf.nf_number}.pdf",
+                    filename=f"NFS-e_{nf.nf_number}.pdf",
                 )
         except Exception as e:
             logger.warning("Erro ao acessar PDF local da NFS-e %s: %s", nf.nf_number, e)
 
     from core.nfse.provider_factory import get_provider
-    from django.core.files.base import ContentFile
+    from core.services.nfse_services import fetch_and_save_nfse_pdf
 
-    target = getattr(nf, "invoice", None)
-    if not target:
-        class DummyInvoice:
-            def __init__(self, nota_fiscal):
-                self.nota_fiscal = nota_fiscal
-
-        target = DummyInvoice(nf)
+    target = getattr(nf, "invoice", None) or nf
 
     try:
         provider = get_provider(target)
-        pdf_bytes = provider.baixar_pdf(target)
+        pdf_bytes = fetch_and_save_nfse_pdf(target, provider)
 
-        if pdf_bytes:
-            nf.danfse_pdf.save(f"NFSe_{nf.nf_number}.pdf", ContentFile(pdf_bytes), save=False)
-            nf.save(update_fields=["danfse_pdf", "updated_at"])
+        if pdf_bytes and nf.danfse_pdf and nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
             return FileResponse(
                 nf.danfse_pdf.open("rb"),
                 content_type="application/pdf",
                 as_attachment=False,
-                filename=f"NFSe_{nf.nf_number}.pdf",
+                filename=f"NFS-e_{nf.nf_number}.pdf",
             )
     except Exception as e:
         logger.error(
@@ -1020,7 +1000,7 @@ def email_template_update(request, pk):
         form = EmailTemplateForm(request.POST, instance=template)
         if form.is_valid():
             form.save()
-            messages.success(request, "Email template updated.")
+            messages.success(request, "Modelo de e-mail atualizado com sucesso.")
             return redirect("email_template_list")
     else:
         form = EmailTemplateForm(instance=template)
@@ -1036,7 +1016,7 @@ def invoice_template_create(request):
             template = form.save()
             formset.instance = template
             formset.save()
-            messages.success(request, "Invoice template created.")
+            messages.success(request, "Modelo de invoice criado com sucesso.")
             return redirect("invoice_template_list")
     else:
         form = InvoiceTemplateForm()
@@ -1055,7 +1035,7 @@ def invoice_template_update(request, pk):
         if form.is_valid() and formset.is_valid():
             form.save()
             formset.save()
-            messages.success(request, "Invoice template updated.")
+            messages.success(request, "Modelo de invoice atualizado com sucesso.")
             return redirect("invoice_template_list")
     else:
         form = InvoiceTemplateForm(instance=template)
@@ -1070,7 +1050,7 @@ def invoice_template_delete(request, pk):
     template = get_object_or_404(InvoiceTemplate, pk=pk)
     if request.method == "POST":
         template.delete()
-        messages.success(request, "Invoice template deleted.")
+        messages.success(request, "Modelo de invoice excluído com sucesso.")
         return redirect("invoice_template_list")
     return render(
         request, "core/invoice_template_confirm_delete.html", {"template": template}
@@ -1100,12 +1080,14 @@ def htmx_get_invoice_template(request, pk):
 @require_POST
 def remove_certificate_view(request):
     company = CompanySettings.load()
+    if not company:
+        messages.error(request, "Configurações da empresa não encontradas.")
+        return redirect("company_settings")
+
     company.pfx_cert_pem = None
     company.pfx_key_pem = None
     company.certificate_valid_until = None
     company.save()
-    from django.contrib import messages
-
     messages.success(request, "Certificado digital removido com sucesso.")
     return redirect("company_settings")
 
