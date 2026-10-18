@@ -436,6 +436,21 @@ class NFSeProviderAbstractionTests(TestCase):
         self.assertTrue(
             "<pTotTribSN>" in signed_xml or "<indTotTrib>0</indTotTrib>" in signed_xml
         )
+        # Verify tomador email and prestador email are included
+        self.assertIn(f"<email>{self.client_obj.email}</email>", signed_xml)
+        self.assertIn(f"<email>{self.company.email}</email>", signed_xml)
+
+    def test_nacional_dps_phone_sanitization(self):
+        from core.nfse.nacional.provider import NacionalProvider
+
+        self.company.phone_number = "+55 (11) 98765-4321"
+        self.company.save()
+
+        nacional_provider = NacionalProvider()
+        dps, signed_xml, id_dps = nacional_provider._build_and_sign_dps(
+            self.invoice, self.company, 2, "1"
+        )
+        self.assertIn("<fone>11987654321</fone>", signed_xml)
 
     @patch("core.utils.http.requests.get")
     @patch("core.utils.http.requests.post")

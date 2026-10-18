@@ -396,10 +396,15 @@ class NacionalProvider(NFSeProvider):
 
         # TODO: Support domestic client invoicing (endNac, cLocPrestacao, trib_issqn=1)
         # Foreign Client (Export of Services)
+        toma_email = (
+            client_obj.email.strip()[:80]
+            if client_obj.email and client_obj.email.strip()
+            else None
+        )
         toma = TcinfoPessoa(
             c_nao_nif=TscodNaoNif.VALUE_2,  # 2 = Não exigência do NIF
             x_nome=client_obj.name[:150],
-            email=None,
+            email=toma_email,
             end=Tcendereco(
                 end_ext=TcenderExt(
                     c_pais=country_code,
@@ -413,6 +418,19 @@ class NacionalProvider(NFSeProvider):
                 x_bairro=bairro,
             ),
         )
+
+        prest_email = (
+            company.email.strip()[:80]
+            if company.email and company.email.strip()
+            else None
+        )
+        prest_phone = None
+        if company.phone_number:
+            phone_digits = re.sub(r"\D", "", company.phone_number)
+            if phone_digits.startswith("55") and len(phone_digits) in (12, 13):
+                phone_digits = phone_digits[2:]
+            if 6 <= len(phone_digits) <= 20:
+                prest_phone = phone_digits
 
         dps = Dps(
             versao="1.01",
@@ -428,6 +446,8 @@ class NacionalProvider(NFSeProvider):
                 c_loc_emi=cod_mun,
                 prest=TcinfoPrestador(
                     cnpj=cnpj_prestador,
+                    email=prest_email,
+                    fone=prest_phone,
                     im=None,  # IM is optional and rejected with E0120 when municipality has no CNC complementary records
                     x_nome=None,  # E0121: O nome ou razão social do prestador não deve ser informado quando tpEmit=1 (o próprio prestador)
                     reg_trib=TcregTrib(
