@@ -1,117 +1,471 @@
 {% extends 'core/base.html' %}
-{% block title %}Detalhes NFS-e {{ nf.nf_number }} - {{ PROJECT_NAME }}{% endblock %}
+{% load humanize %}
+{% block title %}NFS-e #{{ nf.nf_number }} - {{ PROJECT_NAME }}{% endblock %}
 
 {% block content %}
-<div class="mb-4">
-    <a href="{% url 'nfse_list' %}" class="btn btn-outline-secondary">&larr; Voltar para NFS-es</a>
+<div id="nfse-content">
+{% if is_canceling %}
+<div class="alert alert-warning d-flex align-items-center mb-4 shadow-sm" role="alert" hx-get="{% url 'nfse_detail' nf.id %}" hx-trigger="every 3s" hx-select="#nfse-content" hx-target="#nfse-content" hx-swap="outerHTML">
+    <div class="spinner-border spinner-border-sm text-warning me-3" role="status">
+        <span class="visually-hidden">Carregando...</span>
+    </div>
+    <div class="flex-grow-1">
+        <strong>Cancelamento em processamento...</strong> Sincronizando status junto ao provedor da NFS-e. Esta página atualizará automaticamente assim que concluído.
+    </div>
+</div>
+{% endif %}
+
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <a href="{{ back_url|default:'/nfse/' }}" class="btn btn-outline-secondary btn-sm mb-2">
+            <i class="bi bi-arrow-left me-1"></i>Voltar para NFS-es
+        </a>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <h2 class="mb-0 fw-bold">NFS-e #{{ nf.nf_number }}</h2>
+            {% if nf.provider_type == 'NACIONAL' %}
+            <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle fs-6">
+                <i class="bi bi-bank me-1"></i>Sefin Nacional
+            </span>
+            {% else %}
+            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle fs-6">
+                <i class="bi bi-geo-alt me-1"></i>Paulistana
+            </span>
+            {% endif %}
+
+            {% if nf.is_canceled %}
+            <span class="badge bg-danger fs-6">Cancelada</span>
+            {% else %}
+            <span class="badge bg-success fs-6">Autorizada</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
+        <form method="POST" action="{% url 'nfse_refresh' nf.id %}" class="d-inline">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ back_url }}">
+            <button type="submit" class="btn btn-outline-primary" title="Sincronizar dados e status com o provedor">
+                <i class="bi bi-arrow-clockwise me-1"></i>Sincronizar
+            </button>
+        </form>
+        <a href="{% url 'nfse_download_pdf' nf.id %}" target="_blank" class="btn btn-outline-primary">
+            <i class="bi bi-file-earmark-pdf me-1"></i>Baixar PDF
+        </a>
+        <a href="{% url 'nfse_download_xml' nf.id %}" target="_blank" class="btn btn-outline-secondary">
+            <i class="bi bi-filetype-xml me-1"></i>Baixar XML
+        </a>
+        {% if nf.can_be_canceled %}
+        <form method="POST" action="{% url 'nfse_cancel' nf.id %}" class="d-inline">
+            {% csrf_token %}
+            <input type="hidden" name="next" value="{{ back_url }}">
+            <button type="submit" class="btn btn-danger"
+                    data-confirm-message="Tem certeza que deseja CANCELAR esta NFS-e na prefeitura/Sefin? Esta ação não pode ser desfeita."
+                    data-confirm-title="Cancelar NFS-e"
+                    data-confirm-variant="danger"
+                    {% if is_canceling %}disabled{% endif %}>
+                <i class="bi bi-x-circle me-1"></i>{% if is_canceling %}Cancelando...{% else %}Cancelar NFS-e{% endif %}
+            </button>
+        </form>
+        {% endif %}
+    </div>
 </div>
 
-<div class="row">
-    <div class="col-md-8">
+<div class="row g-4">
+    <!-- Left Column: Fiscal Data and Service Description -->
+    <div class="col-lg-8">
+        <!-- Fiscal Details Card -->
         <div class="card shadow-sm mb-4">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">NFS-e #{{ nf.nf_number }}
-                    {% if nf.is_canceled %}
-                    <span class="badge bg-danger ms-2">CANCELADA</span>
-                    {% endif %}
+            <div class="card-header py-3 bg-body-tertiary">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-card-checklist me-2 text-primary"></i>Dados Fiscais da Nota
                 </h5>
-                <div class="d-flex align-items-center gap-2">
-                    <span class="badge bg-info text-dark">{{ nf.provider_type }}</span>
-                    <form method="POST" action="{% url 'nfse_refresh' nf.id %}" class="d-inline">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-primary" title="Sincronizar com o provedor">
-                            <i class="bi bi-arrow-clockwise"></i> Sincronizar
-                        </button>
-                    </form>
-                </div>
             </div>
             <div class="card-body">
-                <div class="row mb-3">
-                    <div class="col-sm-4 text-muted">Data de Emissão:</div>
-                    <div class="col-sm-8">{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</div>
-                </div>
-                {% if nf.is_canceled and nf.cancelation_date %}
-                <div class="row mb-3">
-                    <div class="col-sm-4 text-muted">Data de Cancelamento:</div>
-                    <div class="col-sm-8 text-danger fw-semibold">{{ nf.cancelation_date|date:"SHORT_DATETIME_FORMAT" }}</div>
-                </div>
-                {% endif %}
-                <div class="row mb-3">
-                    <div class="col-sm-4 text-muted">Valor Total:</div>
-                    <div class="col-sm-8"><strong>R$ {{ nf.amount_brl }}</strong></div>
-                </div>
-                {% if nf.verification_code %}
-                <div class="row mb-3">
-                    <div class="col-sm-4 text-muted">Código Verificação:</div>
-                    <div class="col-sm-8">{{ nf.verification_code }}</div>
-                </div>
-                {% endif %}
-                <div class="row mb-3">
-                    <div class="col-sm-4 text-muted">Chave Nacional:</div>
-                    <div class="col-sm-8">{{ nf.chave_acesso_nacional|default:"N/A" }}</div>
-                </div>
-                <div class="row mb-3">
-                    <div class="col-sm-4 text-muted">Descrição:</div>
-                    <div class="col-sm-8">
-                        <pre class="bg-body-tertiary p-2 border rounded" style="white-space: pre-wrap; font-family: inherit;">{{ nf.description }}</pre>
+                <div class="row g-3">
+                    <div class="col-sm-6">
+                        <span class="text-muted small d-block">Número da NFS-e</span>
+                        <strong class="fs-5">#{{ nf.nf_number }}</strong>
+                    </div>
+                    <div class="col-sm-6">
+                        <span class="text-muted small d-block">Valor Total</span>
+                        <strong class="fs-5 text-success">R$ {{ nf.amount_brl|floatformat:2|intcomma }}</strong>
+                    </div>
+
+                    <div class="col-sm-6">
+                        <span class="text-muted small d-block">Data de Competência / Emissão</span>
+                        <span>{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</span>
+                    </div>
+                    <div class="col-sm-6">
+                        <span class="text-muted small d-block">Data / Hora de Autorização</span>
+                        <span>{{ nf.data_hora_autorizacao|date:"SHORT_DATETIME_FORMAT"|default:"-" }}</span>
+                    </div>
+
+                    {% if nf.is_canceled and nf.cancelation_date %}
+                    <div class="col-12">
+                        <div class="alert alert-danger mb-0 py-2">
+                            <i class="bi bi-exclamation-octagon me-1"></i>
+                            <strong>Cancelada em:</strong> {{ nf.cancelation_date|date:"SHORT_DATETIME_FORMAT" }}
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if nf.chave_acesso_nacional %}
+                    <div class="col-12">
+                        <span class="text-muted small d-block">Chave de Acesso Nacional (50 dígitos)</span>
+                        <div class="input-group input-group-sm mt-1">
+                            <input type="text" class="form-control font-monospace" id="chaveAcessoInput" value="{{ nf.chave_acesso_nacional }}" readonly>
+                            <button class="btn btn-outline-secondary" type="button" onclick="copyToClipboard('chaveAcessoInput', this)" title="Copiar Chave">
+                                <i class="bi bi-clipboard"></i> Copiar
+                            </button>
+                        </div>
+                    </div>
+                    {% endif %}
+
+                    {% if nf.verification_code %}
+                    <div class="col-sm-6">
+                        <span class="text-muted small d-block">Código de Verificação Municipal</span>
+                        <code class="fs-6 text-body bg-body-tertiary px-2 py-1 rounded border">{{ nf.verification_code }}</code>
+                    </div>
+                    {% endif %}
+
+                    {% if nf.invoice and nf.invoice.document_number %}
+                    <div class="col-sm-6">
+                        <span class="text-muted small d-block">RPS / DPS de Origem</span>
+                        <span>Série <strong>{{ nf.invoice.document_series }}</strong>, Número <strong>{{ nf.invoice.document_number }}</strong></span>
+                    </div>
+                    {% endif %}
+
+                    <div class="col-12"><hr class="my-2"></div>
+
+                    <!-- Tax and Classification Details -->
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Código Tributação Nacional</span>
+                        <span>{{ nf.codigo_tributacao_nacional|default:"-" }}</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Código Serviço Município</span>
+                        <span>{{ nf.codigo_servico_municipio|default:"-" }}</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Código NBS</span>
+                        <span>{{ nf.codigo_nbs|default:"-" }}</span>
+                    </div>
+
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Enquadramento Tributário</span>
+                        {% if nf.is_export %}
+                        <span class="badge bg-info-subtle text-info-emphasis border">Exportação de Serviços</span>
+                        {% else %}
+                        <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">Mercado Interno</span>
+                        {% endif %}
+                    </div>
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Alíquota ISS</span>
+                        <span>{{ nf.aliquota_iss|default:"0,00" }}%</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Valor ISS Retido / Devido</span>
+                        <span>R$ {{ nf.valor_iss|default:"0,00" }}</span>
                     </div>
                 </div>
-                
-                <hr>
-                
-                <h6 class="mt-4 mb-3">Ações e Arquivos</h6>
-                <div class="d-flex gap-2 flex-wrap align-items-center">
-                    <a href="{% url 'nfse_download_pdf' nf.id %}" target="_blank" class="btn btn-outline-primary">
-                        <i class="bi bi-file-earmark-pdf"></i> Baixar PDF
-                    </a>
-                    
-                    <a href="{% url 'nfse_download_xml' nf.id %}" target="_blank" class="btn btn-outline-secondary">
-                        <i class="bi bi-filetype-xml"></i> Baixar XML
-                    </a>
+            </div>
+        </div>
 
-                    
-                    {% if nf.can_be_canceled %}
-                    <form method="POST" action="{% url 'nfse_cancel' nf.id %}" onsubmit="return confirm('Tem certeza que deseja CANCELAR esta NFS-e na prefeitura? Isso não pode ser desfeito.');" class="ms-auto">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-danger">
-                            <i class="bi bi-x-circle"></i> Cancelar NFS-e
-                        </button>
-                    </form>
-                    {% endif %}
+        <!-- Description Card -->
+        <div class="card shadow-sm mb-4">
+            <div class="card-header py-3 bg-body-tertiary">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-card-text me-2 text-primary"></i>Discriminação dos Serviços
+                </h5>
+            </div>
+            <div class="card-body">
+                <pre class="bg-body-tertiary p-3 border rounded text-break mb-0" style="white-space: pre-wrap; font-family: inherit; font-size: 0.95rem;">{{ nf.description }}</pre>
+            </div>
+        </div>
+
+        <!-- Collapsible Telemetry Accordion: Events & Logs -->
+        <div class="accordion shadow-sm mb-4" id="telemetryAccordion">
+            <div class="accordion-item">
+                <h2 class="accordion-header" id="headingTelemetry">
+                    <button class="accordion-button {% if not nf.is_canceled and not has_errors %}collapsed{% endif %} py-3 bg-body-tertiary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseTelemetry" aria-expanded="{% if nf.is_canceled or has_errors %}true{% else %}false{% endif %}" aria-controls="collapseTelemetry">
+                        <div class="d-flex align-items-center justify-content-between w-100 me-2 flex-wrap gap-2">
+                            <span class="fw-semibold">
+                                <i class="bi bi-cpu me-2 text-primary"></i>Diagnóstico Técnico, Eventos ADN e Logs XML
+                            </span>
+                            <div class="d-flex align-items-center gap-2">
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                                    {{ nf_events|length }} evento{{ nf_events|length|pluralize }}
+                                </span>
+                                <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">
+                                    {{ nfse_logs|length }} log{{ nfse_logs|length|pluralize }}
+                                </span>
+                                {% if has_errors %}
+                                <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                                    <i class="bi bi-exclamation-triangle me-1"></i>Contém Erros
+                                </span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </button>
+                </h2>
+                <div id="collapseTelemetry" class="accordion-collapse collapse {% if nf.is_canceled or has_errors %}show{% endif %}" aria-labelledby="headingTelemetry" data-bs-parent="#telemetryAccordion">
+                    <div class="accordion-body p-0">
+                        <!-- Sub-section: Eventos da NFS-e -->
+                        <div class="p-3 border-bottom bg-body-secondary d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0 fw-bold"><i class="bi bi-bell me-2 text-primary"></i>Eventos da NFS-e (Sefin / ADN)</h6>
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">{{ nf_events|length }} evento{{ nf_events|length|pluralize }}</span>
+                        </div>
+                        {% if nf_events %}
+                        <div class="table-responsive">
+                            <table class="table table-hover align-middle mb-0">
+                                <thead class="bg-body-tertiary small">
+                                    <tr>
+                                        <th>NSU</th>
+                                        <th>Tipo / Evento</th>
+                                        <th>Data / Hora</th>
+                                        <th>Motivo / Descrição</th>
+                                        <th class="text-end">XML</th>
+                                    </tr>
+                                </thead>
+                                <tbody class="small">
+                                    {% for ev in nf_events %}
+                                    <tr>
+                                        <td>
+                                            {% if ev.nsu %}
+                                            <span class="badge bg-body-secondary text-body border">{{ ev.nsu }}</span>
+                                            {% else %}
+                                            <span class="badge bg-body-secondary text-secondary-emphasis border" title="O NSU é gerado de forma assíncrona pela fila de distribuição do ADN após a autorização na Sefin. Ao clicar em 'Sincronizar' após a indexação, o NSU será preenchido automaticamente.">Pendente ADN</span>
+                                            {% endif %}
+                                        </td>
+                                        <td>
+                                            <div class="fw-semibold">
+                                                {% if ev.is_cancellation %}
+                                                 <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">
+                                                    <i class="bi bi-x-circle me-1"></i>Cancelamento
+                                                </span>
+                                                {% else %}
+                                                <span class="badge bg-info-subtle text-info-emphasis border">
+                                                    {{ ev.tipo_evento|default:"Evento" }}
+                                                </span>
+                                                {% endif %}
+                                            </div>
+                                            <small class="text-muted">Cód: {{ ev.codigo_evento|default:"-" }} (Seq {{ ev.n_seq_evento }})</small>
+                                        </td>
+                                        <td>
+                                            <span>{{ ev.dh_evento|date:"d/m/Y H:i:s"|default:ev.dh_evento }}</span>
+                                        </td>
+                                        <td>
+                                            {% if ev.motivo %}
+                                            <div>{{ ev.motivo }}</div>
+                                            {% elif ev.descricao %}
+                                            <div>{{ ev.descricao }}</div>
+                                            {% else %}
+                                            <span class="text-muted">-</span>
+                                            {% endif %}
+                                            {% if ev.id_evento %}
+                                            <small class="text-muted d-block text-truncate" style="max-width: 250px;" title="{{ ev.id_evento }}">ID: {{ ev.id_evento }}</small>
+                                            {% endif %}
+                                        </td>
+                                        <td class="text-end">
+                                            {% if ev.raw_xml %}
+                                            <button class="btn btn-outline-secondary btn-sm" type="button" data-bs-toggle="collapse" data-bs-target="#eventXml-{{ ev.id }}" aria-expanded="false" title="Ver XML do Evento">
+                                                <i class="bi bi-code-slash"></i>
+                                            </button>
+                                            {% else %}
+                                            <span class="text-muted">-</span>
+                                            {% endif %}
+                                        </td>
+                                    </tr>
+                                    {% if ev.raw_xml %}
+                                    <tr class="collapse bg-body-tertiary" id="eventXml-{{ ev.id }}">
+                                        <td colspan="5" class="p-3">
+                                            <div class="d-flex justify-content-between align-items-center mb-2">
+                                                <span class="fw-bold small text-muted">XML Bruto do Evento:</span>
+                                                <button class="btn btn-sm btn-outline-secondary py-0 px-2" onclick="copySnippet('event-raw-{{ ev.id }}', this)">
+                                                    <i class="bi bi-clipboard me-1"></i>Copiar
+                                                </button>
+                                            </div>
+                                            <pre id="event-raw-{{ ev.id }}" class="bg-body-tertiary text-body border p-3 rounded mb-0 text-break" style="max-height: 250px; overflow-y: auto; font-size: 0.8rem;">{{ ev.raw_xml }}</pre>
+                                        </td>
+                                    </tr>
+                                    {% endif %}
+                                    {% endfor %}
+                                </tbody>
+                            </table>
+                        </div>
+                        {% else %}
+                        <div class="text-center py-4 text-muted small">
+                            <i class="bi bi-inbox d-block fs-4 mb-1"></i>
+                            Nenhum evento registrado até o momento para esta NFS-e.
+                        </div>
+                        {% endif %}
+
+                        <!-- Sub-section: Logs de Transmissão -->
+                        <div class="p-3 border-top border-bottom bg-body-secondary d-flex justify-content-between align-items-center">
+                            <h6 class="mb-0 fw-bold"><i class="bi bi-clock-history me-2 text-primary"></i>Histórico de Transmissão e Logs</h6>
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">{{ nfse_logs|length }} registro{{ nfse_logs|length|pluralize }}</span>
+                        </div>
+                        {% if nfse_logs %}
+                        <div class="accordion accordion-flush" id="logsAccordion">
+                            {% for log in nfse_logs %}
+                            <div class="accordion-item">
+                                <h2 class="accordion-header" id="heading-log-{{ log.id }}">
+                                    <button class="accordion-button collapsed py-3" type="button" data-bs-toggle="collapse" data-bs-target="#collapse-log-{{ log.id }}" aria-expanded="false" aria-controls="collapse-log-{{ log.id }}">
+                                        <div class="d-flex align-items-center justify-content-between w-100 me-3 flex-wrap gap-2">
+                                            <div class="d-flex align-items-center gap-2">
+                                                {% if not log.is_success or log.display_error %}
+                                                <span class="badge bg-danger"><i class="bi bi-x-circle me-1"></i>Erro</span>
+                                                {% else %}
+                                                <span class="badge bg-success"><i class="bi bi-check-circle me-1"></i>Sucesso</span>
+                                                {% endif %}
+                                                <span class="small text-muted">{{ log.origem|default:"Sistema" }}</span>
+                                            </div>
+                                            <span class="small text-muted font-monospace">{{ log.created_at|date:"d/m/Y H:i:s" }}</span>
+                                        </div>
+                                    </button>
+                                </h2>
+                                <div id="collapse-log-{{ log.id }}" class="accordion-collapse collapse" aria-labelledby="heading-log-{{ log.id }}" data-bs-parent="#logsAccordion">
+                                    <div class="accordion-body bg-body-tertiary">
+                                        {% if log.display_error %}
+                                        <div class="alert alert-danger py-2 small mb-3">
+                                            <strong>Mensagem de Erro:</strong>
+                                            <pre class="mb-0 mt-1 text-break" style="white-space: pre-wrap;">{{ log.display_error }}</pre>
+                                        </div>
+                                        {% endif %}
+
+                                        <div class="row g-3">
+                                            {% if log.payload_enviado %}
+                                            <div class="col-12 col-xl-6">
+                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                    <span class="small fw-semibold text-muted">Payload Enviado:</span>
+                                                    <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button" onclick="copySnippet('enviado-{{ log.id }}', this)">Copiar</button>
+                                                </div>
+                                                <pre class="bg-body border p-2 rounded small text-break mb-0" id="enviado-{{ log.id }}" style="max-height: 250px; overflow-y: auto; font-size: 0.8rem;">{{ log.payload_enviado }}</pre>
+                                            </div>
+                                            {% endif %}
+
+                                            {% if log.payload_retorno %}
+                                            <div class="col-12 col-xl-6">
+                                                <div class="d-flex justify-content-between align-items-center mb-1">
+                                                    <span class="small fw-semibold text-muted">Payload de Retorno:</span>
+                                                    <button class="btn btn-sm btn-link p-0 text-decoration-none" type="button" onclick="copySnippet('retorno-{{ log.id }}', this)">Copiar</button>
+                                                </div>
+                                                <pre class="bg-body border p-2 rounded small text-break mb-0" id="retorno-{{ log.id }}" style="max-height: 250px; overflow-y: auto; font-size: 0.8rem;">{{ log.payload_retorno }}</pre>
+                                            </div>
+                                            {% endif %}
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                            {% endfor %}
+                        </div>
+                        {% else %}
+                        <div class="text-center py-4 text-muted small">
+                            <i class="bi bi-journal-text display-6 d-block mb-2 text-secondary"></i>
+                            Nenhum registro de transmissão armazenado para esta nota fiscal.
+                        </div>
+                        {% endif %}
+                    </div>
                 </div>
             </div>
         </div>
     </div>
-    
-    <div class="col-md-4">
+
+    <!-- Right Column: Associated Invoice & Client Info -->
+    <div class="col-lg-4">
         <div class="card shadow-sm mb-4">
-            <div class="card-header">
-                <h5 class="mb-0">Vínculos</h5>
+            <div class="card-header py-3 bg-body-tertiary">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-link-45deg me-2 text-primary"></i>Invoice Associada
+                </h5>
             </div>
             <div class="card-body">
-                <h6>Invoice</h6>
                 {% if nf.invoice %}
-                    <p class="mb-1 fw-bold">Invoice #{{ nf.invoice.invoice_number }}</p>
-                    <a href="{% url 'invoice_detail' nf.invoice.id %}" class="btn btn-sm btn-outline-primary mt-2">Ver Invoice</a>
+                <div class="mb-3">
+                    <span class="text-muted small d-block">Número da Invoice</span>
+                    <strong class="fs-5 font-monospace text-body">#{{ nf.invoice.invoice_number }}</strong>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-muted small d-block">Tomador / Cliente</span>
+                    <strong class="d-block">{{ nf.invoice.client.name }}</strong>
+                    {% if nf.invoice.client.address_city and nf.invoice.client.country %}
+                    <small class="text-muted">{{ nf.invoice.client.address_city }}, {{ nf.invoice.client.country }}</small>
+                    {% elif nf.invoice.client.address_city %}
+                    <small class="text-muted">{{ nf.invoice.client.address_city }}</small>
+                    {% elif nf.invoice.client.country %}
+                    <small class="text-muted">{{ nf.invoice.client.country }}</small>
+                    {% endif %}
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-muted small d-block">Valor Estrangeiro</span>
+                    <strong>{{ nf.invoice.currency }} {{ nf.invoice.total_foreign|floatformat:2|intcomma }}</strong>
+                </div>
+
+                <div class="mb-3">
+                    <span class="text-muted small d-block">Taxa de Conversão</span>
+                    <span>R$ {{ nf.invoice.exchange_rate_to_brl|floatformat:4|default:"-" }}</span>
+                </div>
+
+                <div class="d-grid mt-4">
+                    <a href="{% url 'invoice_detail' nf.invoice.id %}?next={{ request.get_full_path|urlencode }}" class="btn btn-outline-primary">
+                        <i class="bi bi-box-arrow-up-right me-1"></i>Ver Detalhes da Invoice
+                    </a>
+                </div>
                 {% else %}
-                    <p class="text-warning mb-3">Nenhuma invoice associada.</p>
-                    
-                    <form method="POST" action="{% url 'nfse_link_invoice' nf.id %}" class="mb-3">
-                        {% csrf_token %}
-                        <div class="input-group">
-                            <select class="form-select" name="invoice_id" required>
-                                <option value="">Vincular invoice existente...</option>
-                                {% for inv in invoices %}
-                                <option value="{{ inv.id }}">Invoice #{{ inv.invoice_number }} - {{ inv.client.name }}</option>
-                                {% endfor %}
-                            </select>
-                            <button type="submit" class="btn btn-primary">Vincular</button>
-                        </div>
-                    </form>
+                <div class="alert alert-warning py-2 mb-3 small">
+                    <i class="bi bi-exclamation-triangle me-1"></i>
+                    Esta NFS-e está registrada como avulsa (sem invoice associada).
+                </div>
+
+                <form method="POST" action="{% url 'nfse_link_invoice' nf.id %}">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ back_url }}">
+                    <label class="form-label small text-muted">Vincular a uma Invoice existente:</label>
+                    <div class="mb-3">
+                        <select class="form-select form-select-sm" name="invoice_id" required>
+                            <option value="">Selecione uma invoice...</option>
+                            {% for inv in invoices %}
+                            <option value="{{ inv.id }}">Invoice #{{ inv.invoice_number }} - {{ inv.client.name }} (R$ {{ inv.total_brl|floatformat:2|intcomma }})</option>
+                            {% endfor %}
+                        </select>
+                    </div>
+                    <button type="submit" class="btn btn-primary btn-sm w-100">
+                        <i class="bi bi-link me-1"></i>Vincular Invoice
+                    </button>
+                </form>
                 {% endif %}
             </div>
         </div>
     </div>
 </div>
-{% endblock %}
+</div>
 
+<script>
+function copyToClipboard(elementId, btn) {
+    const copyText = document.getElementById(elementId);
+    copyText.select();
+    copyText.setSelectionRange(0, 99999);
+    navigator.clipboard.writeText(copyText.value).then(() => {
+        const originalHtml = btn.innerHTML;
+        btn.innerHTML = '<i class="bi bi-check2"></i> Copiado!';
+        btn.classList.replace('btn-outline-secondary', 'btn-success');
+        setTimeout(() => {
+            btn.innerHTML = originalHtml;
+            btn.classList.replace('btn-success', 'btn-outline-secondary');
+        }, 2000);
+    });
+}
+
+function copySnippet(elementId, btn) {
+    const el = document.getElementById(elementId);
+    navigator.clipboard.writeText(el.innerText).then(() => {
+        const originalText = btn.innerText;
+        btn.innerText = 'Copiado!';
+        setTimeout(() => {
+            btn.innerText = originalText;
+        }, 2000);
+    });
+}
+</script>
+{% endblock %}

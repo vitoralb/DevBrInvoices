@@ -1,0 +1,586 @@
+{% extends 'core/base.html' %}
+{% load humanize %}
+
+{% block title %}Painel de {{ target_month|date:"F \d\e Y"|title }} - {{ PROJECT_NAME }}{% endblock %}
+
+{% block content %}
+<!-- Top Header & Navigation -->
+<div class="card shadow-sm mb-4">
+    <div class="card-body">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-3">
+            <div>
+                <span class="text-muted text-uppercase small fw-bold">Painel Mensal</span>
+                <h2 class="mb-0 fw-bold">{{ target_month|date:"F \d\e Y"|title }}</h2>
+            </div>
+
+            <!-- Month Navigator -->
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <div class="btn-group" role="group" aria-label="Navegação entre meses">
+                    {% if has_prev %}
+                        <a href="{% url 'dashboard' %}?month={{ prev_month|date:'Y-m' }}" class="btn btn-outline-secondary d-flex align-items-center gap-1" title="Mês Anterior: {{ prev_month|date:'F/Y'|title }}">
+                            <i class="bi bi-chevron-left"></i><span class="d-none d-sm-inline">{{ prev_month|date:"M/Y" }}</span>
+                        </a>
+                    {% else %}
+                        <button class="btn btn-outline-secondary" disabled><i class="bi bi-chevron-left"></i></button>
+                    {% endif %}
+
+                    <div class="btn-group">
+                        <select class="form-select" style="min-width: 150px;" onchange="if (this.value) window.location.href = this.value;" aria-label="Selecione o mês desejado">
+                            {% for m in available_months %}
+                                <option value="{% url 'dashboard' %}?month={{ m|date:'Y-m' }}" {% if m == target_month %}selected{% endif %}>
+                                    {{ m|date:"F \d\e Y"|title }}
+                                </option>
+                            {% endfor %}
+                        </select>
+                    </div>
+
+                    {% if has_next %}
+                        <a href="{% url 'dashboard' %}?month={{ next_month|date:'Y-m' }}" class="btn btn-outline-secondary d-flex align-items-center gap-1" title="Próximo Mês: {{ next_month|date:'F/Y'|title }}">
+                            <span class="d-none d-sm-inline">{{ next_month|date:"M/Y" }}</span><i class="bi bi-chevron-right"></i>
+                        </a>
+                    {% else %}
+                        <button class="btn btn-outline-secondary" disabled><i class="bi bi-chevron-right"></i></button>
+                    {% endif %}
+                </div>
+
+                {% if target_month != current_month_first %}
+                    <a href="{% url 'dashboard' %}" class="btn btn-outline-primary d-flex align-items-center gap-1" title="Ir para o mês atual">
+                        <i class="bi bi-calendar3"></i> <span class="d-none d-sm-inline">Mês Atual</span>
+                    </a>
+                {% endif %}
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="d-flex gap-2 flex-wrap">
+                <form method="POST" action="{% url 'htmx_reconsolidate_month' consolidation.id %}" class="mb-0">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="btn btn-outline-secondary fw-semibold d-flex align-items-center gap-1" title="Recalcular consolidação deste mês">
+                        <i class="bi bi-arrow-clockwise"></i> Recalcular Mês
+                    </button>
+                </form>
+
+                <div class="dropdown">
+                    <button class="btn btn-outline-primary dropdown-toggle fw-semibold d-flex align-items-center gap-1" type="button" id="esocialDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                        <i class="bi bi-cloud-arrow-down"></i> eSocial & Contabilidade
+                    </button>
+                    <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="esocialDropdown">
+                        <li>
+                            <form method="POST" action="{% url 'sync_esocial' %}" class="mb-0">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                <button type="submit" class="dropdown-item d-flex align-items-center gap-2">
+                                    <i class="bi bi-cloud-arrow-down text-primary"></i> Sincronizar eSocial Online
+                                </button>
+                            </form>
+                        </li>
+                        <li>
+                            <button class="dropdown-item d-flex align-items-center gap-2" type="button" data-bs-toggle="modal" data-bs-target="#modalImportEsocial">
+                                <i class="bi bi-upload text-success"></i> Subir / Importar Backup ou XMLs
+                            </button>
+                        </li>
+                        <li><hr class="dropdown-divider"></li>
+                        <li>
+                            <a class="dropdown-item d-flex align-items-center gap-2" href="{% url 'export_esocial_backup' %}">
+                                <i class="bi bi-download text-secondary"></i> Baixar Backup (.zip)
+                            </a>
+                        </li>
+                    </ul>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Warning Banner if eSocial Window is Incomplete -->
+{% if consolidation.has_incomplete_esocial_window %}
+<div class="alert alert-warning shadow-sm d-flex align-items-center mb-4" role="alert">
+    <div class="fs-4 me-3"><i class="bi bi-exclamation-triangle-fill"></i></div>
+    <div>
+        <h5 class="alert-heading mb-1 fw-bold">Importação do eSocial Incompleta nos Últimos 11 Meses</h5>
+        <p class="mb-0 small">
+            Os seguintes meses anteriores não possuem dados sincronizados do eSocial:
+            <strong>
+                {% for m in consolidation.unsynced_prior_months %}
+                    {{ m|date:"M/Y" }}{% if not forloop.last %}, {% endif %}
+                {% endfor %}
+            </strong>.
+            A projeção do pró-labore ideal e o enquadramento no Anexo III podem sofrer alterações após a importação desses períodos pendentes.
+        </p>
+    </div>
+</div>
+{% endif %}
+
+<!-- Block 1: Faturamento e Resumo do Mês M -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-body-tertiary py-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <h5 class="mb-0 fw-bold">1. Faturamento e Indicadores da Competência ({{ target_month|date:"F \d\e Y"|title }})</h5>
+            <div>
+                {% if consolidation.status == 'CONSOLIDATED' %}
+                    <span class="badge bg-success">Consolidação Atualizada</span>
+                {% else %}
+                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Consolidação Desatualizada</span>
+                {% endif %}
+                {% if consolidation.fator_r_ratio >= 28 %}
+                    <span class="badge bg-primary">Anexo III (Fator R ≥ 28%)</span>
+                {% else %}
+                    <span class="badge bg-danger">Anexo V (Fator R &lt; 28%)</span>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="card-body">
+        <div class="row g-3">
+            <div class="col-sm-6 col-lg-3">
+                <div class="border rounded p-3 text-center h-100 bg-body-tertiary">
+                    <span class="text-muted small d-block mb-1">Receita Total do Mês</span>
+                    <h3 class="fw-bold mb-1 text-primary">R$ {{ consolidation.total_revenue|floatformat:2|intcomma }}</h3>
+                    <small class="text-muted d-block">
+                        Exterior: R$ {{ consolidation.total_revenue_export|floatformat:2|intcomma }}<br>
+                        Interno: R$ {{ consolidation.total_revenue_internal|floatformat:2|intcomma }}
+                    </small>
+                </div>
+            </div>
+
+            <div class="col-sm-6 col-lg-3">
+                <div class="border rounded p-3 text-center h-100 bg-body-tertiary">
+                    <span class="text-muted small d-block mb-1">RBT12 (Receita Bruta 12m)</span>
+                    <h3 class="fw-bold mb-1">R$ {{ consolidation.rbt12|floatformat:2|intcomma }}</h3>
+                    <small class="text-muted d-block">Receita acumulada nos 12 meses anteriores</small>
+                </div>
+            </div>
+
+            <div class="col-sm-6 col-lg-3">
+                <div class="border rounded p-3 text-center h-100 bg-body-tertiary">
+                    <span class="text-muted small d-block mb-1">Fator R do Mês</span>
+                    <h3 class="fw-bold mb-1 {% if consolidation.fator_r_ratio >= 28 %}text-success{% else %}text-danger{% endif %}">
+                        {{ consolidation.fator_r_ratio|floatformat:2|intcomma }}%
+                    </h3>
+                    <small class="text-muted d-block">
+                        Meta para Anexo III: ≥ 28,00%
+                    </small>
+                </div>
+            </div>
+
+            <div class="col-sm-6 col-lg-3">
+                <div class="border rounded p-3 text-center h-100 bg-body-tertiary">
+                    <span class="text-muted small d-block mb-1">Folha de Pagamento 12m</span>
+                    <h4 class="fw-bold mb-1">R$ {{ consolidation.fator_r_payroll_sum|floatformat:2|intcomma }}</h4>
+                    <small class="text-muted d-block">
+                        CPP DAS 12m: R$ {{ consolidation.fator_r_cpp_sum|floatformat:2|intcomma }}
+                    </small>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Block 2: A Pagar Neste Mês (Ref. à Competência Anterior M-1) -->
+<div class="card shadow-sm mb-4 border-warning">
+    <div class="card-header bg-warning-subtle py-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h5 class="mb-0 fw-bold text-warning-emphasis">2. A Pagar Neste Mês ({{ target_month|date:"F \d\e Y"|title }})</h5>
+                <small class="text-muted">
+                    Valores apurados referentes à competência anterior ({% if prev_consolidation %}{{ prev_month|date:"F \d\e Y"|title }}{% else %}N/A{% endif %}) com vencimento neste mês
+                </small>
+            </div>
+            {% if prev_consolidation %}
+                <span class="badge bg-secondary fs-6">Comp. {{ prev_month|date:"m/Y" }}</span>
+            {% endif %}
+        </div>
+    </div>
+    <div class="card-body">
+        {% if prev_consolidation %}
+            <div class="row g-4">
+                <!-- Impostos do Mês Anterior -->
+                <div class="col-md-6">
+                    <div class="border rounded p-3 h-100">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="fw-bold mb-0 text-danger">Impostos a Recolher (Vencimento até dia 20)</h6>
+                            <span class="badge bg-danger">R$ {{ prev_consolidation.total_tax|floatformat:2|intcomma }}</span>
+                        </div>
+                        <ul class="list-group list-group-flush mb-3">
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
+                                <span>DAS (Documento de Arrecadação do Simples)</span>
+                                <strong class="text-end">R$ {{ prev_consolidation.das_tax|floatformat:2|intcomma }}</strong>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
+                                <span>INSS (Guia DAE / DCTFWeb)</span>
+                                <strong class="text-end">R$ {{ prev_consolidation.inss_tax|floatformat:2|intcomma }}</strong>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
+                                <span>IRRF (Retenção na Fonte)</span>
+                                <strong class="text-end">R$ {{ prev_consolidation.irrf_tax|floatformat:2|intcomma }}</strong>
+                            </li>
+                        </ul>
+                        <div class="p-2 bg-body-tertiary border rounded small text-muted">
+                            <i class="bi bi-info-circle me-1"></i> O DAS e a DCTFWeb (INSS + IRRF) devem ser pagos até o dia 20 de {{ target_month|date:"F" }}.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Pró-labore a Transferir -->
+                <div class="col-md-6">
+                    <div class="border rounded p-3 h-100">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="fw-bold mb-0 text-success">Pró-labore do Sócio (Vencimento até 5º dia útil)</h6>
+                            <span class="badge bg-success">R$ {{ prev_consolidation.net_pro_labore|floatformat:2|intcomma }} (Líquido)</span>
+                        </div>
+                        <ul class="list-group list-group-flush mb-3">
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
+                                <span>Pró-labore Bruto Declarado</span>
+                                <strong class="text-end">R$ {{ prev_consolidation.actual_pro_labore_paid|floatformat:2|intcomma }}</strong>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 text-muted">
+                                <span>Retenção INSS Sócio (11%)</span>
+                                <span class="text-danger text-end">- R$ {{ prev_consolidation.inss_tax|floatformat:2|intcomma }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 text-muted">
+                                <span>Retenção IRRF Sócio</span>
+                                <span class="text-danger text-end">- R$ {{ prev_consolidation.irrf_tax|floatformat:2|intcomma }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2 border-top fw-bold">
+                                <span>Valor Líquido a Transferir ao Sócio</span>
+                                <span class="text-success text-end fs-5">R$ {{ prev_consolidation.net_pro_labore|floatformat:2|intcomma }}</span>
+                            </li>
+                        </ul>
+                        <div class="d-flex justify-content-between align-items-center p-2 bg-body-tertiary border rounded small">
+                            <span class="text-muted">Origem dos dados:</span>
+                            {% if prev_consolidation.esocial_synced %}
+                                <span class="badge bg-success" title="Sincronizado do eSocial em {{ prev_consolidation.esocial_synced_at|date:'d/m/Y H:i' }}">
+                                    <i class="bi bi-check-lg me-1"></i> Sincronizado eSocial
+                                </span>
+                            {% elif prev_consolidation.is_closed %}
+                                <span class="badge bg-secondary" title="Mês fechado sem importação do eSocial">
+                                    Pendente eSocial (R$ 0,00)
+                                </span>
+                            {% else %}
+                                <span class="badge bg-info-subtle text-info-emphasis border border-info">
+                                    Calculado Automaticamente
+                                </span>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% else %}
+            <div class="text-center py-4 text-muted">
+                <p class="mb-0">Não há competência anterior registrada (mês de início da operação da empresa).</p>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<!-- Block 3: Previsão para o Mês Seguinte M+1 (Ref. à Competência Deste Mês M) -->
+<div class="card shadow-sm mb-4 border-info">
+    <div class="card-header bg-info-subtle py-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h5 class="mb-0 fw-bold text-info-emphasis">3. Previsão para o Mês Seguinte ({{ next_month|date:"F \d\e Y"|title }})</h5>
+                <small class="text-muted">
+                    Projeção de impostos e pró-labore ideal apurados para a competência deste mês ({{ target_month|date:"F \d\e Y"|title }})
+                </small>
+            </div>
+            <div class="d-flex align-items-center gap-2">
+                <span class="badge bg-info-subtle text-info-emphasis border border-info fs-6">A pagar em {{ next_month|date:"m/Y" }}</span>
+                {% if consolidation.is_closed %}
+                <button class="btn btn-sm btn-outline-info" type="button" data-bs-toggle="collapse" data-bs-target="#collapseHistoricalForecast" aria-expanded="false" aria-controls="collapseHistoricalForecast">
+                    <i class="bi bi-chevron-down me-1"></i>Ver projeção da época ({{ consolidation.proj_fator_r|floatformat:2 }}%)
+                </button>
+                {% endif %}
+            </div>
+        </div>
+    </div>
+    <div class="{% if consolidation.is_closed %}collapse{% else %}show{% endif %}" id="collapseHistoricalForecast">
+        <div class="card-body">
+            <div class="row g-4">
+                <!-- Pró-labore Recomendado / Situação -->
+                <div class="col-md-4">
+                    <div class="border rounded p-3 h-100">
+                        <h6 class="fw-bold mb-3 text-primary">Pró-labore Ideal Recomendado</h6>
+                        <div class="text-center py-2 mb-3 bg-body-tertiary border rounded">
+                            <span class="text-muted small d-block">Valor Bruto para Manter Fator R ≥ 28%</span>
+                            <h3 class="fw-bold text-primary mb-0">R$ {{ consolidation.recommended_pl|floatformat:2|intcomma }}</h3>
+                        </div>
+                        <ul class="list-group list-group-flush small mb-3">
+                            <li class="list-group-item d-flex justify-content-between px-0 py-1">
+                                <span>Retenção INSS Estimada:</span>
+                                <span class="text-muted">R$ {{ consolidation.inss_tax|floatformat:2|intcomma }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between px-0 py-1">
+                                <span>Retenção IRRF Estimada:</span>
+                                <span class="text-muted">R$ {{ consolidation.irrf_tax|floatformat:2|intcomma }}</span>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between px-0 py-1 fw-bold">
+                                <span>Líquido Estimado ao Sócio:</span>
+                                <span class="text-success">R$ {{ consolidation.net_pro_labore|floatformat:2|intcomma }}</span>
+                            </li>
+                        </ul>
+                        <div class="p-2 border rounded bg-body-tertiary small">
+                            <strong>Situação no Sistema:</strong>
+                            <div class="mt-1">
+                                {% if consolidation.esocial_synced %}
+                                    <span class="badge bg-success">Importado via eSocial</span>
+                                    <span class="d-block mt-1 text-muted">Valor real pago: R$ {{ consolidation.actual_pro_labore_paid|floatformat:2|intcomma }}</span>
+                                {% elif consolidation.is_closed %}
+                                    <span class="badge bg-secondary">Mês Fechado (Pendente eSocial)</span>
+                                    <span class="d-block mt-1 text-muted">Valor computado: R$ 0,00</span>
+                                {% else %}
+                                    <span class="badge bg-primary">Mês Aberto</span>
+                                    <span class="d-block mt-1 text-muted">Pró-labore ideal auto-atribuído: R$ {{ consolidation.actual_pro_labore_paid|floatformat:2|intcomma }}</span>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Previsão de Tributos M+1 -->
+                <div class="col-md-4">
+                    <div class="border rounded p-3 h-100">
+                        <div class="d-flex justify-content-between align-items-center mb-3">
+                            <h6 class="fw-bold mb-0 text-danger">Impostos Previstos em {{ next_month|date:"M/Y" }}</h6>
+                            <span class="badge bg-danger">Total: R$ {{ consolidation.total_tax|floatformat:2|intcomma }}</span>
+                        </div>
+                        <ul class="list-group list-group-flush mb-3">
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
+                                <span>DAS Previsto (Simples Nacional)</span>
+                                <strong class="text-end">R$ {{ consolidation.das_tax|floatformat:2|intcomma }}</strong>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
+                                <span>INSS Previsto (Pró-labore)</span>
+                                <strong class="text-end">R$ {{ consolidation.inss_tax|floatformat:2|intcomma }}</strong>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between align-items-center px-0 py-2">
+                                <span>IRRF Previsto (Pró-labore)</span>
+                                <strong class="text-end">R$ {{ consolidation.irrf_tax|floatformat:2|intcomma }}</strong>
+                            </li>
+                        </ul>
+                        <div class="p-2 bg-body-tertiary border rounded small text-muted">
+                            <i class="bi bi-info-circle me-1"></i> Estimativa calculada com base nas notas emitidas até o momento na competência {{ target_month|date:"m/Y" }}.
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Projeção de Fator R e Enquadramento M+1 -->
+                <div class="col-md-4">
+                    <div class="border rounded p-3 h-100">
+                        <h6 class="fw-bold mb-3 text-secondary">Projeção do Fator R para o Próximo Mês</h6>
+                        <div class="text-center py-2 mb-3 bg-body-tertiary border rounded">
+                            <span class="text-muted small d-block">Fator R Projetado</span>
+                            <h3 class="fw-bold mb-0 {% if consolidation.proj_fator_r >= 28 %}text-success{% else %}text-danger{% endif %}">
+                                {{ consolidation.proj_fator_r|floatformat:2|intcomma }}%
+                            </h3>
+                        </div>
+                        <ul class="list-group list-group-flush small mb-3">
+                            <li class="list-group-item d-flex justify-content-between px-0 py-1">
+                                <span>RBT12 Projetado:</span>
+                                <strong class="text-end">R$ {{ consolidation.proj_rbt12|floatformat:2|intcomma }}</strong>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between px-0 py-1">
+                                <span>Folha Projetada (12m):</span>
+                                <strong class="text-end">R$ {{ consolidation.proj_pl_sum|floatformat:2|intcomma }}</strong>
+                            </li>
+                            <li class="list-group-item d-flex justify-content-between px-0 py-1">
+                                <span>CPP DAS Projetado:</span>
+                                <strong class="text-end">R$ {{ consolidation.proj_cpp|floatformat:2|intcomma }}</strong>
+                            </li>
+                        </ul>
+                        <div class="text-center p-2 rounded {% if consolidation.proj_fator_r >= 28 %}bg-success-subtle text-success-emphasis{% else %}bg-danger-subtle text-danger-emphasis{% endif %} fw-bold small">
+                            {% if consolidation.proj_fator_r >= 28 %}
+                                <i class="bi bi-check-circle-fill me-1"></i> Qualificado para Anexo III no próximo mês
+                            {% else %}
+                                <i class="bi bi-exclamation-triangle-fill me-1"></i> Alerta: Projeção abaixo de 28% (risco de Anexo V)
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+</div>
+
+<!-- Block 4: Notas Fiscais e Invoices Emitidas no Mês M -->
+<div class="card shadow-sm mb-4">
+    <div class="card-header bg-body-tertiary py-3">
+        <div class="d-flex justify-content-between align-items-center flex-wrap gap-2">
+            <div>
+                <h5 class="mb-0 fw-bold">4. Notas Fiscais e Invoices Emitidas ({{ target_month|date:"F \d\e Y"|title }})</h5>
+                <small class="text-muted">{{ notas_fiscais|length|add:pending_invoices|length }} documento(s) fiscal(is) localizado(s)</small>
+            </div>
+            <a href="{% url 'invoice_create' %}?next={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-primary fw-semibold d-flex align-items-center gap-1">
+                <i class="bi bi-plus-lg"></i> Nova Invoice
+            </a>
+        </div>
+    </div>
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="bg-body-tertiary">
+                    <tr>
+                        <th scope="col" class="ps-3 py-3">Data</th>
+                        <th scope="col" class="py-3">NFS-e / RPS</th>
+                        <th scope="col" class="py-3">Invoice</th>
+                        <th scope="col" class="py-3">Cliente</th>
+                        <th scope="col" class="py-3">Valor Original</th>
+                        <th scope="col" class="py-3">Câmbio</th>
+                        <th scope="col" class="py-3">Valor (BRL)</th>
+                        <th scope="col" class="py-3">Status</th>
+                        <th scope="col" class="text-end pe-3 py-3">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for inv in pending_invoices %}
+                        <tr>
+                            <td class="ps-3 py-3">{{ inv.issue_date|date:"d/m/Y" }}</td>
+                            <td class="py-3">
+                                <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                                    {% if inv.status == 'DRAFT' %}Rascunho{% else %}Pendente NFS-e{% endif %}
+                                </span>
+                            </td>
+                            <td class="py-3">
+                                <a href="{% url 'invoice_detail' inv.id %}?next={{ request.get_full_path|urlencode }}" class="fw-bold text-decoration-none font-monospace">
+                                    {{ inv.invoice_number }}
+                                </a>
+                            </td>
+                            <td class="py-3">
+                                {% if inv.client %}
+                                    {{ inv.client.name }}
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="font-monospace py-3">
+                                {% if inv.currency and inv.currency != "BRL" %}
+                                    {{ inv.currency }} {{ inv.total_foreign|floatformat:2|intcomma }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td class="font-monospace py-3">
+                                {% if inv.exchange_rate_to_brl %}
+                                    R$ {{ inv.exchange_rate_to_brl|floatformat:4 }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td class="fw-bold font-monospace py-3">
+                                {% if inv.total_brl %}
+                                    R$ {{ inv.total_brl|floatformat:2|intcomma }}
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3">
+                                {% if inv.status == 'DRAFT' %}
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">Rascunho</span>
+                                {% elif inv.status == 'PROCESSING' %}
+                                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Processando</span>
+                                {% elif inv.status == 'FINALIZED' %}
+                                    <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">Pendente NFS-e</span>
+                                {% elif inv.status == 'CANCELED' %}
+                                    <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">Cancelada</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end pe-3 py-3 text-nowrap">
+                                <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+                                    <a href="{% url 'invoice_detail' inv.id %}?next={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-outline-secondary" title="Ver Detalhes">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    <a href="{% url 'generate_invoice_pdf' inv.id %}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Baixar PDF">
+                                        <i class="bi bi-file-earmark-pdf"></i>
+                                    </a>
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    {% for nf in notas_fiscais %}
+                        <tr>
+                            <td class="ps-3 py-3">{{ nf.issue_date|date:"d/m/Y" }}</td>
+                            <td class="py-3">
+                                {% if nf.nf_number %}
+                                    <span class="fw-bold font-monospace">NFS-e #{{ nf.nf_number }}</span>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                                {% if nf.is_export %}
+                                    <span class="badge bg-info-subtle text-info-emphasis border border-info ms-1" style="font-size: 0.7rem;">Exterior</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3">
+                                {% if nf.invoice %}
+                                    <a href="{% url 'invoice_detail' nf.invoice.id %}?next={{ request.get_full_path|urlencode }}" class="fw-bold text-decoration-none font-monospace">
+                                        {{ nf.invoice.invoice_number }}
+                                    </a>
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="py-3">
+                                {% if nf.invoice and nf.invoice.client %}
+                                    {{ nf.invoice.client.name }}
+                                {% else %}
+                                    <span class="text-muted">—</span>
+                                {% endif %}
+                            </td>
+                            <td class="font-monospace py-3">
+                                {% if nf.invoice and nf.invoice.currency and nf.invoice.currency != "BRL" %}
+                                    {{ nf.invoice.currency }} {{ nf.invoice.total_foreign|floatformat:2|intcomma }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td class="font-monospace py-3">
+                                {% if nf.invoice and nf.invoice.exchange_rate_to_brl %}
+                                    R$ {{ nf.invoice.exchange_rate_to_brl|floatformat:4 }}
+                                {% else %}
+                                    —
+                                {% endif %}
+                            </td>
+                            <td class="fw-bold font-monospace py-3">
+                                R$ {{ nf.amount_brl|floatformat:2|intcomma }}
+                            </td>
+                            <td class="py-3">
+                                {% if nf.is_canceled or nf.invoice.status == 'CANCELED' %}
+                                    <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">Cancelada</span>
+                                {% else %}
+                                    <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle">Autorizada</span>
+                                {% endif %}
+                            </td>
+                            <td class="text-end pe-3 py-3 text-nowrap">
+                                <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+                                    <a href="{% url 'nfse_detail' nf.id %}?next={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-outline-secondary" title="Ver Detalhes">
+                                        <i class="bi bi-eye"></i>
+                                    </a>
+                                    {% if nf.danfse_pdf %}
+                                        <a href="{% url 'nfse_download_pdf' nf.id %}" class="btn btn-sm btn-outline-secondary" title="Baixar PDF">
+                                            <i class="bi bi-file-earmark-pdf"></i>
+                                        </a>
+                                    {% endif %}
+                                    {% if nf.xml_autorizacao %}
+                                        <a href="{% url 'nfse_download_xml' nf.id %}" class="btn btn-sm btn-outline-secondary" title="Baixar XML">
+                                            <i class="bi bi-filetype-xml"></i>
+                                        </a>
+                                    {% endif %}
+                                </div>
+                            </td>
+                        </tr>
+                    {% endfor %}
+                    {% if not pending_invoices and not notas_fiscais %}
+                        <tr>
+                            <td colspan="9" class="text-center py-4 text-muted">
+                                Nenhuma nota fiscal ou invoice emitida nesta competência ({{ target_month|date:"F \d\e Y"|title }}).
+                            </td>
+                        </tr>
+                    {% endif %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+
+<!-- Modal Importar Backup eSocial -->
+{% include 'core/partials/esocial_import_modal.html' %}
+{% endblock %}
+

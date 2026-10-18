@@ -518,16 +518,11 @@ class NFeClient:
 
 
 def download_nfse_pdf(im: str, nf_number: str, verification_code: str):
-    """Download NFS-e PDF from São Paulo prefeitura or generate a fake one in debug mode."""
-    if verification_code == "DEBUG-FAKE-CODE":
-        import weasyprint
-
-        html_string = (
-            f"<html><body><h1>FAKE NFS-e PDF</h1>"
-            f"<p>NFS-e Number: {nf_number}</p>"
-            f"<p>This is a test PDF generated in Debug Mode.</p></body></html>"
-        )
-        return weasyprint.HTML(string=html_string).write_pdf()
+    """Download NFS-e PDF from São Paulo prefeitura."""
+    if verification_code == "DEBUG-FAKE-CODE" or str(
+        verification_code or ""
+    ).startswith("DEBUG"):
+        return None
 
     url = f"https://nfe.prefeitura.sp.gov.br/contribuinte/notaprintpdf.aspx?inscricao={im}&nf={nf_number}&verificacao={verification_code}"
     try:

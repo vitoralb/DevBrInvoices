@@ -78,13 +78,15 @@ docker exec notas-web-1 python manage.py collectstatic --noinput
 
 Para desenvolver novas funcionalidades sem riscos para o ambiente de produção nem poluição de arquivos reais, utilize o fluxo de desenvolvimento isolado via `Makefile`:
 
-### 1. Criar um Ambiente de Desenvolvimento (Dev)
-Gera uma stack de desenvolvimento completa (`notas-dev`) na porta **8081**, clonando o banco de dados e arquivos de mídia da produção atual para `./dev_data/`:
+### 1. Criar ou Retomar um Ambiente de Desenvolvimento (Dev)
+Gera ou retoma uma stack de desenvolvimento completa (`notas-dev`) na porta **8081**:
 ```bash
 make dev-spawn
 ```
-- **Live Reload:** O código local é montado em tempo real no container de desenvolvimento.
-- **Travas de Segurança:** `debug_mode` é travado em `True`, `auto_finalize_invoices` é desativado para evitar disparos acidentais, todos os e-mails são redirecionados e as emissões de NFS-e são direcionadas para endpoints de teste/homologação.
+- **Inicialização Clean Slate (Primeiro Spawn):** Se `./dev_data/` não existir, o script cria uma base limpa de desenvolvimento, copiando exclusivamente as configurações (`CompanySettings`) e usuários (`auth_user`) de produção. Contadores são zerados (`next_document_number=1`, `last_adn_nsu=0`), a série de documentos é fixada em `"4242"`, um cliente de teste sintético e template de invoice são criados, e um processo de importação automática de NFS-es e eventos de Homologação é executado via API de Distribuição ADN do Sefin Nacional.
+- **Retomada de Ambiente:** Se `./dev_data/` já existir, os containers existentes são iniciados, migrações pendentes são aplicadas e uma consulta incremental de novos eventos/NFS-es no ADN é disparada.
+- **Live Reload:** O diretório do projeto `.:/app` é montado em tempo real no container de desenvolvimento.
+- **Travas de Segurança:** `debug_mode` é travado em `True`, `document_series` em `"4242"`, `auto_finalize_invoices` é desativado para evitar disparos acidentais, todos os e-mails são redirecionados para e-mail interno/debug e as emissões de NFS-e são direcionadas para endpoints de teste/homologação (Sefin Nacional Produção Restrita `tpAmb=2` ou Paulistana `TesteEnvioLoteRPS`).
 - **Regra de Instância Única:** Apenas **um** ambiente de desenvolvimento pode estar ativo por vez.
 
 ### 2. Executar a Suíte de Testes
@@ -93,30 +95,39 @@ Os testes devem ser executados **obrigatoriamente** no ambiente de desenvolvimen
 make dev-test
 # ou simplesmente:
 make test
+# ou testes específicos:
+make dev-test ARGS="core.tests.test_models"
 ```
 *O test runner isola automaticamente o diretório de mídia em uma pasta temporária que é excluída ao final dos testes, garantindo que nenhum PDF ou XML fictício de teste permaneça no disco.*
 
 ### 3. Reiniciar os Workers no Desenvolvimento
-Caso altere tarefas Celery ou models:
+Caso altere tarefas Celery, configurações ou models:
 ```bash
 make dev-restart
 ```
 
-### 4. Destruir o Ambiente de Desenvolvimento
-Quando terminar a funcionalidade ou testes:
+### 4. Parar o Ambiente de Desenvolvimento (Preservando Dados)
+Para pausar o desenvolvimento e liberar memória e CPU:
 ```bash
 make dev-destroy
 ```
-Isso remove todos os containers de desenvolvimento e exclui completamente a pasta `./dev_data/`.
+Isso interrompe e remove os containers de desenvolvimento, mas **preserva** a pasta `./dev_data/` intacta, permitindo retomar instantaneamente depois via `make dev-spawn` sem precisar reimportar o histórico do Sefin.
 
-### 5. Atualizar a Produção
+### 5. Reinicializar o Ambiente de Desenvolvimento (Clean Slate)
+Caso deseje resetar completamente o banco de dados de desenvolvimento para o estado inicial:
+```bash
+make dev-reset
+```
+Isso interrompe os containers, apaga a pasta `./dev_data/` e recria um ambiente limpo com as travas e importação inicial do Sefin Homologação.
+
+### 6. Atualizar a Produção
 Após finalizar a funcionalidade, testar em Dev e mesclar o código na branch principal (`master`):
 ```bash
 make prod-upgrade
 ```
-O comando reconstrói a imagem Docker de produção, recria os containers de produção e executa as migrações pendentes.
+O comando reconstrói a imagem Docker de produção, recria os containers de produção e executa as migrações pendentes e `collectstatic`.
 
-### 6. Verificar o Status dos Ambientes
+### 7. Verificar o Status dos Ambientes
 ```bash
 make status
 ```

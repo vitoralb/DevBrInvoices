@@ -21,7 +21,7 @@ PT_BR_MONTHS = {
 }
 
 
-def apply_invoice_macros(text, invoice, language="en"):
+def apply_invoice_macros(text, invoice, language="en", extra_context=None):
     if not text:
         return text
 
@@ -74,6 +74,35 @@ def apply_invoice_macros(text, invoice, language="en"):
             replacements["{{ value_brl }}"] = f"{val:,.2f}"
     except:
         replacements["{{ value_brl }}"] = "0,00" if language == "pt-br" else "0.00"
+
+    if invoice.exchange_rate_to_brl is not None:
+        if language == "pt-br":
+            replacements["{{ exchange_rate }}"] = format_money_pt_br(
+                invoice.exchange_rate_to_brl, decimals=4
+            )
+        else:
+            replacements["{{ exchange_rate }}"] = f"{invoice.exchange_rate_to_brl:,.4f}"
+    else:
+        replacements["{{ exchange_rate }}"] = (
+            "0,0000" if language == "pt-br" else "0.0000"
+        )
+
+    replacements["{{ effective_tax_rate }}"] = (
+        "0,00" if language == "pt-br" else "0.00"
+    )
+
+    if extra_context:
+        from decimal import Decimal
+
+        for k, v in extra_context.items():
+            if isinstance(v, Decimal):
+                replacements[k] = (
+                    format_money_pt_br(v, decimals=2)
+                    if language == "pt-br"
+                    else f"{v:,.2f}"
+                )
+            else:
+                replacements[k] = str(v)
 
     for k, v in replacements.items():
         text = text.replace(k, str(v))

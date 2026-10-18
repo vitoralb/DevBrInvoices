@@ -22,6 +22,18 @@ def get_allowed_providers(ibge_code):
     return ALLOWED_PROVIDERS_BY_IBGE.get(str(ibge_code), ["NACIONAL"])
 
 
+DEFAULT_NFSE_DESCRIPTION_TEMPLATE = (
+    "Serviços de desenvolvimento de software. Referente ao período de {{ prev_month_start }} a {{ prev_month_end }}.\n"
+    "Serviço prestado exclusivamente para o exterior, não será usado no Brasil.\n\n"
+    "Valor em moeda estrangeira: {{ currency }} {{ value_original }}\n"
+    "Taxa de conversão: {{ exchange_rate }}\n"
+    "Valor em Reais: R$ {{ value_brl }}\n\n"
+    "Invoice n° {{ invoice_number }} - emitida em {{ invoice_date }}.\n\n"
+    "Valor líquido da Nota Fiscal = R$ {{ value_brl }}.\n\n"
+    " - Conforme Lei 12.741/2012, o percentual total de impostos incidentes neste serviço prestado é de aproximadamente {{ effective_tax_rate }}%"
+)
+
+
 class CompanySettings(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     company_name = models.CharField(max_length=255)
@@ -39,6 +51,12 @@ class CompanySettings(models.Model):
     address_city = models.CharField(max_length=60, blank=True, default="")
 
     email = models.EmailField()
+    phone_number = models.CharField(
+        max_length=20,
+        blank=True,
+        default="",
+        help_text="Telefone de contato da empresa",
+    )
 
     next_document_number = models.IntegerField(
         default=1,
@@ -62,17 +80,7 @@ class CompanySettings(models.Model):
         default="3550308",
         help_text="Código IBGE do município emissor (ex: 3550308 para São Paulo)",
     )
-    default_codigo_tributacao_nacional = models.CharField(
-        max_length=6,
-        default="010101",
-        help_text="Código de tributação nacional do ISSQN (LC 116)",
-    )
-    default_codigo_nbs = models.CharField(
-        max_length=9,
-        blank=True,
-        default="",
-        help_text="Código NBS correspondente ao serviço",
-    )
+
 
     pfx_cert_pem = models.TextField(
         blank=True, null=True, help_text="Certificado Público em formato PEM"
@@ -111,6 +119,10 @@ class CompanySettings(models.Model):
         validators=[MinValueValidator(0), MaxValueValidator(23)],
         help_text="Hour of the day (0-23) to run the automatic invoice finalization.",
     )
+    last_adn_nsu = models.BigIntegerField(
+        default=0,
+        help_text="Último NSU processado na distribuição ADN do Sefin Nacional",
+    )
 
     class Meta:
         verbose_name = "Configuração da Empresa"
@@ -125,16 +137,26 @@ class CompanySettings(models.Model):
     def allowed_providers(self):
         return get_allowed_providers(self.address_city_ibge)
 
+    @property
+    def phoneNumber(self):
+        return self.phone_number
+
+    @phoneNumber.setter
+    def phoneNumber(self, value):
+        self.phone_number = value
+
     @classmethod
     def load(cls):
         instance = cls.objects.first()
         if instance and getattr(settings, "FORCE_DEBUG_MODE", False):
             instance.debug_mode = True
+            instance.document_series = "4242"
         return instance
 
     def save(self, *args, **kwargs):
         if getattr(settings, "FORCE_DEBUG_MODE", False):
             self.debug_mode = True
+            self.document_series = "4242"
         super().save(*args, **kwargs)
         from django.core.cache import cache
 
@@ -252,6 +274,26 @@ class Invoice(models.Model):
         blank=True,
         default="",
         help_text="Dados bancários / instruções de pagamento (suporta Markdown).",
+    )
+    nfse_description = models.TextField(
+        default="Descrição dos Serviços",
+        help_text="Texto / discriminação dos serviços para a NFS-e (suporta macros).",
+    )
+    codigo_tributacao_nacional = models.CharField(
+        max_length=6,
+        default="",
+        help_text="Código de tributação nacional do ISSQN (LC 116)",
+    )
+    codigo_servico_municipio = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="Código de tributação municipal do serviço",
+    )
+    codigo_nbs = models.CharField(
+        max_length=9,
+        default="",
+        help_text="Código NBS correspondente ao serviço prestado",
     )
 
     created_at = models.DateTimeField(default=timezone.now)
@@ -383,7 +425,7 @@ class NotaFiscal(models.Model):
         related_name="nota_fiscal",
     )
 
-    nf_number = models.CharField(max_length=50, unique=True)
+    nf_number = models.CharField(max_length=50, db_index=True)
     issue_date = models.DateField(db_index=True)
     amount_brl = models.DecimalField(
         max_digits=15, decimal_places=2, validators=[MinValueValidator(Decimal("0.00"))]
@@ -435,6 +477,13 @@ class NotaFiscal(models.Model):
         indexes = [
             models.Index(fields=["issue_date", "is_canceled"]),
         ]
+        constraints = [
+            models.UniqueConstraint(
+                fields=["chave_acesso_nacional"],
+                condition=~models.Q(chave_acesso_nacional=""),
+                name="unique_non_empty_chave_acesso_nacional",
+            ),
+        ]
 
     @property
     def can_be_canceled(self):
@@ -454,7 +503,15 @@ class NotaFiscal(models.Model):
 
     @property
     def provider_type(self):
-        if self.verification_code:
+        # In the 50-digit Chave de Acesso Nacional, index 7 (8th digit) is ambGer:
+        # '1' = Sistema Próprio Municipal (Paulistana), '2' = Sefin Nacional (ADN)
+        if self.chave_acesso_nacional and len(self.chave_acesso_nacional) == 50:
+            amb_ger = self.chave_acesso_nacional[7]
+            if amb_ger == "2":
+                return "NACIONAL"
+            if amb_ger == "1":
+                return "PAULISTANA"
+        if self.verification_code and self.verification_code != self.chave_acesso_nacional:
             return "PAULISTANA"
         if self.chave_acesso_nacional:
             return "NACIONAL"
@@ -463,6 +520,42 @@ class NotaFiscal(models.Model):
 
     def __str__(self):
         return f"NF {self.nf_number} - R$ {self.amount_brl}"
+
+
+class NotaFiscalEvent(models.Model):
+    id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
+    nota_fiscal = models.ForeignKey(
+        NotaFiscal,
+        on_delete=models.CASCADE,
+        related_name="events",
+    )
+    nsu = models.BigIntegerField(null=True, blank=True, db_index=True)
+    id_evento = models.CharField(max_length=100, blank=True, default="")
+    tipo_evento = models.CharField(max_length=100, blank=True, default="")
+    codigo_evento = models.CharField(max_length=20, blank=True, default="")
+    n_seq_evento = models.IntegerField(default=1)
+    dh_evento = models.DateTimeField(null=True, blank=True)
+    descricao = models.CharField(max_length=255, blank=True, default="")
+    codigo_motivo = models.CharField(max_length=20, blank=True, default="")
+    motivo = models.TextField(blank=True, default="")
+    raw_xml = models.TextField(blank=True, default="")
+    created_at = models.DateTimeField(default=timezone.now)
+
+    class Meta:
+        verbose_name = "Evento de Nota Fiscal"
+        verbose_name_plural = "Eventos de Nota Fiscal"
+        ordering = ["dh_evento", "nsu", "created_at"]
+
+    @property
+    def is_cancellation(self):
+        return (
+            self.codigo_evento in ("101101", "e101101")
+            or "CANCEL" in (self.tipo_evento or "").upper()
+            or "CANCEL" in (self.descricao or "").upper()
+        )
+
+    def __str__(self):
+        return f"Evento {self.tipo_evento or self.codigo_evento} para NF {self.nota_fiscal.nf_number}"
 
 
 class MonthlyConsolidation(models.Model):
@@ -525,9 +618,61 @@ class MonthlyConsolidation(models.Model):
         max_digits=15, decimal_places=2, default=Decimal("0.00")
     )
 
+    esocial_synced = models.BooleanField(
+        default=False, verbose_name="Sincronizado com eSocial"
+    )
+    esocial_s1299_recibo = models.CharField(
+        max_length=40, blank=True, default="", verbose_name="Recibo S-1299 eSocial"
+    )
+    esocial_inss_tax = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="INSS Informado no eSocial (R$)",
+    )
+    esocial_irrf_tax = models.DecimalField(
+        max_digits=12,
+        decimal_places=2,
+        null=True,
+        blank=True,
+        verbose_name="IRRF Informado no eSocial (R$)",
+    )
+    esocial_synced_at = models.DateTimeField(
+        null=True, blank=True, verbose_name="Data da Sincronização eSocial"
+    )
+    esocial_s5011_xml = models.TextField(
+        blank=True, default="", verbose_name="XML do Evento S-5011"
+    )
+    esocial_s5012_xml = models.TextField(
+        blank=True, default="", verbose_name="XML do Evento S-5012"
+    )
+
     @property
     def total_tax(self):
         return self.das_tax + self.inss_tax + self.irrf_tax
+
+    @property
+    def esocial_discrepancy_warning(self):
+        """Returns a warning message if calculated INSS or IRRF differs from eSocial reported taxes by > R$ 0.05."""
+        if not self.esocial_synced:
+            return None
+        diffs = []
+        if self.esocial_inss_tax is not None:
+            diff_inss = abs((self.inss_tax or Decimal("0.00")) - self.esocial_inss_tax)
+            if diff_inss > Decimal("0.05"):
+                diffs.append(
+                    f"INSS calculado R$ {self.inss_tax:.2f} vs eSocial R$ {self.esocial_inss_tax:.2f}"
+                )
+        if self.esocial_irrf_tax is not None:
+            diff_irrf = abs((self.irrf_tax or Decimal("0.00")) - self.esocial_irrf_tax)
+            if diff_irrf > Decimal("0.05"):
+                diffs.append(
+                    f"IRRF calculado R$ {self.irrf_tax:.2f} vs eSocial R$ {self.esocial_irrf_tax:.2f}"
+                )
+        if diffs:
+            return "Divergência com eSocial: " + " | ".join(diffs)
+        return None
 
     def clean(self):
         super().clean()
@@ -566,6 +711,51 @@ class NfseLog(models.Model):
         max_length=255, blank=True, default="", help_text="Origin (User/IP)"
     )
     created_at = models.DateTimeField(default=timezone.now, db_index=True)
+
+    @property
+    def is_success(self):
+        if self.erro_mensagem:
+            return False
+        if self.payload_retorno:
+            try:
+                import json
+                data = json.loads(self.payload_retorno)
+                if isinstance(data, dict):
+                    if (
+                        data.get("erros")
+                        or data.get("Erros")
+                        or data.get("erro")
+                        or data.get("Erro")
+                        or data.get("errors")
+                    ):
+                        return False
+            except Exception:
+                pass
+        return True
+
+    @property
+    def display_error(self):
+        if self.erro_mensagem:
+            return self.erro_mensagem
+        if not self.is_success and self.payload_retorno:
+            try:
+                import json
+                data = json.loads(self.payload_retorno)
+                if isinstance(data, dict):
+                    errs = data.get("erros") or data.get("Erros")
+                    if isinstance(errs, list) and errs:
+                        err = errs[0]
+                        if isinstance(err, dict):
+                            cod = err.get("codigo") or err.get("Codigo") or ""
+                            desc = err.get("descricao") or err.get("Descricao") or ""
+                            comp = err.get("complemento") or err.get("Complemento") or ""
+                            msg = f"{cod} - {desc}".strip(" -")
+                            if comp:
+                                msg = f"{msg} ({comp})" if msg else str(comp)
+                            return msg
+            except Exception:
+                pass
+        return ""
 
     class Meta:
         verbose_name = "Log NFS-e"
@@ -640,6 +830,26 @@ class InvoiceTemplate(models.Model):
         blank=True,
         default="",
         help_text="Dados bancários / instruções de pagamento (suporta Markdown).",
+    )
+    nfse_description = models.TextField(
+        default="Descrição dos Serviços",
+        help_text="Texto / discriminação dos serviços para a NFS-e (suporta macros).",
+    )
+    codigo_tributacao_nacional = models.CharField(
+        max_length=6,
+        default="",
+        help_text="Código de tributação nacional do ISSQN (LC 116)",
+    )
+    codigo_servico_municipio = models.CharField(
+        max_length=50,
+        blank=True,
+        default="",
+        help_text="Código de tributação municipal do serviço",
+    )
+    codigo_nbs = models.CharField(
+        max_length=9,
+        default="",
+        help_text="Código NBS correspondente ao serviço prestado",
     )
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, null=True)

@@ -29,7 +29,7 @@ def finalize_invoice_task(invoice_id, send_to_client=False, send_to_company=Fals
 
     invoice.status = "FINALIZED"
     invoice.task_id = ""
-    invoice.save()
+    invoice.save(update_fields=["status", "task_id", "updated_at"])
 
     if send_to_client or send_to_company:
         if company:
@@ -45,15 +45,15 @@ def finalize_invoice_task(invoice_id, send_to_client=False, send_to_company=Fals
 
 @shared_task(
     bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=60,
-    retry_backoff_max=3600,
     max_retries=10,
 )
 def cancel_invoice_task(self, invoice_id):
+    from django.core.cache import cache
     from core.services.nfse_services import cancel_nota_fiscal
+    from .task_utils import is_transient_error
 
     invoice = Invoice.objects.get(id=invoice_id)
+    nf_pk = invoice.nota_fiscal.pk if (hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal) else None
 
     if hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
         try:
@@ -69,13 +69,19 @@ def cancel_invoice_task(self, invoice_id):
                 e,
             )
 
-            if self.request.retries >= self.max_retries:
+            is_transient = is_transient_error(e)
+            current_retries = self.request.retries or 0
+            retries_exhausted = current_retries >= self.max_retries
+
+            if not is_transient or retries_exhausted:
+                if nf_pk:
+                    cache.delete(f"nfse_canceling_{nf_pk}")
                 invoice.task_retry_count = 0
                 invoice.task_id = ""
                 invoice.status = (
                     "FINALIZED"  # Revert to finalized so they can try again
                 )
-                invoice.save()
+                invoice.save(update_fields=["status", "task_id", "task_retry_count", "updated_at"])
 
                 # Send failure email
                 company = CompanySettings.load()
@@ -106,122 +112,140 @@ def cancel_invoice_task(self, invoice_id):
 
                 raise e
             else:
-                invoice.task_retry_count = self.request.retries + 1
-                invoice.save()
-                raise e
+                invoice.task_retry_count = current_retries + 1
+                invoice.save(update_fields=["task_retry_count", "updated_at"])
+                countdown = min(3600, 60 * (2 ** current_retries))
+                raise self.retry(exc=e, countdown=countdown)
     else:
         invoice.status = "CANCELED"
 
+    if nf_pk:
+        cache.delete(f"nfse_canceling_{nf_pk}")
     invoice.task_id = ""
     invoice.task_retry_count = 0
-    invoice.save()
+    invoice.save(update_fields=["status", "task_id", "task_retry_count", "updated_at"])
     return f"Invoice {invoice_id} canceled."
 
 
 @shared_task(
     bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=30,
-    retry_backoff_max=600,
     max_retries=3,
 )
 def email_invoice_task(
     self, invoice_id, send_to_company=False, send_to_client=False, include_nfse=False
 ):
-    invoice = Invoice.objects.get(id=invoice_id)
-    company = CompanySettings.load()
+    from .task_utils import is_transient_error
 
-    if not company:
-        return "Company settings not configured."
+    try:
+        invoice = Invoice.objects.get(id=invoice_id)
+        company = CompanySettings.load()
 
-    pdf_bytes = _get_pdf_bytes_for_task(invoice.id)
-    invoice_pdf_attachment = (
-        f"{invoice.invoice_number}.pdf",
-        pdf_bytes,
-        "application/pdf",
-    )
-    company_attachments = [invoice_pdf_attachment]
+        if not company:
+            return "Company settings not configured."
 
-    if include_nfse and hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
-        nf = invoice.nota_fiscal
-        nfse_pdf = None
-        if nf.danfse_pdf:
-            try:
-                if nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
-                    with nf.danfse_pdf.open("rb") as f:
-                        nfse_pdf = f.read()
-            except Exception as e:
-                logger.warning("Error reading local danfse_pdf in email task: %s", e)
-                nfse_pdf = None
+        pdf_bytes = _get_pdf_bytes_for_task(invoice.id)
+        invoice_pdf_attachment = (
+            f"{invoice.invoice_number}.pdf",
+            pdf_bytes,
+            "application/pdf",
+        )
+        company_attachments = [invoice_pdf_attachment]
 
-        if not nfse_pdf:
-            from core.nfse.provider_factory import get_provider
-            from django.core.files.base import ContentFile
+        if include_nfse and hasattr(invoice, "nota_fiscal") and invoice.nota_fiscal:
+            nf = invoice.nota_fiscal
+            nfse_pdf = None
+            if nf.danfse_pdf:
+                try:
+                    if nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
+                        with nf.danfse_pdf.open("rb") as f:
+                            nfse_pdf = f.read()
+                except Exception as e:
+                    logger.warning("Error reading local danfse_pdf in email task: %s", e)
+                    nfse_pdf = None
 
-            try:
-                from core.services.nfse_services import fetch_and_save_nfse_pdf
+            if not nfse_pdf:
+                from core.nfse.provider_factory import get_provider
 
-                provider = get_provider(invoice)
-                nfse_pdf = fetch_and_save_nfse_pdf(invoice, provider)
-            except Exception as e:
-                logger.error(
-                    "Error fetching NFS-e PDF from provider in email task: %s", e
+                try:
+                    from core.services.nfse_services import fetch_and_save_nfse_pdf
+
+                    provider = get_provider(invoice)
+                    nfse_pdf = fetch_and_save_nfse_pdf(invoice, provider)
+                except Exception as e:
+                    logger.error(
+                        "Error fetching NFS-e PDF from provider in email task: %s", e
+                    )
+                    nfse_pdf = None
+
+            if nfse_pdf:
+                company_attachments.append(
+                    (f"NFS-e_{nf.nf_number}.pdf", nfse_pdf, "application/pdf")
                 )
-                nfse_pdf = None
 
-        if nfse_pdf:
-            company_attachments.append(
-                (f"NFS-e_{nf.nf_number}.pdf", nfse_pdf, "application/pdf")
+        # get first 3 words of company name for email display
+        short_company_name = " ".join(company.company_name.split()[:3])
+        sender_name = f"{short_company_name} Invoices"
+        from_email_addr = _format_from_email(sender_name)
+
+        # Client email: per AGENTS.md, NEVER attach NFS-e to client email
+        if send_to_client and invoice.client.email:
+            from core.utils.macros import get_email_content
+
+            client_subject, client_body = get_email_content(
+                "CLIENT_INVOICE_ISSUED", invoice
+            )
+            cc_list = (
+                [cc.strip() for cc in invoice.client.email_cc.split(",") if cc.strip()]
+                if invoice.client.email_cc
+                else []
+            )
+            send_email_with_debug(
+                client_subject,
+                client_body,
+                [invoice.client.email],
+                cc_list,
+                from_email_addr,
+                [invoice_pdf_attachment],
+                company,
             )
 
-    # get first 3 words of company name for email display
-    short_company_name = " ".join(company.company_name.split()[:3])
-    sender_name = f"{short_company_name} Invoices"
-    from_email_addr = _format_from_email(sender_name)
+        # Company internal email
+        if send_to_company and company.email:
+            from core.utils.macros import get_email_content
 
-    # Client email: per AGENTS.md, NEVER attach NFS-e to client email
-    if send_to_client and invoice.client.email:
-        from core.utils.macros import get_email_content
+            company_subject, company_body = get_email_content(
+                "COMPANY_INVOICE_ISSUED", invoice
+            )
+            send_email_with_debug(
+                company_subject,
+                company_body,
+                [company.email],
+                [],
+                from_email_addr,
+                company_attachments,
+                company,
+            )
 
-        client_subject, client_body = get_email_content(
-            "CLIENT_INVOICE_ISSUED", invoice
-        )
-        cc_list = (
-            [cc.strip() for cc in invoice.client.email_cc.split(",") if cc.strip()]
-            if invoice.client.email_cc
-            else []
-        )
-        send_email_with_debug(
-            client_subject,
-            client_body,
-            [invoice.client.email],
-            cc_list,
-            from_email_addr,
-            [invoice_pdf_attachment],
-            company,
-        )
-
-    # Company internal email
-    if send_to_company and company.email:
-        from core.utils.macros import get_email_content
-
-        company_subject, company_body = get_email_content(
-            "COMPANY_INVOICE_ISSUED", invoice
-        )
-        send_email_with_debug(
-            company_subject,
-            company_body,
-            [company.email],
-            [],
-            from_email_addr,
-            company_attachments,
-            company,
-        )
-
-    invoice.task_id = ""
-    invoice.status = "FINALIZED"
-    invoice.save()
-    return f"Emails sent for invoice {invoice_id}."
+        # Only reset status and task_id if this task is the registered owner of task_id
+        current_task_id = self.request.id if self.request else None
+        if current_task_id:
+            Invoice.objects.filter(id=invoice.id, task_id=current_task_id).update(
+                task_id="", status="FINALIZED", updated_at=timezone.now()
+            )
+        return f"Emails sent for invoice {invoice_id}."
+    except Exception as e:
+        logger.error("Error in email_invoice_task for invoice %s: %s", invoice_id, e)
+        is_transient = is_transient_error(e)
+        current_retries = self.request.retries or 0
+        if not is_transient or current_retries >= self.max_retries:
+            current_task_id = self.request.id if self.request else None
+            if current_task_id:
+                Invoice.objects.filter(id=invoice_id, task_id=current_task_id).update(
+                    task_id="", status="FINALIZED", updated_at=timezone.now()
+                )
+            raise e
+        countdown = min(300, 30 * (2 ** current_retries))
+        raise self.retry(exc=e, countdown=countdown)
 
 
 @shared_task(name="core.tasks.invoices_tasks.process_daily_invoices_task")
@@ -242,7 +266,7 @@ def process_daily_invoices_task(force=False):
 
     for invoice in invoices:
         invoice.status = "PROCESSING"
-        invoice.save()
+        invoice.save(update_fields=["status", "updated_at"])
 
         # Determine exchange rate automatically
         exchange_rate = invoice.exchange_rate_to_brl
@@ -318,7 +342,7 @@ def process_daily_invoices_task(force=False):
                 if async_task and getattr(async_task, "id", None)
                 else ""
             )
-            invoice.save()
+            invoice.save(update_fields=["task_id", "updated_at"])
         else:
             async_task = finalize_sig.delay()
             invoice.task_id = (
@@ -326,7 +350,7 @@ def process_daily_invoices_task(force=False):
                 if async_task and getattr(async_task, "id", None)
                 else ""
             )
-            invoice.save()
+            invoice.save(update_fields=["task_id", "updated_at"])
 
         count += 1
 

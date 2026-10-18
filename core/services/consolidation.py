@@ -2,10 +2,11 @@ import logging
 from decimal import Decimal, ROUND_HALF_UP
 from datetime import date
 from dateutil.relativedelta import relativedelta
-from django.db.models import Sum, Max
+from django.db.models import Sum, Max, Min
 from django.db import transaction, models
 from django.db.models.functions import Coalesce
 from django.conf import settings
+from django.utils import timezone
 from ..models import MonthlyConsolidation, CompanySettings, NotaFiscal
 from .. import signals as _signals
 
@@ -14,21 +15,28 @@ logger = logging.getLogger(__name__)
 from .tax_calculations import *
 
 
-def consolidate_month(month_year, actual_pro_labore=None):
+def consolidate_month(month_year, actual_pro_labore=None, force_actual_pro_labore=False):
     """Aggregates data, determines Annex III vs V, and locks in taxes for a month.
 
     When first consolidating (no prior pró-labore set and none provided),
+    or for past months without an explicit non-zero pró-labore,
     the system auto-sets the pró-labore to the ideal amount needed for Fator R >= 28%.
     """
     _signals.set_consolidation_in_progress(True)
     try:
-        return _consolidate_month_inner(month_year, actual_pro_labore)
+        return _consolidate_month_inner(
+            month_year,
+            actual_pro_labore,
+            force_actual_pro_labore=force_actual_pro_labore,
+        )
     finally:
         _signals.set_consolidation_in_progress(False)
 
 
 @transaction.atomic
-def _consolidate_month_inner(month_year, actual_pro_labore=None):
+def _consolidate_month_inner(
+    month_year, actual_pro_labore=None, force_actual_pro_labore=False
+):
     """Inner implementation of consolidate_month, runs with signal guard active."""
     nfs = NotaFiscal.objects.filter(
         issue_date__year=month_year.year, issue_date__month=month_year.month
@@ -41,42 +49,53 @@ def _consolidate_month_inner(month_year, actual_pro_labore=None):
     )["total"]
 
     first_day = month_year.replace(day=1)
+    today = timezone.localdate()
+    closed = is_month_closed(first_day, today=today)
+
     # Lock the row (or create it) to prevent concurrent consolidation of the same month
     MonthlyConsolidation.objects.get_or_create(month_year=first_day)
     consolidation = MonthlyConsolidation.objects.select_for_update().get(
         month_year=first_day
     )
-    created = not consolidation.status == "CONSOLIDATED"
 
-    if actual_pro_labore is not None:
+    if force_actual_pro_labore and actual_pro_labore is not None:
         consolidation.actual_pro_labore_paid = Decimal(str(actual_pro_labore))
-    elif created or consolidation.actual_pro_labore_paid == Decimal("0.00"):
-        # Auto-set to ideal pró-labore when first consolidating this month
+    elif consolidation.esocial_synced:
+        # eSocial synced months are strictly locked to their imported value
+        pass
+    elif closed:
+        # Meses fechados não sincronizados com o eSocial: não forçam pró-labore ideal
+        consolidation.actual_pro_labore_paid = Decimal("0.00")
+    else:
+        # Mês aberto (mês atual, ou mês anterior até dia 7 sem eSocial):
+        # Auto-calcula e define pró-labore ideal necessário para Fator R >= 28%
         current_revenue = revenue_internal + revenue_export
         ideal_pl = calculate_ideal_pro_labore(
             first_day, estimated_current_revenue=current_revenue
         )
 
         if ideal_pl > Decimal("0.00"):
+            try:
+                min_salary = get_minimum_salary(first_day)
+                if ideal_pl < min_salary:
+                    ideal_pl = min_salary
+            except ValueError:
+                pass
             consolidation.actual_pro_labore_paid = ideal_pl
             logger.info(
-                "Auto-set pró-labore for %s to ideal value: R$ %s", first_day, ideal_pl
+                "Auto-set pró-labore for open month %s to ideal value: R$ %s", first_day, ideal_pl
             )
         else:
-            # No revenue — fall back to minimum salary
             try:
                 min_salary = get_minimum_salary(first_day)
                 consolidation.actual_pro_labore_paid = min_salary
                 logger.info(
-                    "Auto-set pró-labore for %s to minimum salary: R$ %s",
+                    "Auto-set pró-labore for open month %s to minimum salary: R$ %s",
                     first_day,
                     min_salary,
                 )
             except ValueError:
-                logger.warning(
-                    "No minimum salary configured for %s, leaving pró-labore at 0",
-                    first_day,
-                )
+                consolidation.actual_pro_labore_paid = Decimal("0.00")
 
     # Save revenue first so RBT12 calculation can see it
     consolidation.total_revenue_internal = revenue_internal
@@ -108,12 +127,15 @@ def _consolidate_month_inner(month_year, actual_pro_labore=None):
 
 
 @transaction.atomic
-def reconsolidate_with_prior(month_year, actual_pro_labore=None):
+def reconsolidate_with_prior(
+    month_year, actual_pro_labore=None, force_actual_pro_labore=False
+):
     """Reconsolidate a specific month, automatically reconsolidating
     any prior OUTDATED months first (oldest to newest) to ensure
     correct cascading RBT12 and Fator R values.
     """
     first_day = month_year.replace(day=1)
+    today_first = timezone.localdate().replace(day=1)
 
     # Find all OUTDATED months prior to (and including) the target
     outdated_prior = (
@@ -125,10 +147,59 @@ def reconsolidate_with_prior(month_year, actual_pro_labore=None):
     # Reconsolidate each prior OUTDATED month chronologically
     for prior in outdated_prior:
         logger.info("Auto-reconsolidating prior OUTDATED month: %s", prior.month_year)
-        consolidate_month(prior.month_year, prior.actual_pro_labore_paid)
+        consolidate_month(prior.month_year)
 
     # Now reconsolidate the target month
-    return consolidate_month(first_day, actual_pro_labore)
+    return consolidate_month(
+        first_day,
+        actual_pro_labore,
+        force_actual_pro_labore=force_actual_pro_labore,
+    )
+
+
+def populate_consolidations_for_imported_notes(imported_dates=None):
+    """Populates and reconciles monthly consolidations for imported notes.
+
+    Ensures monthly consolidation records exist from the earliest note
+    (or company opening date) up to the current month, and consolidates them
+    chronologically. For past months (month_year < current month), assumes
+    the ideal pró-labore was paid to maintain Fator R >= 28% (Annex III).
+    """
+    company = CompanySettings.load()
+    if not company:
+        return
+
+    today_first = date.today().replace(day=1)
+
+    start_date = company.opening_date.replace(day=1)
+    min_nf_date = NotaFiscal.objects.aggregate(Min("issue_date"))["issue_date__min"]
+    if min_nf_date and min_nf_date.replace(day=1) < start_date:
+        start_date = min_nf_date.replace(day=1)
+
+    if imported_dates:
+        earliest_imported = min(imported_dates).replace(day=1)
+        start_month = min(start_date, earliest_imported)
+    else:
+        start_month = start_date
+
+    max_nf_date = NotaFiscal.objects.aggregate(Max("issue_date"))["issue_date__max"]
+    end_month = today_first
+    if max_nf_date and max_nf_date.replace(day=1) > end_month:
+        end_month = max_nf_date.replace(day=1)
+
+    # 1. Ensure all expected months exist
+    curr = start_month
+    while curr <= end_month:
+        MonthlyConsolidation.objects.get_or_create(month_year=curr)
+        curr += relativedelta(months=1)
+
+    # 2. Consolidate chronologically from start_month to end_month
+    all_cons = MonthlyConsolidation.objects.filter(
+        month_year__gte=start_month, month_year__lte=end_month
+    ).order_by("month_year")
+
+    for cons in all_cons:
+        consolidate_month(cons.month_year)
 
 
 def audit_consolidations():
@@ -152,12 +223,16 @@ def audit_consolidations():
         return findings
 
     start_date = company.opening_date.replace(day=1)
+    min_nf_date = NotaFiscal.objects.aggregate(Min("issue_date"))["issue_date__min"]
+    if min_nf_date and min_nf_date.replace(day=1) < start_date:
+        start_date = min_nf_date.replace(day=1)
 
     # Get max month from NFs just in case there's an NF in the future
     max_nf_date = NotaFiscal.objects.aggregate(Max("issue_date"))["issue_date__max"]
 
-    today = date.today()
-    end_date = today.replace(day=1)
+    today = timezone.localdate()
+    today_first = today.replace(day=1)
+    end_date = today_first
     if max_nf_date and max_nf_date.replace(day=1) > end_date:
         end_date = max_nf_date.replace(day=1)
 
@@ -165,10 +240,7 @@ def audit_consolidations():
     current = start_date
     while current <= end_date:
         expected_months.add(current)
-        if current.month == 12:
-            current = current.replace(year=current.year + 1, month=1)
-        else:
-            current = current.replace(month=current.month + 1)
+        current += relativedelta(months=1)
 
     existing_months = set(
         MonthlyConsolidation.objects.values_list("month_year", flat=True)
@@ -199,8 +271,8 @@ def audit_consolidations():
             "Annex": cons.get_applied_annex_display(),
         }
 
-        # Reconsolidate (this saves the new values)
-        updated_cons = consolidate_month(cons.month_year, cons.actual_pro_labore_paid)
+        # Reconsolidate (respects eSocial synced values, closed months 0.00, open months ideal)
+        updated_cons = consolidate_month(cons.month_year)
 
         # Compare
         changes = []

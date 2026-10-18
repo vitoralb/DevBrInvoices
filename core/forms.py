@@ -1,8 +1,10 @@
+import datetime
 from decimal import Decimal
 import re
 from django import forms
 from django.core.exceptions import ValidationError
 from .models import (
+    Client,
     Invoice,
     InvoiceItem,
     EmailTemplate,
@@ -23,6 +25,8 @@ VALID_INVOICE_MACROS = {
     "{{ value_original }}",
     "{{ value_brl }}",
     "{{ company_cnpj }}",
+    "{{ exchange_rate }}",
+    "{{ effective_tax_rate }}",
 }
 
 VALID_EMAIL_MACROS = VALID_INVOICE_MACROS | {
@@ -54,6 +58,10 @@ class InvoiceForm(forms.ModelForm):
             "issue_date",
             "currency",
             "bank_details",
+            "nfse_description",
+            "codigo_tributacao_nacional",
+            "codigo_servico_municipio",
+            "codigo_nbs",
         ]
         labels = {
             "client": "Cliente",
@@ -61,6 +69,10 @@ class InvoiceForm(forms.ModelForm):
             "issue_date": "Data de Emissão",
             "currency": "Moeda",
             "bank_details": "Dados Bancários",
+            "nfse_description": "Descrição da NFS-e",
+            "codigo_tributacao_nacional": "Cód. Tributação Nacional",
+            "codigo_servico_municipio": "Cód. Serviço Município",
+            "codigo_nbs": "Cód. NBS",
         }
         widgets = {
             "issue_date": forms.DateInput(
@@ -80,11 +92,54 @@ class InvoiceForm(forms.ModelForm):
                     "placeholder": "Dados bancários (suporta Markdown)...",
                 }
             ),
+            "nfse_description": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 6,
+                    "placeholder": "Texto / discriminação dos serviços para a NFS-e...",
+                }
+            ),
+            "codigo_tributacao_nacional": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "ex: 010101"}
+            ),
+            "codigo_servico_municipio": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "ex: 02668"}
+            ),
+            "codigo_nbs": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "ex: 115022000"}
+            ),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["codigo_servico_municipio"].required = False
+        if not self.instance.pk and not self.initial.get("issue_date"):
+            self.fields["issue_date"].initial = datetime.date.today
 
     def clean_currency(self):
         curr = self.cleaned_data.get("currency", "CAD")
         return curr.strip().upper() if curr else "CAD"
+
+    def clean_nfse_description(self):
+        desc = self.cleaned_data.get("nfse_description", "")
+        if not desc or not desc.strip():
+            raise ValidationError("A descrição da NFS-e é obrigatória.")
+        return validate_macros(desc.strip(), VALID_INVOICE_MACROS)
+
+    def clean_codigo_tributacao_nacional(self):
+        val = (self.cleaned_data.get("codigo_tributacao_nacional") or "").strip()
+        if not val:
+            raise ValidationError("O Código de Tributação Nacional é obrigatório.")
+        return val
+
+    def clean_codigo_nbs(self):
+        val = (self.cleaned_data.get("codigo_nbs") or "").strip()
+        if not val:
+            raise ValidationError("O Código NBS é obrigatório.")
+        return val
+
+    def clean_codigo_servico_municipio(self):
+        return (self.cleaned_data.get("codigo_servico_municipio") or "").strip()
 
 
 class InvoiceItemForm(forms.ModelForm):
@@ -140,11 +195,23 @@ class EmailTemplateForm(forms.ModelForm):
 class InvoiceTemplateForm(forms.ModelForm):
     class Meta:
         model = InvoiceTemplate
-        fields = ["name", "currency", "bank_details"]
+        fields = [
+            "name",
+            "currency",
+            "bank_details",
+            "nfse_description",
+            "codigo_tributacao_nacional",
+            "codigo_servico_municipio",
+            "codigo_nbs",
+        ]
         labels = {
             "name": "Nome",
             "currency": "Moeda",
             "bank_details": "Dados Bancários",
+            "nfse_description": "Descrição da NFS-e",
+            "codigo_tributacao_nacional": "Cód. Tributação Nacional",
+            "codigo_servico_municipio": "Cód. Serviço Município",
+            "codigo_nbs": "Cód. NBS",
         }
         widgets = {
             "name": forms.TextInput(attrs={"class": "form-control"}),
@@ -156,7 +223,48 @@ class InvoiceTemplateForm(forms.ModelForm):
                     "placeholder": "Dados bancários (suporta Markdown)...",
                 }
             ),
+            "nfse_description": forms.Textarea(
+                attrs={
+                    "class": "form-control",
+                    "rows": 6,
+                    "placeholder": "Texto / discriminação dos serviços para a NFS-e...",
+                }
+            ),
+            "codigo_tributacao_nacional": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "ex: 010101"}
+            ),
+            "codigo_servico_municipio": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "ex: 02668"}
+            ),
+            "codigo_nbs": forms.TextInput(
+                attrs={"class": "form-control", "placeholder": "ex: 115022000"}
+            ),
         }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["codigo_servico_municipio"].required = False
+
+    def clean_nfse_description(self):
+        desc = self.cleaned_data.get("nfse_description", "")
+        if not desc or not desc.strip():
+            raise ValidationError("A descrição da NFS-e é obrigatória.")
+        return validate_macros(desc.strip(), VALID_INVOICE_MACROS)
+
+    def clean_codigo_tributacao_nacional(self):
+        val = (self.cleaned_data.get("codigo_tributacao_nacional") or "").strip()
+        if not val:
+            raise ValidationError("O Código de Tributação Nacional é obrigatório.")
+        return val
+
+    def clean_codigo_nbs(self):
+        val = (self.cleaned_data.get("codigo_nbs") or "").strip()
+        if not val:
+            raise ValidationError("O Código NBS é obrigatório.")
+        return val
+
+    def clean_codigo_servico_municipio(self):
+        return (self.cleaned_data.get("codigo_servico_municipio") or "").strip()
 
 
 class InvoiceTemplateItemForm(forms.ModelForm):
@@ -208,8 +316,8 @@ class CompanySettingsForm(forms.ModelForm):
             attrs={
                 "type": "text",
                 "readonly": "readonly",
-                "class": "form-control",
-                "style": "pointer-events: none; background-color: #e9ecef;",
+                "class": "form-control bg-body-secondary text-body-secondary",
+                "style": "pointer-events: none;",
             },
         ),
     )
@@ -221,6 +329,7 @@ class CompanySettingsForm(forms.ModelForm):
             "pfx_cert_pem",
             "pfx_key_pem",
             "certificate_valid_until",
+            "last_adn_nsu",
         ]
         labels = {
             "address_cep": "CEP",
@@ -236,6 +345,7 @@ class CompanySettingsForm(forms.ModelForm):
             "auto_emit_nfse": "Emitir NFS-e Automaticamente",
             "auto_invoice_hour": "Hora do Processamento Automático",
             "debug_email": "E-mail de Depuração",
+            "phone_number": "Telefone",
         }
         help_texts = {
             "auto_finalize_invoices": "Finaliza automaticamente invoices em rascunho na data de emissão.",
@@ -243,70 +353,77 @@ class CompanySettingsForm(forms.ModelForm):
             "auto_emit_nfse": "Emite a NFS-e automaticamente após a finalização da invoice.",
             "auto_invoice_hour": "Hora do dia (0 a 23) para executar o processamento automático.",
             "debug_email": "Se preenchido, todos os e-mails são redirecionados para este endereço de teste.",
+            "phone_number": "Telefone de contato da empresa.",
         }
         widgets = {
+            "phone_number": forms.TextInput(
+                attrs={
+                    "class": "form-control",
+                    "placeholder": "(11) 99999-9999",
+                }
+            ),
             "company_name": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
             "address_city_ibge": forms.HiddenInput(),
             "address_tipo_logradouro": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
             "address_line1": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
             "address_cep": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
             "address_number": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
             "address_line2": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
             "address_neighborhood": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
             "address_uf": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
             "address_city": forms.TextInput(
                 attrs={
                     "readonly": "readonly",
-                    "class": "form-control",
-                    "style": "pointer-events: none; background-color: #e9ecef;",
+                    "class": "form-control bg-body-secondary text-body-secondary",
+                    "style": "pointer-events: none;",
                 }
             ),
         }
@@ -402,3 +519,102 @@ class CompanySettingsForm(forms.ModelForm):
         ):
             raise forms.ValidationError("CNPJ inválido.")
         return cnpj
+
+
+class ClientForm(forms.ModelForm):
+    class Meta:
+        model = Client
+        fields = [
+            "name",
+            "email",
+            "email_cc",
+            "address_line1",
+            "address_number",
+            "address_line2",
+            "address_neighborhood",
+            "address_city",
+            "address_state_province",
+            "address_postal_code",
+            "address_country_code",
+            "country",
+        ]
+        labels = {
+            "name": "Nome / Razão Social",
+            "email": "E-mail Principal",
+            "email_cc": "E-mails em Cópia (separados por vírgula)",
+            "address_line1": "Logradouro / Endereço",
+            "address_number": "Número",
+            "address_line2": "Complemento / Sala / Suíte",
+            "address_neighborhood": "Bairro / Distrito",
+            "address_city": "Cidade",
+            "address_state_province": "Estado / Província",
+            "address_postal_code": "Código Postal / CEP",
+            "address_country_code": "Código do País (ISO 2 letras, ex: CA, US)",
+            "country": "País (ex: Canada, United States)",
+        }
+        widgets = {
+            "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "Nome ou Razão Social"}),
+            "email": forms.EmailInput(attrs={"class": "form-control", "placeholder": "financeiro@cliente.com"}),
+            "email_cc": forms.TextInput(attrs={"class": "form-control", "placeholder": "diretoria@cliente.com, contatofin@cliente.com"}),
+            "address_line1": forms.TextInput(attrs={"class": "form-control", "placeholder": "Rua / Avenida"}),
+            "address_number": forms.TextInput(attrs={"class": "form-control", "placeholder": "100"}),
+            "address_line2": forms.TextInput(attrs={"class": "form-control", "placeholder": "Suite 400"}),
+            "address_neighborhood": forms.TextInput(attrs={"class": "form-control", "placeholder": "Bairro / Distrito"}),
+            "address_city": forms.TextInput(attrs={"class": "form-control", "placeholder": "Cidade"}),
+            "address_state_province": forms.TextInput(attrs={"class": "form-control", "placeholder": "Estado / Província"}),
+            "address_postal_code": forms.TextInput(attrs={"class": "form-control", "placeholder": "Postal Code / Zip"}),
+            "address_country_code": forms.TextInput(attrs={"class": "form-control", "placeholder": "CA"}),
+            "country": forms.TextInput(attrs={"class": "form-control", "placeholder": "Canada"}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["address_neighborhood"].required = True
+
+    def clean_address_country_code(self):
+        code = self.cleaned_data.get("address_country_code", "")
+        return code.strip().upper() if code else ""
+
+    def clean_country(self):
+        country = self.cleaned_data.get("country", "")
+        return country.strip() if country else ""
+
+
+class InvoiceDraftMetadataForm(forms.ModelForm):
+    class Meta:
+        model = Invoice
+        fields = ["invoice_number", "client", "issue_date", "currency"]
+        labels = {
+            "invoice_number": "Número da Invoice",
+            "client": "Cliente",
+            "issue_date": "Data de Emissão",
+            "currency": "Moeda",
+        }
+        widgets = {
+            "invoice_number": forms.TextInput(attrs={"class": "form-control font-monospace"}),
+            "client": forms.Select(attrs={"class": "form-select"}),
+            "issue_date": forms.DateInput(attrs={"type": "date", "class": "form-control"}),
+            "currency": forms.TextInput(attrs={"class": "form-control", "placeholder": "CAD, USD, EUR, etc."}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields["invoice_number"].required = False
+
+    def clean_invoice_number(self):
+        inv_num = (self.cleaned_data.get("invoice_number") or "").strip()
+        if not inv_num and "invoice_number" not in self.data and self.instance and self.instance.pk:
+            return self.instance.invoice_number
+        if not inv_num:
+            raise forms.ValidationError("O número da invoice é obrigatório.")
+        qs = Invoice.objects.filter(invoice_number=inv_num)
+        if self.instance.pk:
+            qs = qs.exclude(pk=self.instance.pk)
+        if qs.exists():
+            raise forms.ValidationError("Já existe uma invoice com este número.")
+        return inv_num
+
+    def clean_currency(self):
+        curr = self.cleaned_data.get("currency", "CAD")
+        return curr.strip().upper() if curr else "CAD"
+

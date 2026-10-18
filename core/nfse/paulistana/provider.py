@@ -58,6 +58,17 @@ class PaulistanaProvider(NFSeProvider):
         if client_obj.address_postal_code:
             logradoro += f", {client_obj.address_postal_code}"
 
+        cod_servico = str(
+            getattr(invoice, "codigo_servico_municipio", "") or ""
+        ).strip()
+        if not cod_servico:
+            return EmitResult(
+                sucesso=False,
+                erros=[
+                    "Código de Serviço do Município é obrigatório para emissão de RPS na Paulistana."
+                ],
+            )
+
         rps = v1.TpRps(
             assinatura="",
             chave_rps=v1.TpChaveRps(
@@ -71,7 +82,7 @@ class PaulistanaProvider(NFSeProvider):
             tributacao_rps="P",
             valor_servicos=f"{amount_brl:.2f}",
             valor_deducoes="0.00",
-            codigo_servico="2668",
+            codigo_servico=cod_servico,
             aliquota_servicos="0.00",
             issretido=False,
             razao_social_tomador=client_obj.name,
@@ -130,6 +141,35 @@ class PaulistanaProvider(NFSeProvider):
                 result.sucesso = True
                 result.numero_nf = f"DEBUG-{numero_rps}"
                 result.codigo_verificacao = "DEBUG-FAKE-CODE"
+                from core.nfse.paulistana.mock import build_mock_paulistana_nfse_xml
+                from django.utils import timezone
+
+                result.xml_retorno = build_mock_paulistana_nfse_xml(
+                    invoice=invoice,
+                    company=company,
+                    numero_nfe=numero_rps,
+                    codigo_verificacao=result.codigo_verificacao,
+                )
+                result.data_hora_autorizacao = timezone.now()
+                is_export = (
+                    (getattr(client_obj, "address_country_code", "") or "").upper()
+                    != "BR"
+                    if client_obj
+                    else True
+                )
+                if is_export:
+                    result.aliquota_iss = Decimal("0.00")
+                    result.valor_iss = Decimal("0.00")
+                else:
+                    amount_brl, _, effective_rate_pct = _prepare_nf_data(invoice)
+                    result.aliquota_iss = effective_rate_pct
+                    result.valor_iss = (
+                        (amount_brl * (effective_rate_pct / Decimal("100.0"))).quantize(
+                            Decimal("0.01")
+                        )
+                        if effective_rate_pct
+                        else Decimal("0.00")
+                    )
                 return result
             else:
                 erros = getattr(resultado, "erro", []) if resultado else []
@@ -361,10 +401,29 @@ class PaulistanaProvider(NFSeProvider):
 
         # Test mode mock since test environment often fails cancellations
         if company.debug_mode:
+            from core.nfse.paulistana.mock import update_paulistana_xml_cancelled
+            from django.utils import timezone
+
+            cancel_dt = timezone.now()
+            updated_xml = ""
+            if nf and nf.xml_autorizacao:
+                try:
+                    if nf.xml_autorizacao.storage.exists(nf.xml_autorizacao.name):
+                        with nf.xml_autorizacao.open("rb") as f:
+                            existing_xml = f.read().decode("utf-8", errors="replace")
+                        updated_xml = update_paulistana_xml_cancelled(
+                            existing_xml, cancel_dt
+                        )
+                except Exception as ex:
+                    logger.warning(
+                        "Could not update Paulistana XML for cancellation: %s", ex
+                    )
+
             return CancelResult(
                 sucesso=True,
                 xml_enviado="<MockCancelRequest></MockCancelRequest>",
-                xml_retorno="<MockCancelResponse></MockCancelResponse>",
+                xml_retorno=updated_xml or "<MockCancelResponse></MockCancelResponse>",
+                cancelation_date=cancel_dt,
             )
 
         try:
@@ -423,6 +482,24 @@ class PaulistanaProvider(NFSeProvider):
                     except Exception:
                         pass
 
+            if not sucesso:
+                # Idempotency check: what if the note was already canceled externally?
+                err_text = " ".join(erros or []).lower()
+                if "já cancelada" in err_text or "ja cancelada" in err_text or "1206" in err_text:
+                    try:
+                        nfe_data = self.buscar_nfse_por_numero(nf.nf_number)
+                        if nfe_data and nfe_data.get("is_canceled"):
+                            from django.utils import timezone
+
+                            return CancelResult(
+                                sucesso=True,
+                                xml_enviado=xml_enviado,
+                                xml_retorno=nfe_data.get("raw_xml") or xml_retorno,
+                                cancelation_date=nfe_data.get("cancelation_date") or timezone.now(),
+                            )
+                    except Exception:
+                        pass
+
             return CancelResult(
                 sucesso=sucesso,
                 xml_enviado=xml_enviado,
@@ -443,15 +520,70 @@ class PaulistanaProvider(NFSeProvider):
         from core.nfse.base import extract_nota_fiscal
 
         company = CompanySettings.load()
-        if not company or not company.inscricao_municipal:
+        if not company:
+            return None
+
+        nf = extract_nota_fiscal(invoice_or_nf)
+        if not nf or not nf.nf_number:
             return None
 
         im = company.inscricao_municipal
-        nf = extract_nota_fiscal(invoice_or_nf)
-        if not nf or not nf.nf_number or not nf.verification_code:
+        ver_code = str(getattr(nf, "verification_code", "") or "").strip()
+
+        # Try to read local authorization XML if present
+        xml_str = None
+        if nf.xml_autorizacao:
+            try:
+                if nf.xml_autorizacao.storage.exists(nf.xml_autorizacao.name):
+                    with nf.xml_autorizacao.open("rb") as f:
+                        xml_str = f.read().decode("utf-8", errors="replace")
+            except Exception as ex:
+                logger.warning(
+                    "Could not read xml_autorizacao in baixar_pdf: %s", ex
+                )
+
+        from core.nfse.paulistana.mock import is_paulistana_xml_mocked
+
+        is_mock = is_paulistana_xml_mocked(xml_str, ver_code)
+
+        # In debug mode (or when dealing with a mocked nota):
+        # Only use the mock PDF if the XML itself is also mocked.
+        # If the nota was imported from the provider with a valid XML and valid verification code,
+        # the real PDF from the tax authority must be used.
+        if is_mock:
+            if not xml_str:
+                from core.nfse.paulistana.mock import (
+                    build_mock_paulistana_nfse_xml,
+                    update_paulistana_xml_cancelled,
+                )
+
+                invoice = getattr(nf, "invoice", None) or (
+                    invoice_or_nf if isinstance(invoice_or_nf, Invoice) else None
+                )
+                if invoice:
+                    xml_str = build_mock_paulistana_nfse_xml(
+                        invoice, company, nf.nf_number, nf.verification_code
+                    )
+                    if getattr(nf, "is_canceled", False):
+                        xml_str = update_paulistana_xml_cancelled(
+                            xml_str, getattr(nf, "cancelation_date", None)
+                        )
+
+            if xml_str:
+                from core.nfse.paulistana.mock import render_paulistana_debug_pdf
+
+                try:
+                    return render_paulistana_debug_pdf(xml_str)
+                except Exception as ex:
+                    logger.exception(
+                        "Failed to render Paulistana debug PDF: %s", ex
+                    )
+                    return None
+
+        if not im or not ver_code:
             return None
 
-        return download_nfse_pdf(im, nf.nf_number, nf.verification_code)
+        return download_nfse_pdf(im, nf.nf_number, ver_code)
 
     def _parse_nfe_to_dict(self, nota) -> dict:
         """Converts a Paulistana TpNfe object to a standardized dictionary."""

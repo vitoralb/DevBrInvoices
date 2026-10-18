@@ -22,9 +22,9 @@ def format_cep(value: str | None) -> str:
     return str(value)
 
 
-def format_money_pt_br(value: float | Decimal | int | None) -> str:
+def format_money_pt_br(value: float | Decimal | int | None, decimals: int = 2) -> str:
     """Formats a numeric value into Brazilian currency format (1.234,56)."""
     if value is None:
-        return "0,00"
-    return f"{value:,.2f}".replace(",", "_").replace(".", ",").replace("_", ".")
+        return f"0,{'0' * decimals}"
+    return f"{value:,.{decimals}f}".replace(",", "_").replace(".", ",").replace("_", ".")
 

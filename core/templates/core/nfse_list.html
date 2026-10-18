@@ -2,33 +2,18 @@
 {% load humanize %}
 {% block title %}NFS-es - {{ PROJECT_NAME }}{% endblock %}
 
-{% block extra_head %}
-<style>
-.clickable-row {
-    cursor: pointer;
-    transition: background-color 0.15s ease-in-out;
-}
-.clickable-row:hover .row-chevron {
-    color: var(--bs-primary) !important;
-    transform: translateX(2px);
-}
-.row-chevron {
-    transition: transform 0.15s ease-in-out, color 0.15s ease-in-out;
-}
-</style>
-{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4 flex-column flex-sm-row gap-2">
     <div>
-        <h2 class="mb-0">Notas Fiscais de Serviço Eletrônica (NFS-e)</h2>
+        <h2 class="mb-0 fw-bold">Notas Fiscais de Serviço Eletrônica (NFS-e)</h2>
         <div class="text-muted small mt-1">
             Total de <strong>{{ page_obj.paginator.count }}</strong> nota{{ page_obj.paginator.count|pluralize:" fiscal,s fiscais" }}
             {% if query %}&bull; filtrado por "<em>{{ query }}</em>"{% endif %}
         </div>
     </div>
     <div>
-        <button type="button" class="btn btn-success d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#importModal">
+        <button type="button" class="btn btn-primary fw-semibold d-inline-flex align-items-center gap-2" data-bs-toggle="modal" data-bs-target="#importModal">
             <i class="bi bi-cloud-arrow-down"></i>
             <span>Importar NFS-e</span>
         </button>
@@ -37,16 +22,18 @@
 
 <div class="card shadow-sm mb-4">
     <div class="card-header py-3">
-        <div class="row g-2 align-items-center justify-content-between">
-            <div class="col-12 col-sm-7 col-md-5">
+        <div class="row g-3 align-items-center justify-content-between">
+            <div class="col-12 col-md-5">
                 <form method="GET" action="{% url 'nfse_list' %}">
+                    {% if selected_provider %}<input type="hidden" name="provider" value="{{ selected_provider }}">{% endif %}
+                    {% if selected_status %}<input type="hidden" name="status" value="{{ selected_status }}">{% endif %}
                     <div class="input-group input-group-sm">
                         <span class="input-group-text bg-body-tertiary text-muted border-end-0">
                             <i class="bi bi-search"></i>
                         </span>
-                        <input type="text" name="q" value="{{ query }}" class="form-control border-start-0 ps-0" placeholder="Buscar por número, chave ou descrição...">
+                        <input type="text" name="q" value="{{ query }}" class="form-control border-start-0 ps-0" placeholder="Buscar por número, chave, invoice ou tomador...">
                         {% if query %}
-                        <a href="{% url 'nfse_list' %}" class="btn btn-outline-secondary" title="Limpar busca">
+                        <a href="{% url 'nfse_list' %}{% if selected_provider %}?provider={{ selected_provider }}{% if selected_status %}&status={{ selected_status }}{% endif %}{% elif selected_status %}?status={{ selected_status }}{% endif %}" class="btn btn-outline-secondary" title="Limpar busca">
                             <i class="bi bi-x-lg"></i>
                         </a>
                         {% endif %}
@@ -54,34 +41,112 @@
                     </div>
                 </form>
             </div>
+            <div class="col-12 col-md-7 d-flex justify-content-md-end gap-2 flex-wrap">
+                <!-- Provider Filter Pills -->
+                <div class="btn-group btn-group-sm" role="group" aria-label="Filtro de Provedor">
+                    <a href="{% url 'nfse_list' %}?{% if query %}q={{ query }}&{% endif %}{% if selected_status %}status={{ selected_status }}&{% endif %}" class="btn {% if not selected_provider %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+                        Todos <span class="d-none d-sm-inline">Provedores</span>
+                    </a>
+                    <a href="{% url 'nfse_list' %}?provider=NACIONAL{% if query %}&q={{ query }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" class="btn {% if selected_provider == 'NACIONAL' %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+                        Sefin Nacional
+                    </a>
+                    <a href="{% url 'nfse_list' %}?provider=PAULISTANA{% if query %}&q={{ query }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" class="btn {% if selected_provider == 'PAULISTANA' %}btn-primary{% else %}btn-outline-secondary{% endif %}">
+                        Paulistana
+                    </a>
+                </div>
+
+                <!-- Status Filter Pills -->
+                <div class="btn-group btn-group-sm" role="group" aria-label="Filtro de Status">
+                    <a href="{% url 'nfse_list' %}?{% if query %}q={{ query }}&{% endif %}{% if selected_provider %}provider={{ selected_provider }}&{% endif %}" class="btn {% if not selected_status %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                        Todos <span class="d-none d-sm-inline">Status</span>
+                    </a>
+                    <a href="{% url 'nfse_list' %}?status=ACTIVE{% if query %}&q={{ query }}{% endif %}{% if selected_provider %}&provider={{ selected_provider }}{% endif %}" class="btn {% if selected_status == 'ACTIVE' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                        Ativas
+                    </a>
+                    <a href="{% url 'nfse_list' %}?status=CANCELED{% if query %}&q={{ query }}{% endif %}{% if selected_provider %}&provider={{ selected_provider }}{% endif %}" class="btn {% if selected_status == 'CANCELED' %}btn-secondary{% else %}btn-outline-secondary{% endif %}">
+                        Canceladas
+                    </a>
+                </div>
+            </div>
         </div>
     </div>
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0" id="nfseTable">
-                <thead>
+                <thead class="bg-body-tertiary">
                     <tr>
                         <th scope="col" class="ps-3 py-3">Número NF</th>
+                        <th scope="col" class="py-3">Provedor</th>
+                        <th scope="col" class="py-3">Invoice / Tomador</th>
+                        <th scope="col" class="py-3">Identificador Fiscal</th>
                         <th scope="col" class="py-3">Data Emissão</th>
+                        <th scope="col" class="py-3">Status</th>
                         <th scope="col" class="text-end py-3">Valor (BRL)</th>
-                        <th scope="col" class="text-end pe-3 py-3" style="width: 48px;"></th>
+                        <th scope="col" class="text-end pe-3 py-3">Ações</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for nf in notas %}
-                    <tr class="clickable-row{% if nf.is_canceled %} text-body-secondary{% endif %}" data-href="{% url 'nfse_detail' nf.id %}">
+                    <tr{% if nf.is_canceled %} class="text-body-secondary"{% endif %}>
                         <td class="ps-3 py-3">
-                            <div class="d-flex align-items-center gap-2">
-                                <a href="{% url 'nfse_detail' nf.id %}" class="fw-semibold text-decoration-none text-body">
-                                    #{{ nf.nf_number }}
-                                </a>
-                                {% if nf.is_canceled %}
-                                <span class="badge bg-danger">Cancelada</span>
-                                {% endif %}
-                            </div>
+                            <a href="{% url 'nfse_detail' nf.id %}?next={{ request.get_full_path|urlencode }}" class="fw-bold font-monospace text-decoration-none">
+                                #{{ nf.nf_number }}
+                            </a>
                         </td>
-                        <td class="py-3">{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</td>
-                        <td class="text-end fw-semibold py-3">
+                        <td class="py-3">
+                            {% if nf.provider_type == 'NACIONAL' %}
+                            <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">
+                                <i class="bi bi-bank me-1"></i>Sefin Nacional
+                            </span>
+                            {% else %}
+                            <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">
+                                <i class="bi bi-geo-alt me-1"></i>Paulistana
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3">
+                            {% if nf.invoice %}
+                            <div class="fw-semibold">
+                                <a href="{% url 'invoice_detail' nf.invoice.id %}?next={{ request.get_full_path|urlencode }}" class="link-primary fw-semibold text-decoration-none">
+                                    Invoice #{{ nf.invoice.invoice_number }}
+                                </a>
+                            </div>
+                            <small class="text-muted d-block text-truncate" style="max-width: 200px;">
+                                {{ nf.invoice.client.name }}
+                            </small>
+                            {% else %}
+                            <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle">Avulsa</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3">
+                            {% if nf.chave_acesso_nacional %}
+                            <div class="text-body font-monospace small" title="{{ nf.chave_acesso_nacional }}">
+                                {{ nf.chave_acesso_nacional|slice:":8" }}...{{ nf.chave_acesso_nacional|slice:"-8:" }}
+                            </div>
+                            <small class="text-muted">Chave Nacional</small>
+                            {% elif nf.verification_code %}
+                            <div class="text-body font-monospace small">
+                                {{ nf.verification_code }}
+                            </div>
+                            <small class="text-muted">Cód. Verificação</small>
+                            {% else %}
+                            <span class="text-muted small">&mdash;</span>
+                            {% endif %}
+                        </td>
+                        <td class="py-3">
+                            <div>{{ nf.issue_date|date:"SHORT_DATE_FORMAT" }}</div>
+                            {% if nf.data_hora_autorizacao %}
+                            <small class="text-muted">{{ nf.data_hora_autorizacao|date:"H:i" }}</small>
+                            {% endif %}
+                        </td>
+                        <td class="py-3">
+                            {% if nf.is_canceled %}
+                            <span class="badge bg-danger">Cancelada</span>
+                            {% else %}
+                            <span class="badge bg-success">Autorizada</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end fw-semibold py-3 font-monospace">
                             {% if nf.is_canceled %}
                             <span class="text-decoration-line-through text-body-secondary" title="Nota cancelada">
                                 R$ {{ nf.amount_brl|floatformat:2|intcomma }}
@@ -92,18 +157,32 @@
                             </span>
                             {% endif %}
                         </td>
-                        <td class="text-end pe-3 py-3 text-body-secondary">
-                            <i class="bi bi-chevron-right small row-chevron"></i>
+                        <td class="text-end pe-3 py-3 text-nowrap">
+                            <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+                                <a href="{% url 'nfse_detail' nf.id %}?next={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-outline-primary" title="Ver Detalhes">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                {% if nf.danfse_pdf %}
+                                <a href="{% url 'nfse_download_pdf' nf.id %}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Baixar PDF">
+                                    <i class="bi bi-file-earmark-pdf"></i>
+                                </a>
+                                {% endif %}
+                                {% if nf.xml_autorizacao %}
+                                <a href="{% url 'nfse_download_xml' nf.id %}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Baixar XML">
+                                    <i class="bi bi-filetype-xml"></i>
+                                </a>
+                                {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="4" class="text-center py-5 text-muted">
-                            {% if query %}
+                        <td colspan="8" class="text-center py-5 text-muted">
+                            {% if query or selected_provider or selected_status %}
                             <i class="bi bi-search display-6 d-block mb-2 text-secondary"></i>
-                            Nenhuma NFS-e encontrada para "{{ query }}".
+                            Nenhuma NFS-e encontrada com os filtros selecionados.
                             <div class="mt-2">
-                                <a href="{% url 'nfse_list' %}" class="btn btn-sm btn-outline-secondary">Limpar busca</a>
+                                <a href="{% url 'nfse_list' %}" class="btn btn-sm btn-outline-secondary">Limpar filtros</a>
                             </div>
                             {% else %}
                             <i class="bi bi-receipt display-6 d-block mb-2 text-secondary"></i>
@@ -126,7 +205,7 @@
                 <ul class="pagination pagination-sm mb-0">
                     {% if page_obj.has_previous %}
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if query %}&q={{ query }}{% endif %}" aria-label="Anterior">
+                        <a class="page-link" href="?page={{ page_obj.previous_page_number }}{% if query %}&q={{ query }}{% endif %}{% if selected_provider %}&provider={{ selected_provider }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" aria-label="Anterior">
                             <span aria-hidden="true">&laquo;</span>
                         </a>
                     </li>
@@ -143,14 +222,14 @@
                         </li>
                         {% elif num > page_obj.number|add:'-3' and num < page_obj.number|add:'3' %}
                         <li class="page-item">
-                            <a class="page-link" href="?page={{ num }}{% if query %}&q={{ query }}{% endif %}">{{ num }}</a>
+                            <a class="page-link" href="?page={{ num }}{% if query %}&q={{ query }}{% endif %}{% if selected_provider %}&provider={{ selected_provider }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}">{{ num }}</a>
                         </li>
                         {% endif %}
                     {% endfor %}
 
                     {% if page_obj.has_next %}
                     <li class="page-item">
-                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if query %}&q={{ query }}{% endif %}" aria-label="Próxima">
+                        <a class="page-link" href="?page={{ page_obj.next_page_number }}{% if query %}&q={{ query }}{% endif %}{% if selected_provider %}&provider={{ selected_provider }}{% endif %}{% if selected_status %}&status={{ selected_status }}{% endif %}" aria-label="Próxima">
                             <span aria-hidden="true">&raquo;</span>
                         </a>
                     </li>
@@ -192,9 +271,9 @@
                         A importação consultará a prefeitura sequencialmente por número de nota fiscal, importando todas as novas notas emitidas e preenchendo eventuais lacunas não cadastradas localmente.
                     </div>
 
-                    <div id="nacionalInputs" class="alert alert-warning py-2 px-3 mb-0 small" style="display: none;">
-                        <i class="bi bi-exclamation-triangle me-1"></i>
-                        A importação automática por número para o Sefin Nacional está temporariamente em desenvolvimento.
+                    <div id="nacionalInputs" class="alert alert-info py-2 px-3 mb-0 small" style="display: none;">
+                        <i class="bi bi-info-circle me-1"></i>
+                        A importação consultará a API de Distribuição DFe (ADN) pelo NSU incremental, baixando automaticamente novas NFS-es emitidas pela empresa, registrando cancelamentos e sincronizando todos os eventos fiscais.
                     </div>
                 </div>
                 <div class="modal-footer">
@@ -208,16 +287,9 @@
 
 <script>
 document.addEventListener("DOMContentLoaded", () => {
-    const rows = document.querySelectorAll(".clickable-row");
-  
-    rows.forEach(row => {
-        row.addEventListener("click", (e) => {
-            if (e.target.closest("a, button, input, select, textarea")) {
-                return;
-            }
-            window.location.href = row.dataset.href;
-        });
-    });
+    if (document.getElementById('provider')) {
+        toggleProviderInputs();
+    }
 });
 
 function toggleProviderInputs() {

@@ -2,27 +2,49 @@
 {% block title %}Monitor de Tarefas - {{ PROJECT_NAME }}{% endblock %}
 
 {% block content %}
-<div class="row" id="tasks-container" hx-get="{% url 'tasks_view' %}" hx-trigger="every 15s" hx-select="#tasks-container" hx-swap="outerHTML">
+<div class="row" id="tasks-container" hx-get="{% url 'tasks_view' %}" hx-trigger="every 15s [!document.body.classList.contains('modal-open')]" hx-select="#tasks-container" hx-swap="outerHTML">
     <div class="col-12">
-        <div class="d-flex justify-content-between align-items-center mb-4">
-            <h2>Monitor de Tarefas em Segundo Plano</h2>
-            <form method="POST" action="{% url 'tasks_view' %}">
-                {% csrf_token %}
-                <input type="hidden" name="action" value="purge">
-                <button type="submit" class="btn btn-danger" onclick="return confirm('Tem certeza de que deseja limpar todas as tarefas pendentes da fila?');">
-                    <i class="bi bi-trash" aria-hidden="true"></i> Limpar Fila
-                </button>
-            </form>
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <div>
+                <h2 class="mb-0 fw-bold">Monitor de Tarefas</h2>
+                <span class="text-muted small">Fila assíncrona do Celery, tarefas ativas e agendamentos.</span>
+            </div>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                {% if user.is_staff and company.debug_mode %}
+                <form method="POST" action="{% url 'force_process_daily_invoices' %}" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                    <button type="submit" class="btn btn-outline-secondary d-flex align-items-center gap-1"
+                            data-confirm-message="Isso forçará a execução da tarefa diária de processamento agora mesmo. Confirmar?"
+                            data-confirm-title="Forçar Tarefa Diária"
+                            data-confirm-variant="warning">
+                        <i class="bi bi-lightning-charge"></i> Forçar Tarefa Diária
+                    </button>
+                </form>
+                {% endif %}
+                <form method="POST" action="{% url 'tasks_view' %}" class="d-inline">
+                    {% csrf_token %}
+                    <input type="hidden" name="action" value="purge">
+                    <button type="submit" class="btn btn-outline-danger d-flex align-items-center gap-1"
+                            data-confirm-message="Tem certeza de que deseja limpar todas as tarefas pendentes da fila?"
+                            data-confirm-title="Limpar Fila de Tarefas"
+                            data-confirm-variant="danger">
+                        <i class="bi bi-trash"></i> Limpar Fila
+                    </button>
+                </form>
+            </div>
         </div>
         
         {% if retrying_invoices %}
         <div class="card shadow-sm mb-4 border-warning">
-            <div class="card-header bg-warning text-dark fw-bold">Tarefas em Repetição (Invoices)</div>
+            <div class="card-header py-3 bg-warning-subtle text-warning-emphasis fw-bold">
+                <i class="bi bi-arrow-repeat me-2"></i>Tarefas em Repetição (Invoices)
+            </div>
             <div class="card-body p-0">
                 <ul class="list-group list-group-flush">
                 {% for invoice in retrying_invoices %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        <div>
+                    <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+                        <div class="text-break">
                             <strong>Invoice:</strong> {{ invoice.invoice_number }} ({{ invoice.client.name }})<br>
                             <small class="text-muted">Tentativas executadas: {{ invoice.task_retry_count }} / 10</small>
                         </div>
@@ -30,7 +52,10 @@
                             {% csrf_token %}
                             <input type="hidden" name="action" value="cancel_retry">
                             <input type="hidden" name="invoice_id" value="{{ invoice.id }}">
-                            <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Cancelar novas tentativas para esta invoice?');">
+                            <button type="submit" class="btn btn-sm btn-outline-danger"
+                                    data-confirm-message="Cancelar novas tentativas para esta invoice?"
+                                    data-confirm-title="Cancelar Repetições"
+                                    data-confirm-variant="danger">
                                 Cancelar Tentativas
                             </button>
                         </form>
@@ -42,66 +67,124 @@
         {% endif %}
 
         <div class="card shadow-sm mb-4">
-            <div class="card-header bg-primary text-white fw-bold">Tarefas Ativas (Em Execução)</div>
+            <div class="card-header py-3 bg-body-tertiary">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-play-circle me-2 text-primary"></i>Tarefas Ativas (Em Execução)
+                </h5>
+            </div>
             <div class="card-body">
                 {% if active_tasks %}
                     {% for worker, tasks in active_tasks.items %}
-                        <h5>Worker: {{ worker }}</h5>
+                        <h6 class="fw-bold text-muted mb-2"><i class="bi bi-hdd-rack me-1"></i>Worker: {{ worker }}</h6>
                         {% if tasks %}
                             <ul class="list-group mb-3">
                             {% for task in tasks %}
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <strong>{{ task.name }}</strong> <small class="text-muted">(ID: {{ task.id }})</small>
+                                <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                    <div class="text-break">
+                                        <strong>{{ task.name }}</strong>
+                                        <small class="text-muted d-block text-break font-monospace">ID: {{ task.id }}</small>
                                     </div>
                                     <form method="POST" action="{% url 'tasks_view' %}">
                                         {% csrf_token %}
                                         <input type="hidden" name="action" value="revoke">
                                         <input type="hidden" name="task_id" value="{{ task.id }}">
-                                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Revogar esta tarefa?');">Revogar</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                data-confirm-message="Revogar esta tarefa em execução?"
+                                                data-confirm-title="Revogar Tarefa"
+                                                data-confirm-variant="danger">
+                                            Revogar
+                                        </button>
                                     </form>
                                 </li>
                             {% endfor %}
                             </ul>
                         {% else %}
-                            <p class="text-muted">Nenhuma tarefa ativa neste worker.</p>
+                            <p class="text-muted small">Nenhuma tarefa ativa neste worker.</p>
                         {% endif %}
                     {% endfor %}
                 {% else %}
-                    <p class="text-muted">Nenhuma tarefa ativa no momento.</p>
+                    <p class="text-muted mb-0">Nenhuma tarefa ativa no momento.</p>
                 {% endif %}
             </div>
         </div>
 
+        {% if reserved_tasks %}
         <div class="card shadow-sm mb-4">
-            <div class="card-header bg-secondary text-white fw-bold">Tarefas Agendadas (Fila Interna do Celery)</div>
+            <div class="card-header py-3 bg-body-tertiary">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-inbox me-2 text-warning"></i>Tarefas Reservadas (Pré-alocadas)
+                </h5>
+            </div>
+            <div class="card-body">
+                {% for worker, tasks in reserved_tasks.items %}
+                    {% if tasks %}
+                        <h6 class="fw-bold text-muted mb-2"><i class="bi bi-hdd-rack me-1"></i>Worker: {{ worker }}</h6>
+                        <ul class="list-group mb-3">
+                        {% for task in tasks %}
+                            <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                <div class="text-break">
+                                    <strong>{{ task.name }}</strong>
+                                    <small class="text-muted d-block text-break font-monospace">ID: {{ task.id }}</small>
+                                </div>
+                                <form method="POST" action="{% url 'tasks_view' %}">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="action" value="revoke">
+                                    <input type="hidden" name="task_id" value="{{ task.id }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                                            data-confirm-message="Revogar esta tarefa reservada?"
+                                            data-confirm-title="Revogar Tarefa Reservada"
+                                            data-confirm-variant="danger">
+                                        Revogar
+                                    </button>
+                                </form>
+                            </li>
+                        {% endfor %}
+                        </ul>
+                    {% endif %}
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="card shadow-sm mb-4">
+            <div class="card-header py-3 bg-body-tertiary">
+                <h5 class="card-title mb-0">
+                    <i class="bi bi-clock-history me-2 text-secondary"></i>Tarefas Agendadas (Fila Interna do Celery)
+                </h5>
+            </div>
             <div class="card-body">
                 {% if scheduled_tasks %}
                     {% for worker, tasks in scheduled_tasks.items %}
-                        <h5>Worker: {{ worker }}</h5>
+                        <h6 class="fw-bold text-muted mb-2"><i class="bi bi-hdd-rack me-1"></i>Worker: {{ worker }}</h6>
                         {% if tasks %}
                             <ul class="list-group mb-3">
                             {% for task in tasks %}
-                                <li class="list-group-item d-flex justify-content-between align-items-center">
-                                    <div>
-                                        <strong>{{ task.request.name }}</strong> <small class="text-muted">(ID: {{ task.request.id }})</small><br>
+                                <li class="list-group-item d-flex justify-content-between align-items-center flex-wrap gap-2">
+                                    <div class="text-break">
+                                        <strong>{{ task.request.name }}</strong>
+                                        <small class="text-muted d-block text-break font-monospace">ID: {{ task.request.id }}</small>
                                         <small class="text-muted">Horário previsto (ETA): {{ task.eta }}</small>
                                     </div>
                                     <form method="POST" action="{% url 'tasks_view' %}">
                                         {% csrf_token %}
                                         <input type="hidden" name="action" value="revoke">
                                         <input type="hidden" name="task_id" value="{{ task.request.id }}">
-                                        <button type="submit" class="btn btn-sm btn-danger" onclick="return confirm('Revogar esta tarefa agendada?');">Revogar</button>
+                                        <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                data-confirm-message="Revogar esta tarefa agendada?"
+                                                data-confirm-title="Revogar Tarefa Agendada"
+                                                data-confirm-variant="danger">
+                                            Revogar
+                                        </button>
                                     </form>
                                 </li>
                             {% endfor %}
                             </ul>
                         {% else %}
-                            <p class="text-muted">Nenhuma tarefa agendada neste worker.</p>
+                            <p class="text-muted small">Nenhuma tarefa agendada neste worker.</p>
                         {% endif %}
                     {% endfor %}
                 {% else %}
-                    <p class="text-muted">Nenhuma tarefa agendada.</p>
+                    <p class="text-muted mb-0">Nenhuma tarefa agendada.</p>
                 {% endif %}
             </div>
         </div>

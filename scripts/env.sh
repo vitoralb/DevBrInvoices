@@ -33,22 +33,17 @@ log_error() {
 
 check_dev_already_running() {
     local running_containers
-    running_containers=$(docker ps -a --filter "name=notas-dev-" --format "{{.Names}}")
+    running_containers=$(docker ps --filter "name=notas-dev-" --filter "status=running" --format "{{.Names}}")
     if [ -n "$running_containers" ]; then
-        log_error "A development environment is already present or running:"
+        log_error "A development environment is already running:"
         echo "$running_containers" | while read -r line; do
             echo -e "  - ${YELLOW}$line${NC}"
         done
         echo ""
-        log_warn "Only ONE development environment is allowed at any time."
-        log_info "To destroy the existing Dev environment before re-spawning: make dev-destroy (or ./scripts/env.sh destroy-dev)"
-        log_info "To restart the existing Dev environment: make dev-restart (or ./scripts/env.sh restart-dev)"
-        return 1
-    fi
-
-    if [ -d "dev_data" ] && [ "$(ls -A dev_data 2>/dev/null)" ]; then
-        log_error "Found existing dev_data directory from a previous session."
-        log_warn "Run './scripts/env.sh destroy-dev' first to clean up leftover dev state before spawning a new one."
+        log_warn "Only ONE development environment is allowed to run at any time."
+        log_info "To stop Dev containers: make dev-destroy (or ./scripts/env.sh destroy-dev)"
+        log_info "To reset Dev environment: make dev-reset (or ./scripts/env.sh reset-dev)"
+        log_info "To restart Dev containers: make dev-restart (or ./scripts/env.sh restart-dev)"
         return 1
     fi
 
@@ -62,93 +57,199 @@ cmd_spawn_dev() {
         exit 1
     fi
 
-    # 1. Verify production database is running
-    log_info "Checking if production database ('notas-db-1') is available..."
-    if ! docker ps --filter "name=notas-db-1" --filter "status=running" --format "{{.Names}}" | grep -q "notas-db-1"; then
-        log_error "Production database 'notas-db-1' is not running."
-        log_info "Please ensure the production stack is up before cloning state: docker compose up -d"
-        exit 1
+    local is_resuming=false
+    if [ -d "dev_data/postgres_data" ] && [ "$(ls -A dev_data/postgres_data 2>/dev/null)" ]; then
+        is_resuming=true
     fi
 
-    # 2. Prepare isolated dev data directories
-    log_info "Creating dev_data directories..."
-    mkdir -p dev_data/postgres_data dev_data/media
+    if [ "$is_resuming" = true ]; then
+        log_info "Existing dev_data found. Resuming development environment..."
+        docker compose -f "$DEV_COMPOSE" up -d
 
-    # 3. Start dev DB and redis
-    log_info "Starting dev DB and Redis services..."
-    docker compose -f "$DEV_COMPOSE" up -d db redis
+        log_info "Waiting for dev web container (notas-dev-web-1)..."
+        sleep 3
 
-    # 4. Wait for dev DB to become healthy
-    log_info "Waiting for dev database to become ready..."
-    local attempts=0
-    local max_attempts=30
-    until docker exec notas-dev-db-1 pg_isready -U notas -d notas >/dev/null 2>&1 || [ $attempts -ge $max_attempts ]; do
-        attempts=$((attempts + 1))
-        sleep 1
-    done
+        log_info "Applying any pending migrations in development..."
+        docker exec notas-dev-web-1 python manage.py migrate --noinput
 
-    if [ $attempts -ge $max_attempts ]; then
-        log_error "Dev database failed to start within 30 seconds."
-        exit 1
-    fi
+        log_info "Running incremental NSU import from Sefin Homologação..."
+        docker exec notas-dev-web-1 python manage.py shell -c "
+from core.services.nfse_services import import_nfses
+try:
+    count, msg = import_nfses('NACIONAL')
+    print(f'Incremental sync: {count} items. {msg}')
+except Exception as ex:
+    print(f'Incremental sync notice: {ex}')
+"
+    else
+        log_info "No existing dev_data found. Setting up clean-slate development environment..."
 
-    # 5. Clone database from prod to dev
-    log_info "Cloning database from production (notas-db-1) to development (notas-dev-db-1)..."
-    docker exec notas-db-1 pg_dump -U notas -d notas --clean --if-exists | docker exec -i notas-dev-db-1 psql -U notas -d notas >/dev/null
+        # 1. Verify production database is running (needed to clone CompanySettings and User accounts)
+        log_info "Checking if production database ('notas-db-1') is available..."
+        if ! docker ps --filter "name=notas-db-1" --filter "status=running" --format "{{.Names}}" | grep -q "notas-db-1"; then
+            log_error "Production database 'notas-db-1' is not running."
+            log_info "Please ensure the production stack is up before cloning base configuration: docker compose up -d"
+            exit 1
+        fi
 
-    # 6. Clone media directory
-    log_info "Cloning media files to ./dev_data/media/..."
-    if [ -d "media" ]; then
-        cp -a media/. dev_data/media/
-    fi
+        # 2. Prepare isolated dev data directories
+        log_info "Creating dev_data directories..."
+        mkdir -p dev_data/postgres_data dev_data/media
 
-    # 7. Start the rest of the dev stack (web, celery-worker, celery-beat)
-    log_info "Starting development web and celery containers on port 8081..."
-    docker compose -f "$DEV_COMPOSE" up -d
+        # 3. Clone media directory if available
+        if [ -d "media" ]; then
+            log_info "Copying media files to ./dev_data/media/..."
+            cp -a media/. dev_data/media/ 2>/dev/null || true
+        fi
 
-    # 8. Wait for dev web container to be ready
-    log_info "Waiting for dev web container (notas-dev-web-1)..."
-    sleep 3
+        # 4. Start dev DB and redis
+        log_info "Starting dev DB and Redis services..."
+        docker compose -f "$DEV_COMPOSE" up -d db redis
 
-    # 9. Apply migrations in dev
-    log_info "Applying any pending migrations in development..."
-    docker exec notas-dev-web-1 python manage.py migrate --noinput
+        # 5. Wait for dev DB to become healthy
+        log_info "Waiting for dev database to become ready..."
+        local attempts=0
+        local max_attempts=30
+        until docker exec notas-dev-db-1 pg_isready -U notas -d notas >/dev/null 2>&1 || [ $attempts -ge $max_attempts ]; do
+            attempts=$((attempts + 1))
+            sleep 1
+        done
 
-    # 10. Sanitize Dev settings (enforce debug_mode=True, auto_finalize_invoices=False)
-    log_info "Sanitizing development CompanySettings (enforcing debug_mode=True, auto_finalize_invoices=False)..."
-    docker exec notas-dev-web-1 python manage.py shell -c "
+        if [ $attempts -ge $max_attempts ]; then
+            log_error "Dev database failed to start within 30 seconds."
+            exit 1
+        fi
+
+        # 6. Start the rest of the dev stack
+        log_info "Starting development web and celery containers on port 8081..."
+        docker compose -f "$DEV_COMPOSE" up -d
+
+        # 7. Wait for dev web container to be ready
+        log_info "Waiting for dev web container (notas-dev-web-1)..."
+        sleep 3
+
+        # 8. Apply migrations in dev to build schema
+        log_info "Applying migrations to initialize dev schema..."
+        docker exec notas-dev-web-1 python manage.py migrate --noinput
+
+        # 9. Copy only CompanySettings and User accounts from production
+        log_info "Copying User accounts and auth tokens from production..."
+        docker exec notas-db-1 pg_dump -U notas -d notas -t auth_user -t authtoken_token --data-only --column-inserts 2>/dev/null | docker exec -i notas-dev-db-1 psql -U notas -d notas >/dev/null 2>&1 || true
+
+        log_info "Copying and sanitizing CompanySettings from production..."
+        docker exec notas-web-1 python -c "
+import django, os, json
+os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
+django.setup()
 from core.models import CompanySettings
-c = CompanySettings.load()
+from django.forms.models import model_to_dict
+c = CompanySettings.objects.first()
 if c:
+    d = model_to_dict(c)
+    clean = {k: v for k, v in d.items() if k not in ['id', 'default_codigo_tributacao_nacional', 'default_codigo_nbs']}
+    print(json.dumps(clean, default=str))
+" 2>/dev/null | docker exec -i notas-dev-web-1 python manage.py shell -c "
+import sys, json
+from core.models import CompanySettings
+raw = sys.stdin.read().strip()
+if raw:
+    data = json.loads(raw)
+    c = CompanySettings.objects.first() or CompanySettings()
+    for k, v in data.items():
+        if hasattr(c, k):
+            setattr(c, k, v)
     c.debug_mode = True
     c.auto_finalize_invoices = False
+    c.document_series = '4242'
+    c.next_document_number = 1
+    c.last_adn_nsu = 0
     c.save()
-    print('CompanySettings sanitized successfully in Dev DB.')
+    print('CompanySettings configured: series 4242, debug_mode=True, counters reset.')
 else:
-    print('No CompanySettings found to sanitize.')
+    print('Warning: No CompanySettings extracted from production.')
 "
 
-    log_success "Development environment spawned successfully!"
+        # 10. Seed synthetic client and template if needed
+        log_info "Seeding synthetic client and template..."
+        docker exec notas-dev-web-1 python manage.py shell -c "
+from core.models import Client, InvoiceTemplate
+
+if not Client.objects.exists():
+    client = Client.objects.create(
+        name='Acme International LLC',
+        email='billing@example.com',
+        address_line1='100 Market St',
+        address_neighborhood='Downtown',
+        address_city='San Francisco',
+        address_state_province='CA',
+        address_postal_code='94105',
+        country='United States',
+        address_country_code='US',
+    )
+    print('Created synthetic test client: Acme International LLC.')
+else:
+    client = Client.objects.first()
+
+if not InvoiceTemplate.objects.exists():
+    from core.models import InvoiceTemplateItem
+    tmpl = InvoiceTemplate.objects.create(
+        name='Template Padrão Homologação',
+        currency='USD',
+        codigo_tributacao_nacional='010101',
+        codigo_servico_municipio='0101',
+        codigo_nbs='101010100',
+        nfse_description='Serviços de desenvolvimento de software prestados para o exterior.',
+    )
+    InvoiceTemplateItem.objects.create(
+        template=tmpl,
+        description='Consultoria e desenvolvimento de software',
+        quantity=1,
+        unit_price_foreign=1000,
+    )
+    print('Created synthetic test template.')
+"
+
+        # 11. Run automatic NSU import from Sefin Homologação
+        log_info "Running initial NSU import from Sefin Homologação to prefill NFS-e data..."
+        docker exec notas-dev-web-1 python manage.py shell -c "
+from core.services.nfse_services import import_nfses
+try:
+    count, msg = import_nfses('NACIONAL')
+    print(f'Homologação prefill: {count} items processed. {msg}')
+except Exception as ex:
+    print(f'Homologação prefill notice: {ex}')
+"
+    fi
+
+    log_success "Development environment ready!"
     echo ""
     echo -e "  ${GREEN}URL:${NC}                http://localhost:8081"
     echo -e "  ${GREEN}Container Web:${NC}      notas-dev-web-1"
     echo -e "  ${GREEN}Dev Database:${NC}       ./dev_data/postgres_data (isolated from prod)"
     echo -e "  ${GREEN}Dev Media:${NC}          ./dev_data/media (isolated from prod)"
+    echo -e "  ${GREEN}Series / State:${NC}     document_series=4242, Homologação NFS-es prefilled"
     echo -e "  ${GREEN}Code Reload:${NC}        Live bind-mount of current workspace"
     echo -e "  ${GREEN}Safety Rails:${NC}       debug_mode=True (locked), auto_finalize_invoices=False"
     echo ""
     log_info "To run tests in dev: make dev-test (or ./scripts/env.sh test)"
-    log_info "To destroy dev when finished: make dev-destroy (or ./scripts/env.sh destroy-dev)"
+    log_info "To stop dev (preserves data): make dev-destroy (or ./scripts/env.sh destroy-dev)"
+    log_info "To wipe and reset dev from scratch: make dev-reset (or ./scripts/env.sh reset-dev)"
 }
 
 cmd_destroy_dev() {
-    log_info "Stopping and removing development environment containers and volumes..."
+    log_info "Stopping development environment containers..."
+    docker compose -f "$DEV_COMPOSE" down --remove-orphans || true
+    log_success "Development containers stopped. Dev database (./dev_data/) preserved."
+    log_info "To resume, run 'make dev-spawn'. To completely reset dev database, run 'make dev-reset'."
+}
+
+cmd_reset_dev() {
+    log_info "Wiping development environment and data..."
     docker compose -f "$DEV_COMPOSE" down -v --remove-orphans || true
-
-    log_info "Removing dev_data directory..."
     rm -rf dev_data
-
-    log_success "Development environment has been completely destroyed."
+    log_success "Development data wiped."
+    log_info "Re-spawning clean development environment..."
+    cmd_spawn_dev
 }
 
 cmd_restart_dev() {
@@ -228,6 +329,9 @@ case "$1" in
     destroy-dev)
         cmd_destroy_dev
         ;;
+    reset-dev)
+        cmd_reset_dev
+        ;;
     restart-dev)
         cmd_restart_dev
         ;;
@@ -242,7 +346,7 @@ case "$1" in
         cmd_status
         ;;
     *)
-        echo "Usage: $0 {spawn-dev|destroy-dev|restart-dev|test|upgrade-prod|status}"
+        echo "Usage: $0 {spawn-dev|destroy-dev|reset-dev|restart-dev|test|upgrade-prod|status}"
         exit 1
         ;;
 esac

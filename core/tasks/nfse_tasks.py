@@ -1,3 +1,5 @@
+import re
+import requests
 from decimal import Decimal
 from dateutil.relativedelta import relativedelta
 from celery import shared_task
@@ -17,11 +19,11 @@ from .invoices_tasks import _get_pdf_bytes_for_task
 logger = get_task_logger(__name__)
 
 
+from .task_utils import is_transient_error as _is_transient_error
+
+
 @shared_task(
     bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=20,
-    retry_backoff_max=3600,
     max_retries=10,
 )
 def issue_nfse_task(
@@ -35,7 +37,7 @@ def issue_nfse_task(
     invoice.status = "PROCESSING"
     if self.request and self.request.id:
         invoice.task_id = self.request.id
-    invoice.save()
+    invoice.save(update_fields=["exchange_rate_to_brl", "status", "task_id", "updated_at"])
 
     try:
         # Check prefeitura first to avoid duplicate submissions
@@ -85,7 +87,7 @@ def issue_nfse_task(
         invoice.task_id = ""
         invoice.task_retry_count = 0
         invoice.status = "FINALIZED"
-        invoice.save()
+        invoice.save(update_fields=["status", "task_id", "task_retry_count", "updated_at"])
 
         if send_to_company and company and company.email:
             pdf_bytes = None
@@ -139,11 +141,15 @@ def issue_nfse_task(
 
         return f"NFS-e {nf.nf_number} issued for invoice {invoice_id}."
     except Exception as e:
-        if self.request.retries >= self.max_retries:
+        is_transient = _is_transient_error(e)
+        current_retries = self.request.retries or 0
+        retries_exhausted = current_retries >= self.max_retries
+
+        if not is_transient or retries_exhausted:
             invoice.task_retry_count = 0
             invoice.task_id = ""
             invoice.status = "FINALIZED"
-            invoice.save()
+            invoice.save(update_fields=["status", "task_id", "task_retry_count", "updated_at"])
 
             # Send failure email
             if company and company.email:
@@ -168,16 +174,14 @@ def issue_nfse_task(
             raise e
         else:
             invoice.status = "PROCESSING"
-            invoice.task_retry_count = self.request.retries + 1
-            invoice.save()
-            raise e
+            invoice.task_retry_count = current_retries + 1
+            invoice.save(update_fields=["status", "task_retry_count", "updated_at"])
+            countdown = min(3600, 20 * (2 ** current_retries))
+            raise self.retry(exc=e, countdown=countdown)
 
 
 @shared_task(
     bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=60,
-    retry_backoff_max=600,
     max_retries=10,
 )
 def fetch_nfse_pdf_task(self, invoice_id=None, nf_id=None, force=False):
@@ -186,45 +190,54 @@ def fetch_nfse_pdf_task(self, invoice_id=None, nf_id=None, force=False):
     from ..models import Invoice, NotaFiscal
     from core.nfse.provider_factory import get_provider
 
-    invoice = None
-    nf = None
+    try:
+        invoice = None
+        nf = None
 
-    if invoice_id:
-        try:
-            invoice = Invoice.objects.get(id=invoice_id)
-            nf = getattr(invoice, "nota_fiscal", None)
-            if not nf:
-                return f"No NotaFiscal found for invoice {invoice_id}."
-        except Invoice.DoesNotExist:
-            return f"Invoice {invoice_id} not found."
-    elif nf_id:
-        try:
-            nf = NotaFiscal.objects.get(id=nf_id)
-        except NotaFiscal.DoesNotExist:
-            return f"NotaFiscal {nf_id} not found."
-    else:
-        return "Must provide either invoice_id or nf_id."
+        if invoice_id:
+            try:
+                invoice = Invoice.objects.get(id=invoice_id)
+                nf = getattr(invoice, "nota_fiscal", None)
+                if not nf:
+                    return f"No NotaFiscal found for invoice {invoice_id}."
+            except Invoice.DoesNotExist:
+                return f"Invoice {invoice_id} not found."
+        elif nf_id:
+            try:
+                nf = NotaFiscal.objects.get(id=nf_id)
+            except NotaFiscal.DoesNotExist:
+                return f"NotaFiscal {nf_id} not found."
+        else:
+            return "Must provide either invoice_id or nf_id."
 
-    if not force and nf.danfse_pdf and nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
-        return f"PDF already saved for NF {nf.nf_number}."
+        if not force and nf.danfse_pdf and nf.danfse_pdf.storage.exists(nf.danfse_pdf.name):
+            return f"PDF already saved for NF {nf.nf_number}."
 
-    target = invoice if invoice else nf
+        target = invoice if invoice else nf
 
-    from core.services.nfse_services import fetch_and_save_nfse_pdf
+        from core.services.nfse_services import fetch_and_save_nfse_pdf
 
-    provider = get_provider(target)
-    pdf_bytes = fetch_and_save_nfse_pdf(target, provider, force=force)
-    if pdf_bytes:
-        logger.info("Successfully fetched and saved PDF for NF %s", nf.nf_number)
-        return f"PDF successfully downloaded for NF {nf.nf_number}."
-    else:
-        logger.info(
-            "PDF not ready yet for NF %s (retry %d/%d)",
-            nf.nf_number,
-            self.request.retries,
-            self.max_retries,
-        )
-        raise Exception(f"PDF not ready yet for NF {nf.nf_number}.")
+        provider = get_provider(target)
+        pdf_bytes = fetch_and_save_nfse_pdf(target, provider, force=force)
+        if pdf_bytes:
+            logger.info("Successfully fetched and saved PDF for NF %s", nf.nf_number)
+            return f"PDF successfully downloaded for NF {nf.nf_number}."
+        else:
+            logger.info(
+                "PDF not ready yet for NF %s (retry %d/%d)",
+                nf.nf_number,
+                self.request.retries,
+                self.max_retries,
+            )
+            raise Exception(f"PDF not ready yet for NF {nf.nf_number}.")
+    except Exception as e:
+        is_transient = _is_transient_error(e)
+        current_retries = self.request.retries or 0
+        if not is_transient or current_retries >= self.max_retries:
+            logger.error("Falha ao obter PDF para NF/Invoice (não transitório ou retries esgotados): %s", e)
+            raise e
+        countdown = min(600, 30 * (2 ** current_retries))
+        raise self.retry(exc=e, countdown=countdown)
 
 
 @shared_task(bind=True)
@@ -241,22 +254,32 @@ def import_nfses_task(self, provider_type=None, *args, **kwargs):
 
 @shared_task(
     bind=True,
-    autoretry_for=(Exception,),
-    retry_backoff=60,
-    retry_backoff_max=600,
     max_retries=10,
 )
 def cancel_nfse_standalone_task(self, nf_id):
+    from django.core.cache import cache
     from core.models import NotaFiscal
     from core.services.nfse_services import cancel_nota_fiscal
 
-    nf = NotaFiscal.objects.get(id=nf_id)
-    if nf.is_canceled:
-        return f"NFSe {nf_id} already canceled."
+    try:
+        nf = NotaFiscal.objects.get(id=nf_id)
+        if nf.is_canceled:
+            cache.delete(f"nfse_canceling_{nf_id}")
+            return f"NFSe {nf_id} already canceled."
 
-    cancel_result = cancel_nota_fiscal(nf, origem="System / Celery Cancel Standalone")
+        cancel_result = cancel_nota_fiscal(nf, origem="System / Celery Cancel Standalone")
 
-    if not cancel_result.sucesso:
-        raise Exception(f"Falha ao cancelar NFS-e: {' | '.join(cancel_result.erros)}")
+        if not cancel_result.sucesso:
+            raise Exception(f"Falha ao cancelar NFS-e: {' | '.join(cancel_result.erros)}")
 
-    return f"NFSe {nf_id} canceled successfully."
+        cache.delete(f"nfse_canceling_{nf_id}")
+        return f"NFSe {nf_id} canceled successfully."
+    except Exception as e:
+        logger.error("Erro no cancel_nfse_standalone_task para NF %s: %s", nf_id, e)
+        is_transient = _is_transient_error(e)
+        current_retries = self.request.retries or 0
+        if not is_transient or current_retries >= self.max_retries:
+            cache.delete(f"nfse_canceling_{nf_id}")
+            raise e
+        countdown = min(600, 30 * (2 ** current_retries))
+        raise self.retry(exc=e, countdown=countdown)

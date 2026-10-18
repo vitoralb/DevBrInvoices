@@ -1,0 +1,117 @@
+{% extends 'core/base.html' %}
+{% load humanize %}
+{% block title %}Clientes - {{ PROJECT_NAME }}{% endblock %}
+
+{% block content %}
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h2 class="mb-0 fw-bold">Clientes</h2>
+        <span class="text-muted small">Gerencie os tomadores de serviço / clientes cadastrados no sistema.</span>
+    </div>
+    <div>
+        <a href="{% url 'client_create' %}" class="btn btn-primary fw-semibold">
+            <i class="bi bi-plus-lg me-1"></i>Novo Cliente
+        </a>
+    </div>
+</div>
+
+<div class="card shadow-sm border-0 mb-4">
+    <div class="card-body p-0">
+        <div class="table-responsive">
+            <table class="table table-hover align-middle mb-0">
+                <thead class="bg-body-tertiary">
+                    <tr>
+                        <th scope="col" class="ps-3">Nome / Razão Social</th>
+                        <th scope="col">E-mail</th>
+                        <th scope="col">Localização</th>
+                        <th scope="col" class="text-center">Invoices</th>
+                        <th scope="col" class="text-end pe-3">Ações</th>
+                    </tr>
+                </thead>
+                <tbody>
+                    {% for client in clients %}
+                    <tr>
+                        <td class="ps-3 fw-semibold">
+                            <a href="{% url 'client_update' client.id %}" class="text-decoration-none">
+                                {{ client.name }}
+                            </a>
+                        </td>
+                        <td>
+                            {% if client.email %}
+                            <a href="mailto:{{ client.email }}" class="text-decoration-none text-body">
+                                <i class="bi bi-envelope me-1 text-muted"></i>{{ client.email }}
+                            </a>
+                            {% if client.email_cc %}
+                            <div class="small text-muted text-truncate" style="max-width: 250px;" title="CC: {{ client.email_cc }}">
+                                <i class="bi bi-people me-1"></i>CC: {{ client.email_cc }}
+                            </div>
+                            {% endif %}
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td>
+                            {% if client.country or client.address_city %}
+                            <span>{{ client.address_city|default:"" }}{% if client.address_city and client.country %}, {% endif %}{{ client.country|default:"" }}</span>
+                            {% if client.address_country_code %}
+                            <span class="badge bg-body-secondary text-body-secondary ms-1">{{ client.address_country_code }}</span>
+                            {% endif %}
+                            {% else %}
+                            <span class="text-muted">-</span>
+                            {% endif %}
+                        </td>
+                        <td class="text-center">
+                            {% if client.invoices_count > 0 %}
+                            <a href="{% url 'invoice_list' %}?client_id={{ client.id }}" class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle text-decoration-none" title="Ver invoices deste cliente">
+                                {{ client.invoices_count }} invoice{{ client.invoices_count|pluralize }}
+                            </a>
+                            {% else %}
+                            <span class="badge bg-body-secondary text-body-secondary border">
+                                0 invoices
+                            </span>
+                            {% endif %}
+                        </td>
+                        <td class="text-end pe-3 text-nowrap">
+                            <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+                                <a href="{% url 'client_update' client.id %}" class="btn btn-sm btn-outline-secondary" title="Editar Cliente">
+                                    <i class="bi bi-pencil"></i>
+                                </a>
+                                {% if client.invoices_count > 0 %}
+                                <span class="d-inline-block" tabindex="0" title="Cliente possui invoices vinculadas e não pode ser excluído">
+                                    <button type="button" class="btn btn-sm btn-outline-danger" disabled style="pointer-events: none;">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </span>
+                                {% else %}
+                                <form method="POST" action="{% url 'client_delete' client.id %}" class="d-inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                                            data-confirm-message="Tem certeza que deseja excluir o cliente '{{ client.name }}'? Esta ação não pode ser desfeita."
+                                            data-confirm-title="Excluir Cliente"
+                                            data-confirm-variant="danger"
+                                            title="Excluir Cliente">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
+                        </td>
+                    </tr>
+                    {% empty %}
+                    <tr>
+                        <td colspan="5" class="text-center py-5 text-muted">
+                            <i class="bi bi-people display-6 d-block mb-2 text-secondary"></i>
+                            <p class="mb-2">Nenhum cliente cadastrado no momento.</p>
+                            <a href="{% url 'client_create' %}" class="btn btn-sm btn-outline-primary">
+                                <i class="bi bi-plus-lg me-1"></i>Cadastrar Primeiro Cliente
+                            </a>
+                        </td>
+                    </tr>
+                    {% endfor %}
+                </tbody>
+            </table>
+        </div>
+    </div>
+</div>
+{% endblock %}

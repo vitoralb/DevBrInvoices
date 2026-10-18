@@ -1,0 +1,7 @@
+ADN:
+Homologacao: https://adn.producaorestrita.nfse.gov.br/contribuintes
+Producao: https://adn.nfse.gov.br/contribuintes
+
+SEFIN:
+Homologacao: https://sefin.producaorestrita.nfse.gov.br/API/SefinNacional
+Producao: https://sefin.nfse.gov.br/API/SefinNacional

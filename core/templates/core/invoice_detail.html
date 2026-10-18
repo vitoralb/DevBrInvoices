@@ -3,180 +3,411 @@
 {% block title %}Invoice {{ invoice.invoice_number }} - {{ PROJECT_NAME }}{% endblock %}
 
 {% block content %}
-<div class="row" id="invoice-details-row">
-    <div class="col-md-4">
-        <div class="card shadow-sm mb-4">
-            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                <div class="d-flex align-items-center">
-                    {% if invoice.status == 'DRAFT' %}
-                    <h5 class="mb-0" id="invoice-number-display" style="cursor: pointer; text-decoration: underline dotted;" onclick="document.getElementById('invoice-number-form').classList.remove('d-none'); this.classList.add('d-none');" title="Clique para editar">Invoice {{ invoice.invoice_number }}</h5>
-                    <form id="invoice-number-form" class="d-none m-0" hx-post="{% url 'htmx_update_invoice_number' invoice.id %}" hx-swap="none" hx-on::after-request="if(event.detail.successful) { this.classList.add('d-none'); document.getElementById('invoice-number-display').classList.remove('d-none'); document.getElementById('invoice-number-display').innerText = 'Invoice ' + event.detail.xhr.responseText; } else { alert(event.detail.xhr.responseText); }">
-                        {% csrf_token %}
-                        <div class="input-group input-group-sm" style="width: 200px;">
-                            <input type="text" name="invoice_number" class="form-control" value="{{ invoice.invoice_number }}" required>
-                            <button class="btn btn-primary" type="submit">OK</button>
-                            <button class="btn btn-secondary" type="button" onclick="document.getElementById('invoice-number-form').classList.add('d-none'); document.getElementById('invoice-number-display').classList.remove('d-none');">X</button>
-                        </div>
-                    </form>
-                    {% else %}
-                    <h5 class="mb-0">Invoice {{ invoice.invoice_number }}</h5>
-                    {% endif %}
-                </div>
-                <div>
-                    <form method="POST" action="{% url 'clone_invoice' invoice.id %}" class="d-inline">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-light" onclick="return confirm('Clonar para uma nova invoice em rascunho?');">Clonar</button>
-                    </form>
-                    
-                    {% if invoice.status == 'FINALIZED' and not invoice.nota_fiscal %}
-                    <form method="POST" action="{% url 'revert_invoice_to_draft' invoice.id %}" class="d-inline">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-warning" onclick="return confirm('Deseja voltar esta invoice para rascunho?');">Voltar a Rascunho</button>
-                    </form>
-                    {% endif %}
-                    
-                    {% if invoice.status == 'DRAFT' %}
-                    <form method="POST" action="{% url 'invoice_delete' invoice.id %}" class="d-inline">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Tem certeza que deseja excluir esta invoice?');">Excluir</button>
-                    </form>
-                    {% endif %}
-                    
-                    {% if invoice.status == 'FINALIZED' %}
-                    <button type="button" class="btn btn-sm btn-outline-info" data-bs-toggle="modal" data-bs-target="#emailModal">E-mail</button>
-                    {% if invoice.can_be_canceled %}
-                    <form method="POST" action="{% url 'cancel_invoice' invoice.id %}" class="d-inline">
-                        {% csrf_token %}
-                        <button type="submit" class="btn btn-sm btn-outline-danger" onclick="return confirm('Tem certeza que deseja cancelar esta invoice e sua respectiva NFS-e, se houver?');">Cancelar Invoice</button>
-                    </form>
-                    {% endif %}
-                    {% endif %}
-                    <a href="{% url 'generate_invoice_pdf' invoice.id %}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-light">PDF da Invoice</a>
-                </div>
+<div id="invoice-details-root">
+    <!-- Full-Width Detail Page Header -->
+    <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+        <div>
+            <a href="{{ back_url|default:'/invoices/' }}" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1 mb-2">
+                <i class="bi bi-arrow-left"></i> Voltar para Invoices
+            </a>
+            <div class="d-flex align-items-center gap-2 flex-wrap">
+                <h2 class="mb-0 fw-bold font-monospace">Invoice {{ invoice.invoice_number }}</h2>
+                <span class="badge {% if invoice.status == 'FINALIZED' %}bg-success{% elif invoice.status == 'PROCESSING' %}bg-warning-subtle text-warning-emphasis border border-warning{% elif invoice.status == 'CANCELED' %}bg-danger{% else %}bg-secondary{% endif %} fs-6">
+                    {{ invoice.get_status_display }}
+                </span>
             </div>
-            <div class="card-body">
-                <p><strong>Cliente:</strong> {{ invoice.client.name }}</p>
-                <p><strong>Data:</strong> {{ invoice.issue_date }}</p>
-                <p><strong>Moeda:</strong> {{ invoice.currency }}</p>
-                <p><strong>Status:</strong> <span class="badge bg-secondary">{{ invoice.get_status_display }}</span></p>
-                {% include 'core/partials/invoice_bank_details.html' %}
-                
-                {% if invoice.status == 'PROCESSING' %}
-                <hr>
-                <div class="text-center p-3" hx-get="{% url 'invoice_detail' invoice.id %}" hx-trigger="every 2s" hx-target="#invoice-details-row" hx-select="#invoice-details-row" hx-swap="outerHTML">
-                    <div class="spinner-border text-primary mb-2" role="status">
-                        <span class="visually-hidden">Carregando...</span>
-                    </div>
-                    <h6>Processando...</h6>
-                    <p class="text-muted small">Esta página será atualizada automaticamente assim que a tarefa em segundo plano for concluída.</p>
-                </div>
-                {% elif invoice.status == 'DRAFT' %}
-                <hr>
-                <h6>Finalizar Invoice</h6>
-                <form method="POST" action="{% url 'finalize_invoice' invoice.id %}">
-                    {% csrf_token %}
-                    <div class="mb-3 form-check">
-                        <input class="form-check-input" type="checkbox" id="send_to_client_finalize" name="send_to_client" checked>
-                        <label class="form-check-label" for="send_to_client_finalize">
-                            Enviar Invoice para o Cliente
-                        </label>
-                    </div>
-                    <div class="mb-3 form-check">
-                        <input class="form-check-input" type="checkbox" id="send_to_company_finalize" name="send_to_company" checked>
-                        <label class="form-check-label" for="send_to_company_finalize">
-                            Enviar Invoice para a Empresa
-                        </label>
-                    </div>
-                    <button type="submit" class="btn btn-primary w-100" onclick="return confirm('Tem certeza que deseja finalizar esta invoice?');">Finalizar Invoice</button>
-                </form>
-                {% elif invoice.status == 'FINALIZED' %}
-                <hr>
-                {% if not invoice.nota_fiscal %}
-                <h6>Emitir NFS-e</h6>
-                <form method="POST" action="{% url 'issue_nfse' invoice.id %}">
-                    {% csrf_token %}
-                    <div class="mb-2">
-                        <label for="conversion_date_input" class="form-label text-muted small">Data de Conversão</label>
-                        <input type="date" id="conversion_date_input" name="conversion_date" class="form-control" value="{{ invoice.issue_date|date:'Y-m-d' }}" 
-                               hx-get="{% url 'htmx_fetch_exchange_rate' %}?currency={{ invoice.currency }}" 
-                               hx-target="#exchange_rate_container">
-                    </div>
-                    <div class="mb-2" id="exchange_rate_container">
-                        {% include 'core/partials/exchange_rate_input.html' with currency=invoice.currency rate=suggested_exchange_rate %}
-                    </div>
-
-                    <div class="mb-3 form-check">
-                        <input class="form-check-input" type="checkbox" id="send_to_company" name="send_to_company" checked>
-                        <label class="form-check-label" for="send_to_company">
-                            Enviar NFS-e para a Empresa por e-mail após verificação
-                        </label>
-                    </div>
-                    <button type="submit" class="btn btn-success w-100">Emitir NFS-e</button>
-                </form>
-                {% if latest_nfse_log and latest_nfse_log.erro_mensagem %}
-                <div class="alert alert-danger mt-3 mb-0" role="alert">
-                    <strong class="d-block mb-1">Último erro na emissão da NFS-e:</strong>
-                    <div style="white-space: pre-wrap; font-size: 0.85em; max-height: 150px; overflow-y: auto;">{{ latest_nfse_log.erro_mensagem }}</div>
-                    <small class="text-muted d-block mt-1">{{ latest_nfse_log.created_at|date:"d/m/Y H:i" }} ({{ latest_nfse_log.origem }})</small>
-                </div>
-                {% endif %}
-                {% endif %}
-                
-                {% if invoice.nota_fiscal %}
-                <div class="bg-body-tertiary p-3 rounded position-relative mt-4">
-                    <h6>Detalhes da NFS-e</h6>
-                    <ul class="list-unstyled small mb-2">
-                        <li><strong>Número da NFS-e:</strong> {{ invoice.nota_fiscal.nf_number }}</li>
-                        {% if invoice.nota_fiscal.chave_acesso_nacional %}
-                        <li><strong>Chave de Acesso:</strong> <span class="text-break">{{ invoice.nota_fiscal.chave_acesso_nacional }}</span></li>
-                        {% endif %}
-                        <li>
-                            {% if invoice.nota_fiscal.verification_code %}
-                            <strong>Código de Verificação:</strong> {{ invoice.nota_fiscal.verification_code }}
-                            {% endif %}
-                            <a href="{% url 'nfse_download_pdf' invoice.nota_fiscal.id %}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-primary ms-2">Baixar PDF da NFS-e</a>
-                        </li>
-                        <li><strong>Taxa de Câmbio:</strong> R$ {{ invoice.exchange_rate_to_brl|floatformat:4 }}</li>
-                        <li><strong>Valor (BRL):</strong> R$ {{ invoice.nota_fiscal.amount_brl|floatformat:2|intcomma }}</li>
-                    </ul>
-                    <div class="small">
-                        <strong>Descrição enviada para a NFS-e:</strong>
-                        <div class="text-muted mt-1" style="white-space: pre-wrap; font-size: 0.9em; max-height: 200px; overflow-y: auto;">{{ invoice.nota_fiscal.description }}</div>
-                    </div>
-                </div>
-                {% endif %}
-                {% endif %}
+        </div>
+        <div class="d-flex align-items-center gap-2 flex-wrap">
+            <a href="{% url 'generate_invoice_pdf' invoice.id %}" target="_blank" rel="noopener noreferrer" class="btn btn-outline-primary d-inline-flex align-items-center gap-1">
+                <i class="bi bi-file-earmark-pdf"></i> Baixar PDF
+            </a>
+            {% if invoice.status == 'FINALIZED' %}
+            <button type="button" class="btn btn-primary d-inline-flex align-items-center gap-1" data-bs-toggle="modal" data-bs-target="#emailModal">
+                <i class="bi bi-envelope"></i> Enviar E-mail
+            </button>
+            {% endif %}
+            <div class="dropdown">
+                <button class="btn btn-outline-secondary dropdown-toggle d-inline-flex align-items-center gap-1" type="button" id="invoiceActionsDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                    <i class="bi bi-three-dots"></i> Ações
+                </button>
+                <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="invoiceActionsDropdown">
+                    <li>
+                        <form method="POST" action="{% url 'clone_invoice' invoice.id %}" class="mb-0">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ back_url }}">
+                            <button type="submit" class="dropdown-item d-flex align-items-center gap-2"
+                                    data-confirm-message="Clonar para uma nova invoice em rascunho?"
+                                    data-confirm-title="Clonar Invoice"
+                                    data-confirm-variant="primary">
+                                <i class="bi bi-copy text-primary"></i> Clonar Invoice
+                            </button>
+                        </form>
+                    </li>
+                    {% if invoice.status == 'FINALIZED' and not invoice.nota_fiscal %}
+                    <li>
+                        <form method="POST" action="{% url 'revert_invoice_to_draft' invoice.id %}" class="mb-0">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ back_url }}">
+                            <button type="submit" class="dropdown-item d-flex align-items-center gap-2"
+                                    data-confirm-message="Deseja voltar esta invoice para rascunho?"
+                                    data-confirm-title="Voltar a Rascunho"
+                                    data-confirm-variant="warning">
+                                <i class="bi bi-arrow-counterclockwise text-warning"></i> Reverter para Rascunho
+                            </button>
+                        </form>
+                    </li>
+                    {% endif %}
+                    {% if invoice.status == 'DRAFT' or invoice.status == 'FINALIZED' and invoice.can_be_canceled %}
+                    <li><hr class="dropdown-divider"></li>
+                    {% endif %}
+                    {% if invoice.status == 'DRAFT' %}
+                    <li>
+                        <form method="POST" action="{% url 'invoice_delete' invoice.id %}" class="mb-0">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ back_url }}">
+                            <button type="submit" class="dropdown-item d-flex align-items-center gap-2 text-danger"
+                                    data-confirm-message="Tem certeza que deseja excluir esta invoice ({{ invoice.invoice_number }})?"
+                                    data-confirm-title="Excluir Invoice"
+                                    data-confirm-variant="danger">
+                                <i class="bi bi-trash"></i> Excluir Rascunho
+                            </button>
+                        </form>
+                    </li>
+                    {% elif invoice.status == 'FINALIZED' and invoice.can_be_canceled %}
+                    <li>
+                        <form method="POST" action="{% url 'cancel_invoice' invoice.id %}" class="mb-0">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ back_url }}">
+                            <button type="submit" class="dropdown-item d-flex align-items-center gap-2 text-danger"
+                                    data-confirm-message="Tem certeza que deseja cancelar esta invoice e sua respectiva NFS-e, se houver?"
+                                    data-confirm-title="Cancelar Invoice"
+                                    data-confirm-variant="danger">
+                                <i class="bi bi-x-circle"></i> Cancelar Invoice
+                            </button>
+                        </form>
+                    </li>
+                    {% endif %}
+                </ul>
             </div>
         </div>
     </div>
-    <div class="col-md-8">
-        <div class="card shadow-sm">
-            <div class="card-header d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Itens da Invoice</h5>
+
+    <!-- 2-Column Content Grid -->
+    <div class="row g-4" id="invoice-details-row">
+        <!-- Left Column: Dados da Invoice & Fluxo de Emissão -->
+        <div class="col-12 col-lg-5">
+            <div class="card shadow-sm mb-4">
+                <div class="card-header bg-body-tertiary py-3">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-file-earmark-text me-2 text-primary"></i>Dados da Invoice</h5>
+                </div>
+                <div class="card-body">
+                    <!-- Total Badge -->
+                    <div class="p-3 mb-3 rounded bg-body-tertiary border d-flex justify-content-between align-items-center">
+                        <div>
+                            <span class="text-muted small d-block">Valor Total da Invoice:</span>
+                            <span class="fs-4 fw-bold font-monospace text-primary" id="invoice-total-badge">{{ invoice.currency }} {{ invoice.total_foreign|floatformat:2|intcomma }}</span>
+                        </div>
+                        <span class="badge {% if invoice.status == 'FINALIZED' %}bg-success{% elif invoice.status == 'PROCESSING' %}bg-warning-subtle text-warning-emphasis border border-warning{% elif invoice.status == 'CANCELED' %}bg-danger{% else %}bg-secondary{% endif %} fs-6">
+                            {{ invoice.get_status_display }}
+                        </span>
+                    </div>
+
+                    <!-- Metadata Display -->
+                    <div id="invoice-metadata-display" class="mb-3{% if metadata_form_invalid %} d-none{% endif %}">
+                        {% if metadata_saved %}
+                        <div class="alert alert-success alert-dismissible fade show py-2 small mb-2" role="alert">
+                            <i class="bi bi-check-circle-fill me-1 text-success"></i>Dados da invoice atualizados com sucesso.
+                            <button type="button" class="btn-close py-2" data-bs-dismiss="alert" aria-label="Fechar"></button>
+                        </div>
+                        {% endif %}
+                        <div class="d-flex justify-content-between align-items-center mb-1">
+                            <div><strong>Número da Invoice:</strong> <span class="font-monospace">{{ invoice.invoice_number }}</span></div>
+                            {% if invoice.status == 'DRAFT' %}
+                            <button type="button" class="btn btn-sm btn-link p-0 text-decoration-none" onclick="document.getElementById('invoice-metadata-edit').classList.remove('d-none'); document.getElementById('invoice-metadata-display').classList.add('d-none');" title="Editar dados da invoice">
+                                <i class="bi bi-pencil"></i> Editar
+                            </button>
+                            {% endif %}
+                        </div>
+                        <div class="mb-1"><strong>Cliente:</strong> {{ invoice.client.name }}</div>
+                        <div class="mb-1"><strong>Data de Emissão:</strong> {{ invoice.issue_date|date:"d/m/Y" }}</div>
+                        <div><strong>Moeda:</strong> <span class="font-monospace">{{ invoice.currency }}</span></div>
+                    </div>
+
+                    <!-- Metadata Edit Form (DRAFT only) -->
+                    {% if invoice.status == 'DRAFT' %}
+                    <form id="invoice-metadata-edit" class="{% if not metadata_form_invalid %}d-none {% endif %}mb-3 p-3 border rounded bg-body-tertiary" data-inline-error="true" hx-post="{% url 'htmx_update_invoice_metadata' invoice.id %}" hx-target="#invoice-details-root" hx-select="#invoice-details-root" hx-swap="outerHTML">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ back_url }}">
+                        {% if metadata_errors %}
+                        <div class="alert alert-danger py-2 small mb-2">
+                            <ul class="mb-0 ps-3">
+                                {% for field, errs in metadata_errors.items %}
+                                    {% for err in errs %}
+                                    <li>{{ err }}</li>
+                                    {% endfor %}
+                                {% endfor %}
+                            </ul>
+                        </div>
+                        {% endif %}
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold">Número da Invoice</label>
+                            <input type="text" name="invoice_number" class="form-control form-control-sm font-monospace" value="{{ invoice.invoice_number }}" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold">Cliente</label>
+                            <select name="client" class="form-select form-select-sm" required>
+                                {% for cl in all_clients %}
+                                <option value="{{ cl.id }}" {% if cl.id == invoice.client.id %}selected{% endif %}>{{ cl.name }}</option>
+                                {% endfor %}
+                            </select>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold">Data de Emissão</label>
+                            <input type="date" name="issue_date" class="form-control form-control-sm" value="{{ invoice.issue_date|date:'Y-m-d' }}" required>
+                        </div>
+                        <div class="mb-2">
+                            <label class="form-label small fw-semibold">Moeda</label>
+                            <input type="text" name="currency" class="form-control form-control-sm font-monospace" value="{{ invoice.currency }}" required>
+                        </div>
+                        <div class="d-flex gap-2 justify-content-end">
+                            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('invoice-metadata-edit').reset(); document.getElementById('invoice-metadata-edit').classList.add('d-none'); document.getElementById('invoice-metadata-display').classList.remove('d-none');">Cancelar</button>
+                            <button type="submit" class="btn btn-sm btn-primary">Salvar</button>
+                        </div>
+                    </form>
+                    {% endif %}
+
+                    <!-- PROMOTED PRIMARY LIFECYCLE CTA -->
+                    {% if invoice.status == 'PROCESSING' %}
+                    <hr>
+                    <div class="text-center p-3" hx-get="{% url 'invoice_detail' invoice.id %}" hx-trigger="every 2s" hx-target="#invoice-details-root" hx-select="#invoice-details-root" hx-swap="outerHTML">
+                        <div class="spinner-border text-primary mb-2" role="status">
+                            <span class="visually-hidden">Carregando...</span>
+                        </div>
+                        <h6 class="fw-bold">Processando...</h6>
+                        <p class="text-muted small mb-0">Esta página será atualizada automaticamente assim que a tarefa em segundo plano for concluída.</p>
+                    </div>
+                    {% elif invoice.status == 'DRAFT' %}
+                    <hr>
+                    <div class="p-3 border rounded bg-body-tertiary">
+                        <h6 class="fw-bold mb-2"><i class="bi bi-check2-circle me-1 text-primary"></i>Finalizar Invoice</h6>
+                        <form method="POST" action="{% url 'finalize_invoice' invoice.id %}">
+                            {% csrf_token %}
+                            <input type="hidden" name="next" value="{{ back_url }}">
+                            <div class="mb-2 form-check">
+                                <input class="form-check-input" type="checkbox" id="send_to_client_finalize" name="send_to_client" checked>
+                                <label class="form-check-label small" for="send_to_client_finalize">
+                                    Enviar Invoice para o Cliente por e-mail
+                                </label>
+                            </div>
+                            <div class="mb-3 form-check">
+                                <input class="form-check-input" type="checkbox" id="send_to_company_finalize" name="send_to_company" checked>
+                                <label class="form-check-label small" for="send_to_company_finalize">
+                                    Enviar Invoice para a Empresa por e-mail
+                                </label>
+                            </div>
+                            <button type="submit" class="btn btn-primary w-100 fw-semibold"
+                                    data-confirm-message="Tem certeza que deseja finalizar esta invoice? Após a finalização, ela não poderá mais ser editada como rascunho."
+                                    data-confirm-title="Finalizar Invoice"
+                                    data-confirm-variant="primary">
+                                <i class="bi bi-check2-circle me-1"></i> Finalizar Invoice
+                            </button>
+                        </form>
+                    </div>
+                    {% elif invoice.status == 'FINALIZED' %}
+                        <hr>
+                        {% if not invoice.nota_fiscal %}
+                        <div class="p-3 border rounded bg-body-tertiary">
+                            <h6 class="fw-bold mb-2"><i class="bi bi-file-earmark-arrow-up me-1 text-success"></i>Emitir NFS-e</h6>
+                            <form method="POST" action="{% url 'issue_nfse' invoice.id %}">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="{{ back_url }}">
+                                <div class="mb-2">
+                                    <label for="conversion_date_input" class="form-label text-muted small mb-1">Data de Conversão</label>
+                                    <input type="date" id="conversion_date_input" name="conversion_date" class="form-control form-control-sm" value="{{ invoice.issue_date|date:'Y-m-d' }}" 
+                                           hx-get="{% url 'htmx_fetch_exchange_rate' %}?currency={{ invoice.currency }}" 
+                                           hx-target="#exchange_rate_container">
+                                </div>
+                                <div class="mb-2" id="exchange_rate_container">
+                                    {% include 'core/partials/exchange_rate_input.html' with currency=invoice.currency rate=suggested_exchange_rate %}
+                                </div>
+
+                                <div class="mb-3 form-check">
+                                    <input class="form-check-input" type="checkbox" id="send_to_company" name="send_to_company" checked>
+                                    <label class="form-check-label small" for="send_to_company">
+                                        Enviar NFS-e para a Empresa por e-mail após verificação
+                                    </label>
+                                </div>
+                                <button type="submit" class="btn btn-success w-100 fw-semibold">
+                                    <i class="bi bi-file-earmark-arrow-up me-1"></i> Emitir NFS-e
+                                </button>
+                            </form>
+                            {% if latest_nfse_log and latest_nfse_log.erro_mensagem %}
+                            <div class="alert alert-danger mt-3 mb-0" role="alert">
+                                <strong class="d-block mb-1">Último erro na emissão da NFS-e:</strong>
+                                <div style="white-space: pre-wrap; font-size: 0.85em; max-height: 150px; overflow-y: auto;">{{ latest_nfse_log.erro_mensagem }}</div>
+                                <small class="text-muted d-block mt-1">{{ latest_nfse_log.created_at|date:"d/m/Y H:i" }} ({{ latest_nfse_log.origem }})</small>
+                            </div>
+                            {% endif %}
+                        </div>
+                        {% else %}
+                        <!-- NFS-e Associada Summary Box -->
+                        <div class="bg-body-tertiary p-3 rounded position-relative border">
+                            <div class="d-flex justify-content-between align-items-center mb-2 flex-wrap gap-1">
+                                <h6 class="mb-0 fw-bold">NFS-e #{{ invoice.nota_fiscal.nf_number }}</h6>
+                                <div class="d-flex gap-1">
+                                    {% if invoice.nota_fiscal.provider_type == 'NACIONAL' %}
+                                    <span class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle">
+                                        <i class="bi bi-bank me-1"></i>Sefin Nacional
+                                    </span>
+                                    {% else %}
+                                    <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle">
+                                        <i class="bi bi-geo-alt me-1"></i>Paulistana
+                                    </span>
+                                    {% endif %}
+                                    {% if invoice.nota_fiscal.is_canceled %}
+                                    <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">Cancelada</span>
+                                    {% else %}
+                                    <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle">Autorizada</span>
+                                    {% endif %}
+                                </div>
+                            </div>
+                            <ul class="list-unstyled small mb-3">
+                                {% if invoice.nota_fiscal.chave_acesso_nacional %}
+                                <li class="mb-1">
+                                    <strong>Chave Nacional:</strong>
+                                    <div class="font-monospace text-break small bg-body p-1 rounded border mt-1">{{ invoice.nota_fiscal.chave_acesso_nacional }}</div>
+                                </li>
+                                {% endif %}
+                                {% if invoice.nota_fiscal.verification_code %}
+                                <li class="mb-1"><strong>Cód. Verificação:</strong> <code>{{ invoice.nota_fiscal.verification_code }}</code></li>
+                                {% endif %}
+                                <li class="mb-1"><strong>Taxa de Câmbio:</strong> <span class="font-monospace">R$ {{ invoice.exchange_rate_to_brl|floatformat:4 }}</span></li>
+                                <li class="mb-1"><strong>Valor (BRL):</strong> <span class="font-monospace fw-bold">R$ {{ invoice.nota_fiscal.amount_brl|floatformat:2|intcomma }}</span></li>
+                            </ul>
+                            <div class="d-flex gap-2 flex-wrap mb-3">
+                                <a href="{% url 'nfse_detail' invoice.nota_fiscal.id %}?next={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-primary">
+                                    <i class="bi bi-eye me-1"></i>Ver Detalhes da NFS-e
+                                </a>
+                                {% if invoice.nota_fiscal.danfse_pdf %}
+                                <a href="{% url 'nfse_download_pdf' invoice.nota_fiscal.id %}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-primary">
+                                    <i class="bi bi-file-earmark-pdf me-1"></i>Baixar PDF
+                                </a>
+                                {% endif %}
+                                {% if invoice.nota_fiscal.xml_autorizacao %}
+                                <a href="{% url 'nfse_download_xml' invoice.nota_fiscal.id %}" target="_blank" rel="noopener noreferrer" class="btn btn-sm btn-outline-secondary">
+                                    <i class="bi bi-filetype-xml me-1"></i>XML
+                                </a>
+                                {% endif %}
+                            </div>
+                            <div class="small">
+                                <strong>Descrição enviada para a NFS-e:</strong>
+                                <div class="text-muted mt-1" style="white-space: pre-wrap; font-size: 0.85em; max-height: 120px; overflow-y: auto;">{{ invoice.nota_fiscal.description }}</div>
+                            </div>
+                        </div>
+                        {% endif %}
+                    {% endif %}
+
+                    <!-- Collapsible Accordion: Configurações Fiscais e Bancárias -->
+                    <div class="accordion mt-3" id="invoiceSecondaryAccordion">
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="headingSecondaryConfig">
+                                <button class="accordion-button {% if invoice.nota_fiscal %}collapsed{% endif %} py-2 small fw-semibold" type="button" data-bs-toggle="collapse" data-bs-target="#collapseSecondaryConfig" aria-expanded="{% if invoice.nota_fiscal %}false{% else %}true{% endif %}" aria-controls="collapseSecondaryConfig">
+                                    <i class="bi bi-sliders me-2 text-primary"></i>Configurações Fiscais e Bancárias
+                                </button>
+                            </h2>
+                            <div id="collapseSecondaryConfig" class="accordion-collapse collapse {% if not invoice.nota_fiscal %}show{% endif %}" aria-labelledby="headingSecondaryConfig" data-bs-parent="#invoiceSecondaryAccordion">
+                                <div class="accordion-body px-2 py-3">
+                                    {% include 'core/partials/invoice_bank_details.html' %}
+                                    {% include 'core/partials/invoice_nfse_description.html' %}
+                                    {% include 'core/partials/invoice_fiscal_codes.html' %}
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- Transmission Logs (Shown only if unlinked and logs exist) -->
+                    {% if not invoice.nota_fiscal and nfse_logs %}
+                    <div class="mt-3">
+                        <button class="btn btn-sm btn-outline-secondary w-100 d-flex justify-content-between align-items-center" type="button" data-bs-toggle="collapse" data-bs-target="#invoiceNfseLogsCollapse">
+                            <span><i class="bi bi-clock-history me-1"></i>Histórico de Transmissão ({{ nfse_logs|length }})</span>
+                            <i class="bi bi-chevron-down small"></i>
+                        </button>
+                        <div class="collapse mt-2" id="invoiceNfseLogsCollapse">
+                            <div class="list-group list-group-flush small">
+                                {% for log in nfse_logs %}
+                                <div class="list-group-item px-2 py-2 bg-body-tertiary rounded mb-1 border">
+                                    <div class="d-flex justify-content-between align-items-center mb-1">
+                                        {% if not log.is_success or log.display_error %}
+                                        <span class="badge bg-danger-subtle text-danger-emphasis border border-danger-subtle">Erro</span>
+                                        {% else %}
+                                        <span class="badge bg-success-subtle text-success-emphasis border border-success-subtle">Sucesso</span>
+                                        {% endif %}
+                                        <span class="text-muted font-monospace" style="font-size: 0.75rem;">{{ log.created_at|date:"d/m H:i:s" }}</span>
+                                    </div>
+                                    {% if log.display_error %}
+                                    <div class="text-danger small text-break">{{ log.display_error|truncatechars:180 }}</div>
+                                    {% endif %}
+                                    <div class="d-flex gap-2 mt-1">
+                                        {% if log.payload_enviado %}
+                                        <a href="javascript:void(0)" class="text-muted small" data-bs-toggle="collapse" data-bs-target="#invoice-log-env-{{ log.id }}">Payload Enviado</a>
+                                        {% endif %}
+                                        {% if log.payload_retorno %}
+                                        <a href="javascript:void(0)" class="text-muted small" data-bs-toggle="collapse" data-bs-target="#invoice-log-ret-{{ log.id }}">Payload Retorno</a>
+                                        {% endif %}
+                                    </div>
+                                    {% if log.payload_enviado %}
+                                    <pre class="collapse bg-body p-2 rounded small text-break mb-1 mt-1 font-monospace" id="invoice-log-env-{{ log.id }}" style="max-height: 150px; overflow-y: auto; font-size: 0.75rem;">{{ log.payload_enviado }}</pre>
+                                    {% endif %}
+                                    {% if log.payload_retorno %}
+                                    <pre class="collapse bg-body p-2 rounded small text-break mb-0 mt-1 font-monospace" id="invoice-log-ret-{{ log.id }}" style="max-height: 150px; overflow-y: auto; font-size: 0.75rem;">{{ log.payload_retorno }}</pre>
+                                    {% endif %}
+                                </div>
+                                {% endfor %}
+                            </div>
+                        </div>
+                    </div>
+                    {% endif %}
+                </div>
             </div>
-            <div class="card-body" id="invoice-items-container">
-                {% include 'core/partials/invoice_item_list.html' %}
+        </div>
+
+        <!-- Right Column: Itens da Invoice -->
+        <div class="col-12 col-lg-7">
+            <div class="card shadow-sm">
+                <div class="card-header bg-body-tertiary d-flex justify-content-between align-items-center py-3">
+                    <h5 class="mb-0 fw-bold"><i class="bi bi-list-check me-2 text-primary"></i>Itens da Invoice</h5>
+                </div>
+                <div class="card-body" id="invoice-items-container">
+                    {% include 'core/partials/invoice_item_list.html' %}
+                </div>
+                {% if invoice.status == 'DRAFT' %}
+                <div class="card-footer bg-transparent">
+                    <form hx-post="{% url 'htmx_add_invoice_item' invoice.id %}" hx-target="#invoice-items-container" hx-on::after-request="if(event.detail.successful) this.reset()" class="row g-2 align-items-end">
+                        <div class="col-12 col-sm-5">{{ item_form.description.label_tag }}{{ item_form.description }}</div>
+                        <div class="col-6 col-sm-2">{{ item_form.quantity.label_tag }}{{ item_form.quantity }}</div>
+                        <div class="col-6 col-sm-3">{{ item_form.unit_price_foreign.label_tag }}{{ item_form.unit_price_foreign }}</div>
+                        <div class="col-12 col-sm-2">
+                            <button type="submit" class="btn btn-primary w-100 fw-semibold d-flex align-items-center justify-content-center gap-1">
+                                <i class="bi bi-plus-lg"></i> Adicionar
+                            </button>
+                        </div>
+                    </form>
+                </div>
+                {% endif %}
             </div>
-            {% if invoice.status == 'DRAFT' %}
-            <div class="card-footer bg-transparent">
-                <form hx-post="{% url 'htmx_add_invoice_item' invoice.id %}" hx-target="#invoice-items-container" hx-on::after-request="if(event.detail.successful) this.reset()" class="row g-2 align-items-end">
-                    <div class="col-md-6">{{ item_form.description.label_tag }}{{ item_form.description }}</div>
-                    <div class="col-md-2">{{ item_form.quantity.label_tag }}{{ item_form.quantity }}</div>
-                    <div class="col-md-3">{{ item_form.unit_price_foreign.label_tag }}{{ item_form.unit_price_foreign }}</div>
-                    <div class="col-md-1"><button type="submit" class="btn btn-primary" aria-label="Adicionar item">+</button></div>
-                </form>
-            </div>
-            {% endif %}
         </div>
     </div>
 </div>
+
+<!-- Modal Enviar E-mail -->
 <div class="modal fade" id="emailModal" tabindex="-1" aria-labelledby="emailModalLabel" aria-hidden="true">
-  <div class="modal-dialog">
+  <div class="modal-dialog modal-dialog-centered">
     <div class="modal-content">
       <form method="POST" action="{% url 'email_invoice' invoice.id %}">
         {% csrf_token %}
+        <input type="hidden" name="next" value="{{ back_url }}">
         <div class="modal-header">
-          <h5 class="modal-title" id="emailModalLabel">Enviar Invoice / NFS-e por E-mail</h5>
+          <h5 class="modal-title" id="emailModalLabel"><i class="bi bi-envelope me-2 text-primary"></i>Enviar Invoice / NFS-e por E-mail</h5>
           <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
         </div>
         <div class="modal-body">
@@ -202,8 +433,10 @@
           {% endif %}
         </div>
         <div class="modal-footer">
-          <button type="button" class="btn btn-secondary" data-bs-dismiss="modal">Cancelar</button>
-          <button type="submit" class="btn btn-primary">Enviar E-mail</button>
+          <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+          <button type="submit" class="btn btn-primary fw-semibold d-flex align-items-center gap-1">
+            <i class="bi bi-send"></i> Enviar E-mail
+          </button>
         </div>
       </form>
     </div>

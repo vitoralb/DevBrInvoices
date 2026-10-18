@@ -1,9 +1,10 @@
-.PHONY: help dev-spawn dev-destroy dev-restart dev-test test prod-upgrade status
+.PHONY: help dev-spawn dev-destroy dev-reset dev-restart dev-test test prod-upgrade status
 
 help:
 	@echo "Available commands:"
-	@echo "  make dev-spawn    - Spawn an isolated development environment cloned from current prod state"
-	@echo "  make dev-destroy  - Destroy the development environment and wipe isolated dev data"
+	@echo "  make dev-spawn    - Spawn development environment (clean-slate or resume existing)"
+	@echo "  make dev-destroy  - Stop development environment containers (preserves dev_data for quick resume)"
+	@echo "  make dev-reset    - Wipe dev_data and recreate clean-slate development environment"
 	@echo "  make dev-restart  - Restart development web and Celery containers"
 	@echo "  make dev-test     - Run the test suite inside the development container (never pollutes prod)"
 	@echo "  make test         - Alias for dev-test"
@@ -15,6 +16,9 @@ dev-spawn:
 
 dev-destroy:
 	@./scripts/env.sh destroy-dev
+
+dev-reset:
+	@./scripts/env.sh reset-dev
 
 dev-restart:
 	@./scripts/env.sh restart-dev

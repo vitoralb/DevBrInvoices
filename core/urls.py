@@ -4,12 +4,24 @@ from . import views
 urlpatterns = [
     # Dashboard
     path("", views.dashboard_view, name="dashboard"),
+    path("historico/", views.consolidation_history_view, name="consolidation_history"),
     path(
         "htmx/consolidate/<int:pk>/",
         views.htmx_reconsolidate_month,
         name="htmx_reconsolidate_month",
     ),
     path("audit/", views.run_audit, name="run_audit"),
+    path("dashboard/sync-esocial/", views.sync_esocial_view, name="sync_esocial"),
+    path(
+        "dashboard/export-esocial-backup/",
+        views.export_esocial_backup_view,
+        name="export_esocial_backup",
+    ),
+    path(
+        "dashboard/import-esocial-backup/",
+        views.import_esocial_backup_view,
+        name="import_esocial_backup",
+    ),
     path("tasks/", views.tasks_view, name="tasks_view"),
     # Invoices
     path("invoices/", views.invoice_list, name="invoice_list"),
@@ -36,6 +48,26 @@ urlpatterns = [
         "invoices/<uuid:pk>/update-bank-details/",
         views.htmx_update_bank_details,
         name="htmx_update_bank_details",
+    ),
+    path(
+        "invoices/<uuid:pk>/update-nfse-description/",
+        views.htmx_update_nfse_description,
+        name="htmx_update_nfse_description",
+    ),
+    path(
+        "invoices/<uuid:pk>/update-fiscal-codes/",
+        views.htmx_update_fiscal_codes,
+        name="htmx_update_fiscal_codes",
+    ),
+    path(
+        "invoices/<uuid:pk>/update-metadata/",
+        views.htmx_update_invoice_metadata,
+        name="htmx_update_invoice_metadata",
+    ),
+    path(
+        "invoices/items/<uuid:item_pk>/edit/",
+        views.htmx_edit_invoice_item,
+        name="htmx_edit_invoice_item",
     ),
     path(
         "invoices/item/<uuid:item_pk>/delete/",
@@ -86,6 +118,11 @@ urlpatterns = [
         views.htmx_fetch_exchange_rate,
         name="htmx_fetch_exchange_rate",
     ),
+    # Clients
+    path("clients/", views.client_list, name="client_list"),
+    path("clients/new/", views.client_create, name="client_create"),
+    path("clients/<uuid:pk>/edit/", views.client_update, name="client_update"),
+    path("clients/<uuid:pk>/delete/", views.client_delete, name="client_delete"),
     # Templates
     path("templates/emails/", views.email_template_list, name="email_template_list"),
     path(

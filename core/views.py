@@ -10,9 +10,10 @@ from django.conf import settings
 from django.contrib import messages
 from django.contrib.admin.views.decorators import staff_member_required
 from django.contrib.auth.decorators import login_required
+from django.core.cache import cache
 from django.core.paginator import Paginator
 from django.db import transaction
-from django.db.models import F, Q, Sum
+from django.db.models import F, Q, Sum, Min, Max, Count
 from django.db.models.functions import Coalesce
 from django.http import (
     HttpResponse,
@@ -22,7 +23,10 @@ from django.http import (
     JsonResponse,
 )
 from django.utils.html import escape
+from django.utils.http import url_has_allowed_host_and_scheme
 from django.shortcuts import get_object_or_404, redirect, render
+from django.urls import reverse
+from urllib.parse import parse_qs, quote, urlencode, urlsplit, urlunsplit
 from django.views.decorators.http import require_GET, require_POST
 
 from .forms import (
@@ -32,6 +36,8 @@ from .forms import (
     InvoiceTemplateForm,
     InvoiceTemplateItemFormSet,
     CompanySettingsForm,
+    ClientForm,
+    InvoiceDraftMetadataForm,
 )
 from .models import (
     Client,
@@ -43,16 +49,42 @@ from .models import (
     EmailTemplate,
     InvoiceTemplate,
     InvoiceTemplateItem,
+    DEFAULT_NFSE_DESCRIPTION_TEMPLATE,
 )
 from .pdf_service import generate_pdf_bytes
 from .services import (
     audit_consolidations,
     attach_recommended_pl,
     fetch_exchange_rate,
+    is_month_closed,
     reconsolidate_with_prior,
 )
 
 logger = logging.getLogger(__name__)
+
+
+def _redirect_with_next(request, default_view, *args, **kwargs):
+    """Safely redirects to next param (GET or POST) if internal, otherwise default_view."""
+    next_url = request.POST.get("next") or request.GET.get("next")
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return redirect(next_url)
+    return redirect(default_view, *args, **kwargs)
+
+
+def _get_safe_next_url(request, default_url=None):
+    """Safely returns validated next param (GET or POST) if internal, otherwise default_url."""
+    next_url = request.POST.get("next") or request.GET.get("next")
+    if next_url and url_has_allowed_host_and_scheme(
+        url=next_url,
+        allowed_hosts={request.get_host()},
+        require_https=request.is_secure(),
+    ):
+        return next_url
+    return default_url
 
 
 # --- Dashboard & Consolidation ---
@@ -60,8 +92,112 @@ logger = logging.getLogger(__name__)
 
 @login_required
 def dashboard_view(request):
+    """Monthly detail dashboard view (landing page).
+
+    Displays detailed financial information for a selected month (defaults to current month):
+    - Block 1: Revenue & monthly metrics (RBT12, Fator R, Annex)
+    - Block 2: Amounts to pay this month (taxes & pró-labore from previous month)
+    - Block 3: Forecast for next month (ideal pró-labore, projected taxes & Fator R)
+    - Block 4: List of Invoices and NFS-es issued in the month
+    """
+    today = timezone.localdate()
+    current_month_first = today.replace(day=1)
+
+    month_str = request.GET.get("month", "").strip()
+    target_month = current_month_first
+    if month_str:
+        try:
+            target_month = datetime.strptime(month_str, "%Y-%m").date().replace(day=1)
+        except ValueError:
+            target_month = current_month_first
+
+    company = CompanySettings.load()
+    start_date = (
+        company.opening_date.replace(day=1)
+        if company and company.opening_date
+        else current_month_first
+    )
+    min_nf_date = NotaFiscal.objects.aggregate(Min("issue_date"))["issue_date__min"]
+    if min_nf_date and min_nf_date.replace(day=1) < start_date:
+        start_date = min_nf_date.replace(day=1)
+
+    # Ensure target consolidation exists and is up to date
+    cons = MonthlyConsolidation.objects.filter(month_year=target_month).first()
+    if not cons or cons.status == "OUTDATED":
+        cons = reconsolidate_with_prior(target_month)
+
+    # Build all consolidations dict for ideal PL calculations
+    all_cons_dict = {c.month_year: c for c in MonthlyConsolidation.objects.all()}
+    attach_recommended_pl(cons, all_cons_dict)
+
+    # Previous month (M-1) for amounts to pay this month (M)
+    prev_month = target_month - relativedelta(months=1)
+    prev_cons = all_cons_dict.get(prev_month)
+    if prev_cons and prev_cons.status == "OUTDATED":
+        prev_cons = reconsolidate_with_prior(prev_month)
+        all_cons_dict[prev_month] = prev_cons
+    if prev_cons:
+        attach_recommended_pl(prev_cons, all_cons_dict)
+
+    # Next month (M+1) for navigation
+    next_month = target_month + relativedelta(months=1)
+
+    # Invoices / Notas Fiscais in target month
+    nfs = (
+        NotaFiscal.objects.filter(
+            issue_date__year=target_month.year,
+            issue_date__month=target_month.month,
+        )
+        .select_related("invoice", "invoice__client")
+        .order_by("-issue_date", "-created_at")
+    )
+
+    pending_invoices = (
+        Invoice.objects.filter(
+            issue_date__year=target_month.year,
+            issue_date__month=target_month.month,
+            nota_fiscal__isnull=True,
+        )
+        .select_related("client")
+        .order_by("issue_date", "invoice_number")
+    )
+
+    # Build list of available months for navigation dropdown
+    max_month = max(current_month_first, target_month)
+    available_months = []
+    curr = max_month
+    while curr >= start_date:
+        available_months.append(curr)
+        curr -= relativedelta(months=1)
+
+    has_prev = prev_month >= start_date
+    has_next = target_month < max_month
+
+    return render(
+        request,
+        "core/mes_detail.html",
+        {
+            "consolidation": cons,
+            "prev_consolidation": prev_cons,
+            "target_month": target_month,
+            "prev_month": prev_month,
+            "next_month": next_month,
+            "current_month_first": current_month_first,
+            "notas_fiscais": nfs,
+            "pending_invoices": pending_invoices,
+            "available_months": available_months,
+            "has_prev": has_prev,
+            "has_next": has_next,
+            "company": company,
+        },
+    )
+
+
+@login_required
+def consolidation_history_view(request):
+    """Historical multi-month consolidation table view with filters."""
     qs = MonthlyConsolidation.objects.all()
-    today = date.today()
+    today = timezone.localdate()
 
     if "quick_filter" in request.GET or "start_date" in request.GET:
         quick_filter = request.GET.get("quick_filter", "")
@@ -135,6 +271,7 @@ def dashboard_view(request):
             "quick_filter": quick_filter,
             "start_date": start_date_val,
             "end_date": end_date_val,
+            "current_month_first": today.replace(day=1),
         },
     )
 
@@ -146,21 +283,54 @@ def htmx_reconsolidate_month(request, pk):
 
     actual_pl_str = request.POST.get("actual_pro_labore_paid", "").strip()
     actual_pl = None
+    force_pl = False
     if actual_pl_str:
+        if is_month_closed(consolidation.month_year):
+            return HttpResponseBadRequest(
+                "Meses passados são sincronizados via eSocial e não permitem edição manual."
+            )
         try:
             actual_pl = Decimal(actual_pl_str.replace(",", "."))
+            force_pl = True
         except Exception:
             return HttpResponseBadRequest("Valor de pró-labore inválido.")
 
     try:
         consolidation = reconsolidate_with_prior(
-            consolidation.month_year, actual_pro_labore=actual_pl
+            consolidation.month_year,
+            actual_pro_labore=actual_pl,
+            force_actual_pro_labore=force_pl,
         )
+        next_url = request.GET.get("next") or request.POST.get("next")
+        if next_url and url_has_allowed_host_and_scheme(
+            url=next_url,
+            allowed_hosts={request.get_host()},
+            require_https=request.is_secure(),
+        ):
+            if not request.headers.get("HX-Request"):
+                messages.success(
+                    request,
+                    f"Mês {consolidation.month_year.strftime('%m/%Y')} recalculado com sucesso.",
+                )
+                return redirect(next_url)
+            else:
+                response = HttpResponse()
+                response["HX-Redirect"] = next_url
+                return response
+
+        if request.headers.get("HX-Request"):
+            response = HttpResponse()
+            response["HX-Refresh"] = "true"
+            return response
+
         attach_recommended_pl(consolidation)
         return render(
             request,
             "core/partials/consolidation_row.html",
-            {"consolidation": consolidation},
+            {
+                "consolidation": consolidation,
+                "current_month_first": timezone.localdate().replace(day=1),
+            },
         )
     except Exception as e:
         logger.error("Error reconsolidating month %s: %s", consolidation.month_year, e)
@@ -185,7 +355,73 @@ def run_audit(request):
     except Exception as e:
         logger.error("Audit failed: %s", e)
         messages.error(request, "Erro ao executar a auditoria. Verifique os logs.")
-    return redirect("dashboard")
+    return _redirect_with_next(request, "dashboard")
+
+
+@login_required
+@staff_member_required
+@require_POST
+def sync_esocial_view(request):
+    try:
+        from core.services.esocial_services import sync_esocial_payroll
+
+        count, msg = sync_esocial_payroll(force=True)
+        if count > 0:
+            messages.success(request, msg)
+        else:
+            messages.info(request, msg)
+    except Exception as e:
+        logger.error("eSocial sync failed: %s", e)
+        messages.error(request, f"Erro ao sincronizar com o eSocial: {str(e)}")
+    return _redirect_with_next(request, "dashboard")
+
+
+@login_required
+@staff_member_required
+def export_esocial_backup_view(request):
+    try:
+        from core.services.esocial_services import export_esocial_backup
+
+        zip_bytes, filename = export_esocial_backup()
+        response = HttpResponse(zip_bytes, content_type="application/zip")
+        response["Content-Disposition"] = f'attachment; filename="{filename}"'
+        return response
+    except Exception as e:
+        logger.error("Failed to export eSocial backup: %s", e)
+        messages.error(request, f"Erro ao exportar backup do eSocial: {str(e)}")
+        return _redirect_with_next(request, "dashboard")
+
+
+@login_required
+@staff_member_required
+@require_POST
+def import_esocial_backup_view(request):
+    uploaded_files = request.FILES.getlist("backup_file")
+    if not uploaded_files:
+        messages.warning(
+            request,
+            "Nenhum arquivo enviado. Selecione um ou mais arquivos ZIP ou XML do eSocial.",
+        )
+        return _redirect_with_next(request, "dashboard")
+
+    try:
+        from core.services.esocial_services import import_esocial_backup
+
+        files_payload = [(f.read(), f.name) for f in uploaded_files]
+        res = import_esocial_backup(files_payload)
+        if res.get("count", 0) > 0:
+            messages.success(
+                request, res.get("message", "Importação realizada com sucesso.")
+            )
+        else:
+            messages.warning(
+                request, res.get("message", "Nenhum dado importado.")
+            )
+    except Exception as e:
+        logger.error("Failed to import eSocial backup: %s", e)
+        messages.error(request, f"Falha ao processar arquivo(s) do eSocial: {str(e)}")
+
+    return _redirect_with_next(request, "dashboard")
 
 
 # --- Invoices Management ---
@@ -200,7 +436,7 @@ def invoice_list(request):
     )
     company = CompanySettings.load()
 
-    invoices = Invoice.objects.select_related("client").all()
+    invoices = Invoice.objects.select_related("client", "nota_fiscal").all()
 
     if client_id:
         invoices = invoices.filter(client_id=client_id)
@@ -241,6 +477,8 @@ def invoice_list(request):
 def invoice_create(request):
     from .forms import InvoiceItemFormSet
 
+    safe_next = _get_safe_next_url(request, None)
+
     if request.method == "POST":
         form = InvoiceForm(request.POST)
         formset = InvoiceItemFormSet(request.POST)
@@ -260,21 +498,33 @@ def invoice_create(request):
                     item.save()
 
                 messages.success(request, "Invoice criada com sucesso.")
-                return redirect("invoice_detail", pk=invoice.id)
+                detail_url = reverse("invoice_detail", kwargs={"pk": invoice.id})
+                if safe_next:
+                    return redirect(f"{detail_url}?next={quote(safe_next)}")
+                return redirect(detail_url)
     else:
-        form = InvoiceForm()
+        initial = {"nfse_description": DEFAULT_NFSE_DESCRIPTION_TEMPLATE}
+        client_id = request.GET.get("client_id")
+        if client_id:
+            initial["client"] = client_id
+        form = InvoiceForm(initial=initial)
         formset = InvoiceItemFormSet()
 
     invoice_templates = InvoiceTemplate.objects.all()
     return render(
         request,
         "core/invoice_form.html",
-        {"form": form, "formset": formset, "invoice_templates": invoice_templates},
+        {
+            "form": form,
+            "formset": formset,
+            "invoice_templates": invoice_templates,
+            "next_url": safe_next or "",
+        },
     )
 
 
 @login_required
-def invoice_detail(request, pk):
+def invoice_detail(request, pk, extra_context=None):
     invoice = get_object_or_404(Invoice, pk=pk)
     item_form = InvoiceItemForm()
     company = CompanySettings.load()
@@ -291,17 +541,26 @@ def invoice_detail(request, pk):
             pass
 
     latest_nfse_log = invoice.nfse_logs.order_by("-created_at").first()
+    nfse_logs = invoice.nfse_logs.order_by("-created_at")[:10]
+    back_url = _get_safe_next_url(request, reverse("invoice_list"))
+
+    context = {
+        "invoice": invoice,
+        "item_form": item_form,
+        "company": company,
+        "suggested_exchange_rate": suggested_exchange_rate,
+        "latest_nfse_log": latest_nfse_log,
+        "nfse_logs": nfse_logs,
+        "all_clients": Client.objects.all(),
+        "back_url": back_url,
+    }
+    if extra_context:
+        context.update(extra_context)
 
     return render(
         request,
         "core/invoice_detail.html",
-        {
-            "invoice": invoice,
-            "item_form": item_form,
-            "company": company,
-            "suggested_exchange_rate": suggested_exchange_rate,
-            "latest_nfse_log": latest_nfse_log,
-        },
+        context,
     )
 
 
@@ -314,7 +573,7 @@ def invoice_delete(request, pk):
         messages.success(request, "Invoice excluída com sucesso.")
     else:
         messages.error(request, "Apenas invoices em rascunho podem ser excluídas.")
-    return redirect("invoice_list")
+    return _redirect_with_next(request, "invoice_list")
 
 
 @login_required
@@ -331,7 +590,7 @@ def revert_invoice_to_draft(request, pk):
             request,
             "Apenas invoices finalizadas sem NFS-e podem ser revertidas para rascunho.",
         )
-    return redirect("invoice_detail", pk=invoice.id)
+    return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
 
 @login_required
@@ -364,6 +623,43 @@ def htmx_add_invoice_item(request, pk):
 
 
 @login_required
+def htmx_edit_invoice_item(request, item_pk):
+    item = get_object_or_404(InvoiceItem.objects.select_related("invoice"), pk=item_pk)
+    invoice = item.invoice
+    if invoice.status != "DRAFT":
+        return HttpResponseForbidden(
+            "Apenas itens de invoices em rascunho podem ser editados."
+        )
+
+    if request.method == "POST":
+        form = InvoiceItemForm(request.POST, instance=item)
+        if form.is_valid():
+            item = form.save(commit=False)
+            from .utils.macros import apply_invoice_macros
+
+            item.description = apply_invoice_macros(
+                item.description, invoice, language="en"
+            )
+            item.save()
+            response = render(
+                request,
+                "core/partials/invoice_item_list.html",
+                {"invoice": invoice},
+            )
+            response["HX-Trigger"] = "itemUpdated"
+            return response
+        else:
+            return HttpResponseBadRequest("Dados do formulário inválidos.")
+
+    # GET request - return inline edit row
+    return render(
+        request,
+        "core/partials/invoice_item_row_edit.html",
+        {"item": item, "invoice": invoice},
+    )
+
+
+@login_required
 @require_POST
 def htmx_delete_invoice_item(request, item_pk):
     item = get_object_or_404(InvoiceItem, pk=item_pk)
@@ -371,6 +667,38 @@ def htmx_delete_invoice_item(request, item_pk):
     if invoice.status == "DRAFT":
         item.delete()
     return render(request, "core/partials/invoice_item_list.html", {"invoice": invoice})
+
+
+@login_required
+@require_POST
+def htmx_update_invoice_metadata(request, pk):
+    invoice = get_object_or_404(Invoice, pk=pk)
+    if invoice.status != "DRAFT":
+        return HttpResponseForbidden(
+            "Apenas invoices em rascunho podem ser modificadas."
+        )
+    form = InvoiceDraftMetadataForm(request.POST, instance=invoice)
+    metadata_form_invalid = False
+    metadata_errors = None
+    metadata_saved = False
+    if form.is_valid():
+        form.save()
+        metadata_saved = True
+    else:
+        metadata_form_invalid = True
+        metadata_errors = form.errors
+
+    if request.headers.get("HX-Request"):
+        return invoice_detail(
+            request,
+            pk,
+            extra_context={
+                "metadata_form_invalid": metadata_form_invalid,
+                "metadata_errors": metadata_errors,
+                "metadata_saved": metadata_saved,
+            },
+        )
+    return _redirect_with_next(request, "invoice_detail", pk=pk)
 
 
 @login_required
@@ -415,12 +743,111 @@ def htmx_update_bank_details(request, pk):
 
 @login_required
 @require_POST
+def htmx_update_nfse_description(request, pk):
+    from django.http import HttpResponseBadRequest
+    from .forms import VALID_INVOICE_MACROS, validate_macros
+    from django.core.exceptions import ValidationError
+
+    invoice = get_object_or_404(Invoice, pk=pk)
+    if invoice.status != "DRAFT":
+        return HttpResponseBadRequest(
+            "Apenas invoices em rascunho podem ter a descrição da NFS-e alterada."
+        )
+
+    new_text = request.POST.get("nfse_description", "").strip()
+    error_message = None
+    if not new_text:
+        error_message = "A descrição da NFS-e é obrigatória."
+    else:
+        try:
+            validate_macros(new_text, VALID_INVOICE_MACROS)
+        except ValidationError as e:
+            error_message = e.message
+
+    if error_message:
+        return render(
+            request,
+            "core/partials/invoice_nfse_description.html",
+            {
+                "invoice": invoice,
+                "error_message": error_message,
+                "draft_text": new_text,
+                "is_editing": True,
+            },
+            status=400,
+        )
+
+    invoice.nfse_description = new_text
+    invoice.save(update_fields=["nfse_description", "updated_at"])
+    return render(
+        request,
+        "core/partials/invoice_nfse_description.html",
+        {"invoice": invoice},
+    )
+
+
+@login_required
+@require_POST
+def htmx_update_fiscal_codes(request, pk):
+    from django.http import HttpResponseBadRequest
+
+    invoice = get_object_or_404(Invoice, pk=pk)
+    if invoice.status != "DRAFT":
+        return HttpResponseBadRequest(
+            "Apenas invoices em rascunho podem ter os códigos fiscais alterados."
+        )
+
+    trib_nac = request.POST.get("codigo_tributacao_nacional", "").strip()
+    serv_mun = request.POST.get("codigo_servico_municipio", "").strip()
+    nbs = request.POST.get("codigo_nbs", "").strip()
+
+    error_message = None
+    if not trib_nac:
+        error_message = "O Código de Tributação Nacional é obrigatório."
+    elif not nbs:
+        error_message = "O Código NBS é obrigatório."
+
+    if error_message:
+        return render(
+            request,
+            "core/partials/invoice_fiscal_codes.html",
+            {
+                "invoice": invoice,
+                "error_message": error_message,
+                "draft_trib_nac": trib_nac,
+                "draft_serv_mun": serv_mun,
+                "draft_nbs": nbs,
+                "is_editing": True,
+            },
+            status=400,
+        )
+
+    invoice.codigo_tributacao_nacional = trib_nac
+    invoice.codigo_servico_municipio = serv_mun
+    invoice.codigo_nbs = nbs
+    invoice.save(
+        update_fields=[
+            "codigo_tributacao_nacional",
+            "codigo_servico_municipio",
+            "codigo_nbs",
+            "updated_at",
+        ]
+    )
+    return render(
+        request,
+        "core/partials/invoice_fiscal_codes.html",
+        {"invoice": invoice},
+    )
+
+
+@login_required
+@require_POST
 def finalize_invoice(request, pk):
     invoice = get_object_or_404(Invoice, pk=pk)
 
     if invoice.status != "DRAFT":
         messages.error(request, "Apenas invoices em rascunho podem ser finalizadas.")
-        return redirect("invoice_detail", pk=invoice.id)
+        return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
     send_to_client = request.POST.get("send_to_client") == "on"
     send_to_company = request.POST.get("send_to_company") == "on"
@@ -432,10 +859,10 @@ def finalize_invoice(request, pk):
         invoice.id, send_to_client=send_to_client, send_to_company=send_to_company
     )
     invoice.task_id = task.id
-    invoice.save()
+    invoice.save(update_fields=["status", "task_id", "updated_at"])
 
     messages.success(request, "Processo de finalização iniciado em segundo plano.")
-    return redirect("invoice_detail", pk=invoice.id)
+    return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
 
 @login_required
@@ -445,13 +872,13 @@ def cancel_invoice(request, pk):
 
     if invoice.status == "CANCELED":
         messages.error(request, "Esta invoice já foi cancelada.")
-        return redirect("invoice_detail", pk=invoice.id)
+        return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
     if invoice.status == "DRAFT":
         messages.error(
             request, "Invoices em rascunho devem ser excluídas, não canceladas."
         )
-        return redirect("invoice_detail", pk=invoice.id)
+        return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
     if (
         hasattr(invoice, "nota_fiscal")
@@ -462,17 +889,17 @@ def cancel_invoice(request, pk):
             request,
             "A NFS-e vinculada a esta invoice foi autorizada há mais de 24 horas e não pode ser cancelada diretamente pelo sistema.",
         )
-        return redirect("invoice_detail", pk=invoice.id)
+        return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
     invoice.status = "PROCESSING"
     from .tasks import cancel_invoice_task
 
     task = cancel_invoice_task.delay(invoice.id)
     invoice.task_id = task.id
-    invoice.save()
+    invoice.save(update_fields=["status", "task_id", "updated_at"])
 
     messages.success(request, "Processo de cancelamento iniciado em segundo plano.")
-    return redirect("invoice_detail", pk=invoice.id)
+    return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
 
 @login_required
@@ -482,12 +909,12 @@ def issue_nfse(request, pk):
 
     if invoice.status != "FINALIZED":
         messages.error(request, "Apenas invoices finalizadas podem ter NFS-e emitida.")
-        return redirect("invoice_detail", pk=invoice.id)
+        return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
     exchange_rate_str = request.POST.get("exchange_rate")
     if not exchange_rate_str:
         messages.error(request, "A taxa de câmbio é obrigatória para emissão da NFS-e.")
-        return redirect("invoice_detail", pk=invoice.id)
+        return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
     try:
         exchange_rate = Decimal(exchange_rate_str.replace(",", "."))
@@ -495,7 +922,7 @@ def issue_nfse(request, pk):
             raise ValueError()
     except Exception:
         messages.error(request, "Taxa de câmbio inválida.")
-        return redirect("invoice_detail", pk=invoice.id)
+        return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
     send_to_company = request.POST.get("send_to_company") == "on"
     send_to_client = request.POST.get("send_to_client") == "on"
@@ -510,10 +937,10 @@ def issue_nfse(request, pk):
         send_to_client=send_to_client,
     )
     invoice.task_id = task.id
-    invoice.save()
+    invoice.save(update_fields=["status", "task_id", "updated_at"])
 
     messages.success(request, "Processo de emissão da NFS-e iniciado em segundo plano.")
-    return redirect("invoice_detail", pk=invoice.id)
+    return _redirect_with_next(request, "invoice_detail", pk=invoice.id)
 
 
 @login_required
@@ -557,6 +984,10 @@ def clone_invoice(request, pk):
         issue_date=date.today(),
         currency=original.currency,
         bank_details=original.bank_details,
+        nfse_description=original.nfse_description,
+        codigo_tributacao_nacional=original.codigo_tributacao_nacional,
+        codigo_servico_municipio=original.codigo_servico_municipio,
+        codigo_nbs=original.codigo_nbs,
     )
     for item in original.items.all():
         InvoiceItem.objects.create(
@@ -599,7 +1030,7 @@ def email_invoice(request, pk):
         include_nfse=include_nfse,
     )
     invoice.task_id = task.id
-    invoice.save()
+    invoice.save(update_fields=["status", "task_id", "updated_at"])
 
     messages.success(request, "Envio de e-mail iniciado em segundo plano.")
     return redirect("invoice_detail", pk=invoice.id)
@@ -650,7 +1081,7 @@ def tasks_view(request):
             invoice.task_id = ""
             invoice.task_retry_count = 0
             invoice.status = "FINALIZED"
-            invoice.save()
+            invoice.save(update_fields=["task_id", "task_retry_count", "status", "updated_at"])
             messages.success(
                 request,
                 f"Tentativas canceladas para a invoice {invoice.invoice_number}.",
@@ -688,7 +1119,7 @@ def force_process_daily_invoices(request):
     messages.success(
         request, "Processamento diário de invoices iniciado em segundo plano."
     )
-    return redirect("invoice_list")
+    return _redirect_with_next(request, "invoice_list")
 
 
 from django.http import HttpResponse
@@ -699,20 +1130,40 @@ from .tasks import import_nfses_task
 @login_required
 def nfse_list(request):
     query = request.GET.get("q", "").strip()
-    notas_qs = NotaFiscal.objects.all().order_by(
-        F("data_hora_autorizacao").desc(nulls_last=True),
-        "-issue_date",
-        "-created_at",
+    provider_filter = request.GET.get("provider", "").strip().upper()
+    status_filter = request.GET.get("status", "").strip().upper()
+
+    notas_qs = (
+        NotaFiscal.objects.select_related("invoice", "invoice__client")
+        .all()
+        .order_by(
+            F("data_hora_autorizacao").desc(nulls_last=True),
+            "-issue_date",
+            "-created_at",
+        )
     )
+
     if query:
         notas_qs = notas_qs.filter(
             Q(nf_number__icontains=query)
             | Q(chave_acesso_nacional__icontains=query)
             | Q(verification_code__icontains=query)
             | Q(description__icontains=query)
+            | Q(invoice__invoice_number__icontains=query)
+            | Q(invoice__client__name__icontains=query)
         )
 
-    paginator = Paginator(notas_qs, 10)
+    if provider_filter == "NACIONAL":
+        notas_qs = notas_qs.filter(chave_acesso_nacional__regex=r"^\d{7}2")
+    elif provider_filter == "PAULISTANA":
+        notas_qs = notas_qs.exclude(chave_acesso_nacional__regex=r"^\d{7}2")
+
+    if status_filter == "ACTIVE":
+        notas_qs = notas_qs.filter(is_canceled=False)
+    elif status_filter == "CANCELED":
+        notas_qs = notas_qs.filter(is_canceled=True)
+
+    paginator = Paginator(notas_qs, 15)
     page_number = request.GET.get("page")
     page_obj = paginator.get_page(page_number)
 
@@ -724,6 +1175,8 @@ def nfse_list(request):
             "page_obj": page_obj,
             "notas": page_obj,
             "query": query,
+            "selected_provider": provider_filter,
+            "selected_status": status_filter,
             "company": company,
         },
     )
@@ -738,17 +1191,11 @@ def nfse_import(request):
     task = import_nfses_task.delay(provider)
 
     # Return HTMX polling snippet
-    return HttpResponse(f"""
-        <div class="modal-content" id="importModalContent">
-            <div class="modal-body text-center py-5">
-                <div class="spinner-border text-primary mb-3" role="status"></div>
-                <h5>Importando NFS-es...</h5>
-                <p class="text-muted" hx-get="/nfse/import/status/{task.id}/" hx-trigger="every 2s" hx-target="#importModalContent" hx-swap="outerHTML">
-                    Aguarde enquanto consultamos o provedor. Pode levar alguns minutos.
-                </p>
-            </div>
-        </div>
-    """)
+    return render(
+        request,
+        "core/partials/import_status.html",
+        {"state": "pending", "task_id": task.id},
+    )
 
 
 @login_required
@@ -798,12 +1245,34 @@ def nfse_detail(request, pk):
         if not nf.invoice
         else []
     )
+    nfse_logs = list(nf.nfse_logs.order_by("-created_at")[:20])
+    if not nfse_logs and nf.invoice:
+        nfse_logs = list(nf.invoice.nfse_logs.order_by("-created_at")[:20])
+    nf_events = list(nf.events.order_by("-created_at"))
+
+    is_canceling = False
+    if not nf.is_canceled:
+        if cache.get(f"nfse_canceling_{nf.pk}"):
+            is_canceling = True
+        elif nf.invoice and nf.invoice.status == "PROCESSING":
+            is_canceling = True
+    else:
+        cache.delete(f"nfse_canceling_{nf.pk}")
+
+    has_errors = any(not log.is_success or bool(log.display_error) for log in nfse_logs)
+    back_url = _get_safe_next_url(request, reverse("nfse_list"))
+
     return render(
         request,
         "core/nfse_detail.html",
         {
             "nf": nf,
             "invoices": invoices,
+            "nfse_logs": nfse_logs,
+            "nf_events": nf_events,
+            "is_canceling": is_canceling,
+            "back_url": back_url,
+            "has_errors": has_errors,
         },
     )
 
@@ -819,7 +1288,7 @@ def nfse_refresh(request, pk):
         messages.success(request, msg)
     else:
         messages.error(request, msg)
-    return redirect("nfse_detail", pk=pk)
+    return _redirect_with_next(request, "nfse_detail", pk=pk)
 
 
 @login_required
@@ -838,7 +1307,7 @@ def nfse_link_invoice(request, pk):
             nf.invoice = invoice
             nf.save()
             messages.success(request, "Invoice vinculada com sucesso.")
-    return redirect("nfse_detail", pk=pk)
+    return _redirect_with_next(request, "nfse_detail", pk=pk)
 
 
 @login_required
@@ -848,14 +1317,14 @@ def nfse_cancel(request, pk):
 
     if nf.is_canceled:
         messages.error(request, "Esta NFS-e já está cancelada.")
-        return redirect("nfse_detail", pk=pk)
+        return _redirect_with_next(request, "nfse_detail", pk=pk)
 
     if not nf.can_be_canceled:
         messages.error(
             request,
             "Esta NFS-e foi autorizada há mais de 24 horas e não pode ser cancelada diretamente pelo sistema.",
         )
-        return redirect("nfse_detail", pk=pk)
+        return _redirect_with_next(request, "nfse_detail", pk=pk)
 
     if nf.invoice:
         # If there's an invoice, trigger the invoice cancel workflow which cancels both
@@ -864,7 +1333,7 @@ def nfse_cancel(request, pk):
         nf.invoice.status = "PROCESSING"
         task = cancel_invoice_task.delay(nf.invoice.id)
         nf.invoice.task_id = task.id
-        nf.invoice.save()
+        nf.invoice.save(update_fields=["status", "task_id", "updated_at"])
         messages.success(
             request,
             "Processo de cancelamento da Invoice e NFS-e iniciado em segundo plano.",
@@ -879,7 +1348,8 @@ def nfse_cancel(request, pk):
             "Processo de cancelamento da NFS-e avulsa iniciado em segundo plano.",
         )
 
-    return redirect("nfse_detail", pk=pk)
+    cache.set(f"nfse_canceling_{nf.pk}", True, timeout=60)
+    return _redirect_with_next(request, "nfse_detail", pk=pk)
 
 
 @login_required
@@ -973,23 +1443,33 @@ def nfse_download_xml(request, pk):
 
 @login_required
 def email_template_list(request):
-    email_templates = EmailTemplate.objects.all()
+    active_tab = request.GET.get("tab", "emails")
+    invoice_templates = InvoiceTemplate.objects.prefetch_related("items").all()
+    email_templates = EmailTemplate.objects.all().order_by("name")
     return render(
         request,
         "core/email_template_list.html",
         {
+            "invoice_templates": invoice_templates,
             "email_templates": email_templates,
+            "active_tab": active_tab,
         },
     )
 
 
 @login_required
 def invoice_template_list(request):
-    invoice_templates = InvoiceTemplate.objects.all()
+    active_tab = request.GET.get("tab", "invoices")
+    invoice_templates = InvoiceTemplate.objects.prefetch_related("items").all()
+    email_templates = EmailTemplate.objects.all().order_by("name")
     return render(
         request,
         "core/invoice_template_list.html",
-        {"invoice_templates": invoice_templates},
+        {
+            "invoice_templates": invoice_templates,
+            "email_templates": email_templates,
+            "active_tab": active_tab,
+        },
     )
 
 
@@ -1019,7 +1499,9 @@ def invoice_template_create(request):
             messages.success(request, "Modelo de invoice criado com sucesso.")
             return redirect("invoice_template_list")
     else:
-        form = InvoiceTemplateForm()
+        form = InvoiceTemplateForm(
+            initial={"nfse_description": DEFAULT_NFSE_DESCRIPTION_TEMPLATE}
+        )
         formset = InvoiceTemplateItemFormSet()
     return render(
         request, "core/invoice_template_form.html", {"form": form, "formset": formset}
@@ -1052,9 +1534,7 @@ def invoice_template_delete(request, pk):
         template.delete()
         messages.success(request, "Modelo de invoice excluído com sucesso.")
         return redirect("invoice_template_list")
-    return render(
-        request, "core/invoice_template_confirm_delete.html", {"template": template}
-    )
+    return redirect("invoice_template_list")
 
 
 @login_required
@@ -1071,6 +1551,10 @@ def htmx_get_invoice_template(request, pk):
         {
             "currency": template.currency,
             "bank_details": template.bank_details,
+            "nfse_description": template.nfse_description,
+            "codigo_tributacao_nacional": template.codigo_tributacao_nacional,
+            "codigo_servico_municipio": template.codigo_servico_municipio,
+            "codigo_nbs": template.codigo_nbs,
             "items": items,
         }
     )
@@ -1082,28 +1566,35 @@ def remove_certificate_view(request):
     company = CompanySettings.load()
     if not company:
         messages.error(request, "Configurações da empresa não encontradas.")
-        return redirect("company_settings")
+        return _redirect_with_next(request, "company_settings")
 
     company.pfx_cert_pem = None
     company.pfx_key_pem = None
     company.certificate_valid_until = None
     company.save()
     messages.success(request, "Certificado digital removido com sucesso.")
-    return redirect("company_settings")
+    return _redirect_with_next(request, "company_settings")
 
 
 @login_required
 def company_settings_view(request):
     company = CompanySettings.load()
+    safe_next = _get_safe_next_url(request, None)
     if request.method == "POST":
         form = CompanySettingsForm(request.POST, request.FILES, instance=company)
         if form.is_valid():
             form.save()
+            from core.middleware import COMPANY_SETTINGS_CACHE_KEY
+            cache.delete(COMPANY_SETTINGS_CACHE_KEY)
             messages.success(request, "Configurações da empresa atualizadas.")
-            return redirect("company_settings")
+            return _redirect_with_next(request, "company_settings")
     else:
         form = CompanySettingsForm(instance=company)
-    return render(request, "core/company_settings_form.html", {"form": form})
+    return render(
+        request,
+        "core/company_settings_form.html",
+        {"form": form, "next_url": safe_next or ""},
+    )
 
 
 import requests
@@ -1139,3 +1630,75 @@ def api_cnpj_view(request, cnpj):
         response.raise_for_status()
     except Exception as e:
         return JsonResponse({"error": str(e)}, status=500)
+
+
+# --- Client Management ---
+
+
+@login_required
+def client_list(request):
+    clients = Client.objects.annotate(invoices_count=Count("invoices")).order_by("name")
+    return render(request, "core/client_list.html", {"clients": clients})
+
+
+@login_required
+def client_create(request):
+    safe_next = _get_safe_next_url(request, None)
+    if request.method == "POST":
+        form = ClientForm(request.POST)
+        if form.is_valid():
+            client = form.save()
+            messages.success(request, f"Cliente '{client.name}' cadastrado com sucesso.")
+            if safe_next:
+                parsed = urlsplit(safe_next)
+                qs = parse_qs(parsed.query, keep_blank_values=True)
+                qs["client_id"] = [str(client.id)]
+                new_query = urlencode(qs, doseq=True)
+                target = urlunsplit(
+                    (parsed.scheme, parsed.netloc, parsed.path, new_query, parsed.fragment)
+                )
+                return redirect(target)
+            return redirect("client_list")
+    else:
+        form = ClientForm()
+    return render(
+        request, "core/client_form.html", {"form": form, "next_url": safe_next or ""}
+    )
+
+
+@login_required
+def client_update(request, pk):
+    client = get_object_or_404(Client, pk=pk)
+    safe_next = _get_safe_next_url(request, None)
+    if request.method == "POST":
+        form = ClientForm(request.POST, instance=client)
+        if form.is_valid():
+            client = form.save()
+            messages.success(request, f"Cliente '{client.name}' atualizado com sucesso.")
+            if safe_next:
+                return redirect(safe_next)
+            return redirect("client_list")
+    else:
+        form = ClientForm(instance=client)
+    return render(
+        request,
+        "core/client_form.html",
+        {"form": form, "client": client, "next_url": safe_next or ""},
+    )
+
+
+@login_required
+@require_POST
+def client_delete(request, pk):
+    client = get_object_or_404(Client, pk=pk)
+    invoice_count = client.invoices.count()
+    if invoice_count > 0:
+        messages.error(
+            request,
+            f"Não é possível excluir o cliente '{client.name}' porque ele possui "
+            f"{invoice_count} invoice(s) vinculada(s).",
+        )
+    else:
+        client.delete()
+        messages.success(request, f"Cliente '{client.name}' excluído com sucesso.")
+    return _redirect_with_next(request, "client_list")

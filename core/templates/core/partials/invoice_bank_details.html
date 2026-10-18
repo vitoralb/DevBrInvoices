@@ -9,20 +9,22 @@
     </div>
 
     {% if invoice.status == 'DRAFT' %}
-    <form id="bank-details-edit-form" class="d-none mb-2" hx-post="{% url 'htmx_update_bank_details' invoice.id %}" hx-target="#invoice-bank-details-wrapper" hx-swap="outerHTML">
+    <form id="bank-details-edit-form" class="d-none mb-2" data-inline-error="true" hx-post="{% url 'htmx_update_bank_details' invoice.id %}" hx-target="#invoice-bank-details-wrapper" hx-swap="outerHTML">
         {% csrf_token %}
         <div class="mb-2">
             <textarea name="bank_details" class="form-control form-control-sm" rows="4" placeholder="Dados bancários (suporta Markdown)...">{{ invoice.bank_details }}</textarea>
             <small class="text-muted">Suporta formatação em Markdown (negrito, itálico, listas, etc.).</small>
         </div>
-        <button type="submit" class="btn btn-sm btn-primary">Salvar</button>
-        <button type="button" class="btn btn-sm btn-secondary" onclick="document.getElementById('bank-details-edit-form').classList.add('d-none'); document.getElementById('bank-details-content').classList.remove('d-none');">Cancelar</button>
+        <div class="d-flex gap-2 justify-content-end">
+            <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('bank-details-edit-form').reset(); document.getElementById('bank-details-edit-form').classList.add('d-none'); document.getElementById('bank-details-content').classList.remove('d-none');">Cancelar</button>
+            <button type="submit" class="btn btn-sm btn-primary">Salvar</button>
+        </div>
     </form>
     {% endif %}
 
-    <div id="bank-details-content" class="p-2 rounded bg-light border">
+    <div id="bank-details-content" class="p-2 rounded bg-body-tertiary border">
         {% if invoice.bank_details %}
-            <div class="markdown-preview small text-dark">{{ invoice.bank_details_html }}</div>
+            <div class="markdown-preview small text-body">{{ invoice.bank_details_html }}</div>
         {% else %}
             <span class="text-muted small fst-italic">Nenhum dado bancário informado.</span>
         {% endif %}

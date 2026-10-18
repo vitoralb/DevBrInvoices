@@ -1,33 +1,152 @@
 {% extends 'core/base.html' %}
+{% block title %}Modelos (Templates) - {{ PROJECT_NAME }}{% endblock %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Invoice Templates</h2>
+<div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-4">
+    <h2 class="mb-0 fw-bold">Modelos (Templates)</h2>
+    <a href="{% url 'invoice_template_create' %}" class="btn btn-primary fw-semibold d-inline-flex align-items-center gap-1">
+        <i class="bi bi-plus-lg"></i> Novo Modelo de Invoice
+    </a>
 </div>
 
-<div class="row">
-    <div class="col-md-12 mb-4">
+<ul class="nav nav-pills mb-4" id="templateTabs" role="tablist">
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if active_tab != 'emails' %}active{% endif %}" id="pills-invoices-tab" data-bs-toggle="pill" data-bs-target="#pills-invoices" type="button" role="tab" aria-controls="pills-invoices" aria-selected="{% if active_tab != 'emails' %}true{% else %}false{% endif %}">
+            <i class="bi bi-file-earmark-text me-1"></i> Modelos de Invoice ({{ invoice_templates|length }})
+        </button>
+    </li>
+    <li class="nav-item" role="presentation">
+        <button class="nav-link {% if active_tab == 'emails' %}active{% endif %}" id="pills-emails-tab" data-bs-toggle="pill" data-bs-target="#pills-emails" type="button" role="tab" aria-controls="pills-emails" aria-selected="{% if active_tab == 'emails' %}true{% else %}false{% endif %}">
+            <i class="bi bi-envelope me-1"></i> Modelos de E-mail ({{ email_templates|length }})
+        </button>
+    </li>
+</ul>
+
+<div class="tab-content" id="templateTabsContent">
+    <!-- Tab 1: Invoice Templates -->
+    <div class="tab-pane fade {% if active_tab != 'emails' %}show active{% endif %}" id="pills-invoices" role="tabpanel" aria-labelledby="pills-invoices-tab" tabindex="0">
         <div class="card shadow-sm">
-            <div class="card-header bg-dark text-white d-flex justify-content-between align-items-center">
-                <h5 class="mb-0">Invoice Templates</h5>
-                <a href="{% url 'invoice_template_create' %}" class="btn btn-sm btn-primary">Novo Invoice Template</a>
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="bg-body-tertiary">
+                            <tr>
+                                <th class="ps-3 py-3">Nome</th>
+                                <th class="py-3">Moeda</th>
+                                <th class="py-3">Itens</th>
+                                <th class="py-3">Cód. Tributação / NBS</th>
+                                <th class="text-end pe-3 py-3">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for inv in invoice_templates %}
+                            <tr>
+                                <td class="ps-3 py-3">
+                                    <a href="{% url 'invoice_template_update' inv.pk %}" class="fw-bold text-decoration-none">
+                                        {{ inv.name }}
+                                    </a>
+                                </td>
+                                <td class="py-3">
+                                    <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle font-monospace">{{ inv.currency }}</span>
+                                </td>
+                                <td class="py-3">
+                                    <span class="badge bg-body-secondary text-body border">{{ inv.items.all|length }} {% if inv.items.all|length == 1 %}item{% else %}itens{% endif %}</span>
+                                </td>
+                                <td class="py-3 font-monospace small text-body-secondary">
+                                    {% if inv.codigo_tributacao_nacional or inv.codigo_nbs %}
+                                        {{ inv.codigo_tributacao_nacional|default:"-" }} / {{ inv.codigo_nbs|default:"-" }}
+                                    {% else %}
+                                        <span class="text-muted">-</span>
+                                    {% endif %}
+                                </td>
+                                <td class="text-end pe-3 py-3 text-nowrap">
+                                    <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+                                        <a href="{% url 'invoice_template_update' inv.pk %}" class="btn btn-sm btn-outline-secondary" title="Editar template">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                        <form method="POST" action="{% url 'invoice_template_delete' inv.pk %}" class="d-inline">
+                                            {% csrf_token %}
+                                            <button type="submit" class="btn btn-sm btn-outline-danger"
+                                                    data-confirm-message="Tem certeza que deseja excluir o template '{{ inv.name }}'?"
+                                                    data-confirm-title="Excluir Template"
+                                                    data-confirm-variant="danger"
+                                                    title="Excluir template">
+                                                <i class="bi bi-trash"></i>
+                                            </button>
+                                        </form>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">
+                                    Nenhum modelo de invoice configurado.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
-            <div class="card-body">
-                <ul class="list-group list-group-flush">
-                    {% for inv in invoice_templates %}
-                    <li class="list-group-item d-flex justify-content-between align-items-center">
-                        {{ inv.name }}
-                        <span>
-                            <a href="{% url 'invoice_template_update' inv.pk %}" class="btn btn-sm btn-outline-secondary"><i class="bi bi-pencil"></i></a>
-                            <a href="{% url 'invoice_template_delete' inv.pk %}" class="btn btn-sm btn-outline-danger"><i class="bi bi-trash"></i></a>
-                        </span>
-                    </li>
-                    {% empty %}
-                    <li class="list-group-item text-muted">Nenhum template de invoice configurado.</li>
-                    {% endfor %}
-                </ul>
+        </div>
+    </div>
+
+    <!-- Tab 2: Email Templates -->
+    <div class="tab-pane fade {% if active_tab == 'emails' %}show active{% endif %}" id="pills-emails" role="tabpanel" aria-labelledby="pills-emails-tab" tabindex="0">
+        <div class="card shadow-sm">
+            <div class="card-body p-0">
+                <div class="table-responsive">
+                    <table class="table table-hover align-middle mb-0">
+                        <thead class="bg-body-tertiary">
+                            <tr>
+                                <th class="ps-3 py-3">Nome</th>
+                                <th class="py-3">Tipo</th>
+                                <th class="py-3">Idioma</th>
+                                <th class="py-3">Assunto</th>
+                                <th class="text-end pe-3 py-3">Ações</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            {% for email in email_templates %}
+                            <tr>
+                                <td class="ps-3 py-3">
+                                    <a href="{% url 'email_template_update' email.pk %}" class="fw-bold text-decoration-none">
+                                        {{ email.name }}
+                                    </a>
+                                </td>
+                                <td class="py-3 text-body-secondary small">
+                                    {{ email.get_template_type_display }}
+                                </td>
+                                <td class="py-3">
+                                    {% if email.language == 'pt-br' %}
+                                        <span class="badge bg-info-subtle text-info-emphasis border border-info-subtle font-monospace">PT-BR</span>
+                                    {% else %}
+                                        <span class="badge bg-secondary-subtle text-secondary-emphasis border border-secondary-subtle font-monospace">EN</span>
+                                    {% endif %}
+                                </td>
+                                <td class="py-3 text-truncate" style="max-width: 320px;" title="{{ email.subject }}">
+                                    {{ email.subject }}
+                                </td>
+                                <td class="text-end pe-3 py-3 text-nowrap">
+                                    <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+                                        <a href="{% url 'email_template_update' email.pk %}" class="btn btn-sm btn-outline-secondary" title="Editar template">
+                                            <i class="bi bi-pencil"></i>
+                                        </a>
+                                    </div>
+                                </td>
+                            </tr>
+                            {% empty %}
+                            <tr>
+                                <td colspan="5" class="text-center py-4 text-muted">
+                                    Nenhum template de e-mail configurado.
+                                </td>
+                            </tr>
+                            {% endfor %}
+                        </tbody>
+                    </table>
+                </div>
             </div>
         </div>
     </div>
 </div>
 {% endblock %}
-

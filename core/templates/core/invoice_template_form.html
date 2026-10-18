@@ -1,31 +1,58 @@
 {% extends 'core/base.html' %}
+{% block title %}{% if form.instance.pk %}Editar{% else %}Novo{% endif %} Invoice Template - {{ PROJECT_NAME }}{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-10">
+        <div class="d-flex flex-wrap justify-content-between align-items-center gap-2 mb-3">
+            <div>
+                <a href="{% url 'invoice_template_list' %}" class="btn btn-outline-secondary btn-sm mb-2">
+                    <i class="bi bi-arrow-left me-1"></i>Voltar para Modelos
+                </a>
+                <h2 class="mb-0 fw-bold">{% if form.instance.pk %}Editar Modelo de Invoice{% else %}Novo Modelo de Invoice{% endif %}</h2>
+            </div>
+            {% if form.instance.pk %}
+            <div>
+                <button type="submit" form="delete-template-form" class="btn btn-outline-danger btn-sm"
+                        data-confirm-message="Tem certeza que deseja excluir o template '{{ form.instance.name }}'?"
+                        data-confirm-title="Excluir Template"
+                        data-confirm-variant="danger"
+                        title="Excluir template">
+                    <i class="bi bi-trash me-1"></i>Excluir
+                </button>
+            </div>
+            {% endif %}
+        </div>
+
         <div class="card shadow-sm">
-            <div class="card-header bg-dark text-white"><h5>{% if form.instance.pk %}Editar{% else %}Novo{% endif %} Invoice Template</h5></div>
+            <div class="card-header bg-body-tertiary py-3">
+                <h5 class="mb-0 fw-bold"><i class="bi bi-file-earmark-text me-2 text-primary"></i>Configurações do Modelo</h5>
+            </div>
             <div class="card-body">
                 <div class="accordion mb-3" id="macroAccordion">
                     <div class="accordion-item">
                         <h2 class="accordion-header" id="headingMacros">
-                            <button class="accordion-button collapsed" type="button" data-bs-toggle="collapse" data-bs-target="#collapseMacros" aria-expanded="false" aria-controls="collapseMacros">
-                                Ver Macros Disponíveis
+                            <button class="accordion-button collapsed py-2" type="button" data-bs-toggle="collapse" data-bs-target="#collapseMacros" aria-expanded="false" aria-controls="collapseMacros">
+                                <i class="bi bi-code-slash me-2"></i> Ver Macros Disponíveis
                             </button>
                         </h2>
                         <div id="collapseMacros" class="accordion-collapse collapse" aria-labelledby="headingMacros" data-bs-parent="#macroAccordion">
                             <div class="accordion-body">
-                                <p>As seguintes macros podem ser usadas nas descrições dos itens:</p>
+                                <p>As seguintes macros podem ser usadas nas descrições dos itens e na descrição da NFS-e:</p>
                                 <ul>
                                     <li><code>&#123;&#123; invoice_date &#125;&#125;</code> - Data de Emissão</li>
                                     <li><code>&#123;&#123; prev_month_start &#125;&#125;</code> - Primeiro dia do mês anterior</li>
                                     <li><code>&#123;&#123; prev_month_end &#125;&#125;</code> - Último dia do mês anterior</li>
-                                    <li><code>&#123;&#123; prev_month_name &#125;&#125;</code> - Nome do mês anterior (em inglês)</li>
+                                    <li><code>&#123;&#123; prev_month_name &#125;&#125;</code> - Nome do mês anterior</li>
                                     <li><code>&#123;&#123; prev_month_year &#125;&#125;</code> - Ano do mês anterior</li>
                                     <li><code>&#123;&#123; invoice_number &#125;&#125;</code> - Número da Invoice</li>
                                     <li><code>&#123;&#123; currency &#125;&#125;</code> - Moeda</li>
                                     <li><code>&#123;&#123; client_name &#125;&#125;</code> - Nome do Cliente</li>
+                                    <li><code>&#123;&#123; company_cnpj &#125;&#125;</code> - CNPJ da Empresa</li>
                                     <li><code>&#123;&#123; value_original &#125;&#125;</code> - Valor Total Original</li>
                                     <li><code>&#123;&#123; value_brl &#125;&#125;</code> - Valor Total BRL</li>
+                                    <li><code>&#123;&#123; exchange_rate &#125;&#125;</code> - Taxa de Conversão</li>
+                                    <li><code>&#123;&#123; effective_tax_rate &#125;&#125;</code> - Percentual de Impostos (Simples Nacional)</li>
                                 </ul>
                             </div>
                         </div>
@@ -33,6 +60,9 @@
                 </div>
                 <form method="POST">
                     {% csrf_token %}
+                    {% if form.non_field_errors %}
+                    <div class="alert alert-danger mb-3">{{ form.non_field_errors }}</div>
+                    {% endif %}
                     <div class="row">
                         <div class="col-md-8 mb-3">
                             {{ form.name.label_tag }}
@@ -50,70 +80,106 @@
                             <small class="form-text text-muted">Dados bancários que serão pré-preenchidos ao criar uma invoice a partir deste template. Suporta formatação em Markdown (negrito, listas, etc.).</small>
                             {{ form.bank_details.errors }}
                         </div>
+                        <div class="col-12 mb-3">
+                            {{ form.nfse_description.label_tag }}
+                            {{ form.nfse_description }}
+                            <small class="form-text text-muted">Texto / discriminação dos serviços para a NFS-e (texto simples, suporta macros como <code>&#123;&#123; prev_month_start &#125;&#125;</code>, <code>&#123;&#123; exchange_rate &#125;&#125;</code>, <code>&#123;&#123; value_brl &#125;&#125;</code>, <code>&#123;&#123; effective_tax_rate &#125;&#125;</code>).</small>
+                            {{ form.nfse_description.errors }}
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            {{ form.codigo_tributacao_nacional.label_tag }}
+                            {{ form.codigo_tributacao_nacional }}
+                            {{ form.codigo_tributacao_nacional.errors }}
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            {{ form.codigo_servico_municipio.label_tag }}
+                            {{ form.codigo_servico_municipio }}
+                            {{ form.codigo_servico_municipio.errors }}
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            {{ form.codigo_nbs.label_tag }}
+                            {{ form.codigo_nbs }}
+                            {{ form.codigo_nbs.errors }}
+                        </div>
                     </div>
                     <hr>
-                    <h6>Itens</h6>
+                    <h6 class="fw-bold mb-3">Itens do Template</h6>
                     {{ formset.management_form }}
+                    {{ formset.non_form_errors }}
                     
                     <div id="empty-form-template" class="d-none">
-                        <div class="row formset-row mb-3 align-items-center">
-                            {{ formset.empty_form.id }}
-                            <div class="col-md-5">
-                                {{ formset.empty_form.description.label_tag }}
-                                {{ formset.empty_form.description }}
-                            </div>
-                            <div class="col-md-2">
-                                {{ formset.empty_form.quantity.label_tag }}
-                                {{ formset.empty_form.quantity }}
-                            </div>
-                            <div class="col-md-3">
-                                {{ formset.empty_form.unit_price_foreign.label_tag }}
-                                {{ formset.empty_form.unit_price_foreign }}
-                            </div>
-                            <div class="col-md-2 text-center">
-                                <div class="d-none">
-                                    {{ formset.empty_form.DELETE }}
+                        <div class="formset-row p-3 mb-2 border rounded bg-body-tertiary">
+                            <div class="row g-2 align-items-end">
+                                {{ formset.empty_form.id }}
+                                <div class="col-12 col-md-5">
+                                    {{ formset.empty_form.description.label_tag }}
+                                    {{ formset.empty_form.description }}
                                 </div>
-                                <button type="button" class="btn btn-sm btn-outline-danger delete-row-btn" title="Excluir Item">
-                                    <i class="bi bi-trash"></i>
-                                </button>
+                                <div class="col-6 col-md-2">
+                                    {{ formset.empty_form.quantity.label_tag }}
+                                    {{ formset.empty_form.quantity }}
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    {{ formset.empty_form.unit_price_foreign.label_tag }}
+                                    {{ formset.empty_form.unit_price_foreign }}
+                                </div>
+                                <div class="col-12 col-md-2 text-end">
+                                    <div class="d-none">
+                                        {{ formset.empty_form.DELETE }}
+                                    </div>
+                                    <button type="button" class="btn btn-outline-danger delete-row-btn w-100" title="Excluir Item">
+                                        <i class="bi bi-trash"></i> <span class="d-md-none">Excluir</span>
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
 
                     <div id="formset-container">
                         {% for item_form in formset %}
-                            <div class="row formset-row mb-3 align-items-center">
-                                {{ item_form.id }}
-                                <div class="col-md-5">
-                                    {{ item_form.description.label_tag }}
-                                    {{ item_form.description }}
-                                </div>
-                                <div class="col-md-2">
-                                    {{ item_form.quantity.label_tag }}
-                                    {{ item_form.quantity }}
-                                </div>
-                                <div class="col-md-3">
-                                    {{ item_form.unit_price_foreign.label_tag }}
-                                    {{ item_form.unit_price_foreign }}
-                                </div>
-                                <div class="col-md-2 text-center">
-                                    <div class="d-none">
-                                        {{ item_form.DELETE }}
+                            <div class="formset-row p-3 mb-2 border rounded bg-body-tertiary">
+                                <div class="row g-2 align-items-end">
+                                    {{ item_form.id }}
+                                    <div class="col-12 col-md-5">
+                                        {{ item_form.description.label_tag }}
+                                        {{ item_form.description }}
+                                        {{ item_form.description.errors }}
                                     </div>
-                                    <button type="button" class="btn btn-sm btn-outline-danger delete-row-btn" title="Excluir Item">
-                                        <i class="bi bi-trash"></i>
-                                    </button>
+                                    <div class="col-6 col-md-2">
+                                        {{ item_form.quantity.label_tag }}
+                                        {{ item_form.quantity }}
+                                        {{ item_form.quantity.errors }}
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        {{ item_form.unit_price_foreign.label_tag }}
+                                        {{ item_form.unit_price_foreign }}
+                                        {{ item_form.unit_price_foreign.errors }}
+                                    </div>
+                                    <div class="col-12 col-md-2 text-end">
+                                        <div class="d-none">
+                                            {{ item_form.DELETE }}
+                                        </div>
+                                        <button type="button" class="btn btn-outline-danger delete-row-btn w-100" title="Excluir Item">
+                                            <i class="bi bi-trash"></i> <span class="d-md-none">Excluir</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         {% endfor %}
                     </div>
-                    <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="add-item-btn">Adicionar Item</button>
-                    <div class="d-flex justify-content-between gap-2 mt-3">
-                        <a href="{% url 'invoice_template_list' %}" class="btn btn-outline-secondary w-50">Cancelar</a>
-                        <button type="submit" class="btn btn-primary w-50">Salvar</button>
+                    <button type="button" class="btn btn-sm btn-outline-secondary mb-3 d-inline-flex align-items-center gap-1" id="add-item-btn">
+                        <i class="bi bi-plus-lg"></i> Adicionar Item
+                    </button>
+                    <div class="d-flex justify-content-end gap-2 mt-4">
+                        <a href="{% url 'invoice_template_list' %}" class="btn btn-outline-secondary">Cancelar</a>
+                        <button type="submit" class="btn btn-primary px-4 fw-semibold">Salvar Template</button>
                     </div>
                 </form>
+                {% if form.instance.pk %}
+                <form id="delete-template-form" method="POST" action="{% url 'invoice_template_delete' form.instance.pk %}" class="d-none">
+                    {% csrf_token %}
+                </form>
+                {% endif %}
             </div>
         </div>
     </div>
@@ -124,7 +190,7 @@
         const formsetContainer = document.getElementById('formset-container');
         const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
         
-        if(addItemBtn) {
+        if (addItemBtn) {
             addItemBtn.addEventListener('click', function() {
                 const totalForms = parseInt(totalFormsInput.value);
                 const template = document.getElementById('empty-form-template').firstElementChild.cloneNode(true);
@@ -141,32 +207,19 @@
             const btn = e.target.closest('.delete-row-btn');
             if (btn) {
                 const row = btn.closest('.formset-row');
-                // Find the hidden DELETE checkbox in this row
                 const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
-                if (deleteCheckbox) {
-                    // Mark it for deletion
+                if (deleteCheckbox && deleteCheckbox.closest('.d-none') && row.querySelector('input[type="hidden"][name$="-id"]')?.value) {
                     deleteCheckbox.checked = true;
-                    // Hide the row visually
                     row.style.display = 'none';
                 } else {
-                    // If there's no delete checkbox, it's a newly added row not yet in DB, just remove it
                     row.remove();
-                    
-                    // Update the TOTAL_FORMS count
-                    const totalForms = parseInt(totalFormsInput.value);
-                    totalFormsInput.value = totalForms - 1;
-                    
-                    // Re-index remaining forms
                     const rows = formsetContainer.querySelectorAll('.formset-row');
+                    totalFormsInput.value = rows.length;
                     rows.forEach((r, index) => {
                         const inputs = r.querySelectorAll('input, textarea, select');
                         inputs.forEach(input => {
-                            if (input.name) {
-                                input.name = input.name.replace(/items-\d+-/, `items-${index}-`);
-                            }
-                            if (input.id) {
-                                input.id = input.id.replace(/id_items-\d+-/, `id_items-${index}-`);
-                            }
+                            if (input.name) input.name = input.name.replace(/items-\d+-/, `items-${index}-`);
+                            if (input.id) input.id = input.id.replace(/id_items-\d+-/, `id_items-${index}-`);
                         });
                     });
                 }

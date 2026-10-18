@@ -206,6 +206,86 @@ class ServicesExchangeRateTests(TestCase):
         self.assertEqual(rate, Decimal("4.0123"))
 
 
+SAMPLE_NACIONAL_NFSE_XML = """<?xml version="1.0" encoding="UTF-8"?>
+<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">
+  <infNFSe Id="NFS35503082000000000001910000100000000000999991234567">
+    <xLocEmi>São Paulo</xLocEmi>
+    <xLocPrestacao>São Paulo</xLocPrestacao>
+    <nNFSe>99999</nNFSe>
+    <cVerif>ABCDEF123456</cVerif>
+    <dhProc>2026-10-16T12:00:00-03:00</dhProc>
+    <DPS xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">
+      <infDPS Id="DPS3550308212345678000190000010000000000099999">
+        <tpAmb>2</tpAmb>
+        <dhEmi>2026-10-16T12:00:00-03:00</dhEmi>
+        <verProc>1.0</verProc>
+        <dCompet>2026-10-16</dCompet>
+        <prest>
+          <CNPJ>12345678000190</CNPJ>
+          <xNome>EMPRESA TESTE LTDA</xNome>
+          <end>
+            <xLgr>RUA TESTE</xLgr>
+            <nro>100</nro>
+            <xBairro>CENTRO</xBairro>
+            <cMun>3550308</cMun>
+            <xMun>SAO PAULO</xMun>
+            <UF>SP</UF>
+            <CEP>01001000</CEP>
+          </end>
+          <regTrib>
+            <opSimpNac>1</opSimpNac>
+            <regEspTrib>0</regEspTrib>
+          </regTrib>
+        </prest>
+        <toma>
+          <xNome>CLIENT TEST FOREIGN INC</xNome>
+          <end>
+            <endExt>
+              <cPais>CAN</cPais>
+              <cEndPost>H2X 1Y4</cEndPost>
+              <xCidade>Montreal</xCidade>
+              <xEstProvReg>Quebec</xEstProvReg>
+            </endExt>
+            <xLgr>Rue Sainte-Catherine</xLgr>
+            <nro>123</nro>
+            <xBairro>Centre-Ville</xBairro>
+          </end>
+        </toma>
+        <serv>
+          <locPrest>
+            <cLocPrestacao>3550308</cLocPrestacao>
+          </locPrest>
+          <cServ>
+            <cTribNac>010101</cTribNac>
+            <xDescServ>Servicos de desenvolvimento de software e consultoria em TI.</xDescServ>
+          </cServ>
+        </serv>
+        <valores>
+          <vServPrest>
+            <vServ>1000.00</vServ>
+          </vServPrest>
+          <trib>
+            <tribMun>
+              <tribISSQN>3</tribISSQN>
+              <tpRetISSQN>1</tpRetISSQN>
+            </tribMun>
+            <totTrib>
+              <pTotTribSN>2.01</pTotTribSN>
+            </totTrib>
+          </trib>
+        </valores>
+      </infDPS>
+    </DPS>
+    <valores>
+      <vServPrest>
+        <vServ>1000.00</vServ>
+      </vServPrest>
+      <vLiq>1000.00</vLiq>
+    </valores>
+  </infNFSe>
+</NFSe>"""
+
+
 class NFSeProviderAbstractionTests(TestCase):
     @classmethod
     def setUpClass(cls):
@@ -266,6 +346,9 @@ class NFSeProviderAbstractionTests(TestCase):
             currency="CAD",
             exchange_rate_to_brl=Decimal("4.20"),
             bank_details="Test Beneficiary\n12345\n001\n0001",
+            codigo_tributacao_nacional="010101",
+            codigo_servico_municipio="",
+            codigo_nbs="115022000",
         )
         InvoiceItem.objects.create(
             invoice=self.invoice,
@@ -343,6 +426,12 @@ class NFSeProviderAbstractionTests(TestCase):
         self.assertNotIn("<NIF>", signed_xml)
         # Verify IM is omitted to prevent E0120
         self.assertNotIn("<IM>", signed_xml)
+        # Verify prestador xNome is omitted when tpEmit=1 to prevent E0121
+        self.assertNotIn(f"<xNome>{self.company.company_name}</xNome>", signed_xml)
+        # Verify locPrest uses cLocPrestacao in Brazil and cPaisResult for export Scenario 2 (prevents E0591)
+        self.assertIn(f"<cLocPrestacao>{self.company.address_city_ibge}</cLocPrestacao>", signed_xml)
+        self.assertNotIn("<cPaisPrestacao>", signed_xml)
+        self.assertIn("<cPaisResult>CA</cPaisResult>", signed_xml)
         # Verify pTotTribSN or indTotTrib
         self.assertTrue(
             "<pTotTribSN>" in signed_xml or "<indTotTrib>0</indTotTrib>" in signed_xml
@@ -361,7 +450,7 @@ class NFSeProviderAbstractionTests(TestCase):
 
         mock_get.return_value = MockGetResp()
 
-        fake_nfse_xml = "<xml><nNFSe>99999</nNFSe></xml>"
+        fake_nfse_xml = SAMPLE_NACIONAL_NFSE_XML
         fake_b64 = base64.b64encode(
             gzip.compress(fake_nfse_xml.encode("utf-8"))
         ).decode("utf-8")
@@ -611,6 +700,65 @@ class NFSeProviderAbstractionTests(TestCase):
         self.assertIsNotNone(pdf_bytes)
         self.assertTrue(pdf_bytes.startswith(b"%PDF"))
 
+    def test_paulistana_provider_baixar_pdf_real_xml_in_debug_mode(self):
+        from core.nfse.paulistana.provider import PaulistanaProvider
+        from django.core.files.base import ContentFile
+        from unittest.mock import patch
+
+        self.company.debug_mode = True
+        self.company.inscricao_municipal = "12345678"
+        self.company.save()
+
+        provider = PaulistanaProvider()
+
+        real_xml = """<?xml version="1.0" encoding="utf-8"?>
+<NFe xmlns="http://www.prefeitura.sp.gov.br/nfe/tipos">
+    <ChaveNFe>
+        <InscricaoPrestador>12345678</InscricaoPrestador>
+        <NumeroNFe>12345</NumeroNFe>
+        <CodigoVerificacao>ABC12345</CodigoVerificacao>
+    </ChaveNFe>
+</NFe>"""
+
+        nf = NotaFiscal.objects.create(
+            invoice=self.invoice,
+            nf_number="12345",
+            issue_date=self.invoice.issue_date,
+            amount_brl=Decimal("5000.00"),
+            is_export=True,
+            description="Service Real",
+            verification_code="ABC12345",
+        )
+        nf.xml_autorizacao.save("NFS-e_12345.xml", ContentFile(real_xml.encode("utf-8")), save=True)
+
+        with patch("core.nfse.paulistana.client.download_nfse_pdf", return_value=b"%PDF-1.4 Real Paulistana PDF") as mock_download:
+            with patch("core.nfse.paulistana.mock.render_paulistana_debug_pdf") as mock_render_mock:
+                pdf_bytes = provider.baixar_pdf(self.invoice)
+                mock_download.assert_called_once_with("12345678", "12345", "ABC12345")
+                mock_render_mock.assert_not_called()
+                self.assertEqual(pdf_bytes, b"%PDF-1.4 Real Paulistana PDF")
+
+    def test_is_paulistana_xml_mocked_helper(self):
+        from core.nfse.paulistana.mock import is_paulistana_xml_mocked
+
+        # Mocked verification codes
+        self.assertTrue(is_paulistana_xml_mocked(None, "DEBUG-1"))
+        self.assertTrue(is_paulistana_xml_mocked("<xml/>", "DEBUG-FAKE-CODE"))
+        self.assertTrue(is_paulistana_xml_mocked("<NFe/>", "DBG0001X"))
+        self.assertTrue(is_paulistana_xml_mocked("<NFe/>", ""))
+        self.assertTrue(is_paulistana_xml_mocked(None, "ABC12345"))
+
+        # Mocked XML contents
+        mock_xml = "<NFe><CodigoVerificacao>DBG0001X</CodigoVerificacao></NFe>"
+        self.assertTrue(is_paulistana_xml_mocked(mock_xml, "ABC12345"))
+
+        invalid_xml = "not xml at all"
+        self.assertTrue(is_paulistana_xml_mocked(invalid_xml, "ABC12345"))
+
+        # Real valid XML and verification code
+        valid_xml = '<NFe xmlns="http://www.prefeitura.sp.gov.br/nfe/tipos"><ChaveNFe><NumeroNFe>10</NumeroNFe><CodigoVerificacao>ABC12345</CodigoVerificacao></ChaveNFe></NFe>'
+        self.assertFalse(is_paulistana_xml_mocked(valid_xml, "ABC12345"))
+
     @patch("core.nfse.provider_factory.get_provider")
     def test_consultar_nfe_na_prefeitura_via_provider(self, mock_get_provider):
         from unittest.mock import MagicMock
@@ -804,6 +952,7 @@ class NFSeProviderAbstractionTests(TestCase):
 
         self.invoice.document_number = 1
         self.invoice.document_series = "12"
+        self.invoice.codigo_servico_municipio = "02668"
         self.invoice.save()
 
         with patch(
@@ -889,6 +1038,8 @@ class NFSeProviderAbstractionTests(TestCase):
         self.company.debug_mode = False
         self.company.nfse_provider = "PAULISTANA"
         self.company.save()
+        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.save()
 
         with patch(
             "core.nfse.paulistana.provider.assinar_rps_v1",
@@ -931,6 +1082,8 @@ class NFSeProviderAbstractionTests(TestCase):
         self.company.debug_mode = False
         self.company.nfse_provider = "PAULISTANA"
         self.company.save()
+        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.save()
 
         with patch(
             "core.nfse.paulistana.provider.assinar_rps_v1",
@@ -1180,6 +1333,193 @@ class NFSeProviderAbstractionTests(TestCase):
         self.assertGreaterEqual(fator_r_ideal, Decimal("28.00"))
         self.assertGreater(pl_ideal, Decimal("0.00"))
 
+    def test_nacional_baixar_pdf_generates_pdf_via_brazilfiscalreport(self):
+        from core.nfse.nacional.provider import NacionalProvider
+        from django.core.files.base import ContentFile
+
+        self.company.nfse_provider = "NACIONAL"
+        self.company.save()
+
+        nf = NotaFiscal.objects.create(
+            invoice=self.invoice,
+            nf_number="99999",
+            issue_date=self.invoice.issue_date,
+            amount_brl=Decimal("1000.00"),
+            is_export=True,
+            description="Software Development Services",
+            chave_acesso_nacional="35503082000000000001910000100000000000999991234567",
+        )
+        nf.xml_autorizacao.save(
+            "NFS-e_99999.xml", ContentFile(SAMPLE_NACIONAL_NFSE_XML.encode("utf-8"))
+        )
+
+        provider = NacionalProvider()
+        pdf_bytes = provider.baixar_pdf(self.invoice)
+        self.assertIsNotNone(pdf_bytes)
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(pdf_bytes), 10000)
+
+    def test_nacional_baixar_pdf_with_cancelled_watermark(self):
+        from core.nfse.nacional.provider import NacionalProvider
+        from django.core.files.base import ContentFile
+        from django.utils import timezone as dj_timezone
+
+        self.company.nfse_provider = "NACIONAL"
+        self.company.save()
+
+        nf = NotaFiscal.objects.create(
+            invoice=self.invoice,
+            nf_number="99999",
+            issue_date=self.invoice.issue_date,
+            amount_brl=Decimal("1000.00"),
+            is_export=True,
+            is_canceled=True,
+            cancelation_date=dj_timezone.now(),
+            description="Software Development Services",
+            chave_acesso_nacional="35503082000000000001910000100000000000999991234567",
+        )
+        nf.xml_autorizacao.save(
+            "NFS-e_99999.xml", ContentFile(SAMPLE_NACIONAL_NFSE_XML.encode("utf-8"))
+        )
+
+        provider = NacionalProvider()
+        pdf_bytes = provider.baixar_pdf(self.invoice)
+        self.assertIsNotNone(pdf_bytes)
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        self.assertGreater(len(pdf_bytes), 10000)
+
+    def test_nacional_baixar_pdf_recovers_xml_from_api_if_missing(self):
+        from core.nfse.nacional.provider import NacionalProvider
+
+        self.company.nfse_provider = "NACIONAL"
+        self.company.save()
+
+        nf = NotaFiscal.objects.create(
+            invoice=self.invoice,
+            nf_number="99999",
+            issue_date=self.invoice.issue_date,
+            amount_brl=Decimal("1000.00"),
+            is_export=True,
+            description="Software Development Services",
+            chave_acesso_nacional="35503082000000000001910000100000000000999991234567",
+        )
+
+        provider = NacionalProvider()
+        with patch.object(
+            provider,
+            "buscar_nfse_por_chave",
+            return_value={"raw_xml": SAMPLE_NACIONAL_NFSE_XML},
+        ):
+            pdf_bytes = provider.baixar_pdf(self.invoice)
+
+        self.assertIsNotNone(pdf_bytes)
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+        nf.refresh_from_db()
+        self.assertTrue(bool(nf.xml_autorizacao))
+
+    @patch("core.nfse.paulistana.client.NFeClient.testar_envio_lote_rps")
+    def test_paulistana_debug_emission_generates_authentic_xml_and_pdf(
+        self, mock_testar_lote
+    ):
+        from core.services import enviar_nfe_para_prefeitura
+        from core.nfse.paulistana.schemas_v1.retorno_envio_lote_rps_v01 import (
+            RetornoEnvioLoteRps as RetornoEnvioLoteRpsV1,
+        )
+
+        self.company.nfse_provider = "PAULISTANA"
+        self.company.debug_mode = True
+        self.company.save()
+
+        self.invoice.document_number = 101
+        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.save()
+
+        mock_testar_lote.return_value = (
+            RetornoEnvioLoteRpsV1(
+                cabecalho=RetornoEnvioLoteRpsV1.Cabecalho(sucesso=True)
+            ),
+            "<signedXml/>",
+            "<retornoXml/>",
+        )
+
+        success = enviar_nfe_para_prefeitura(self.invoice)
+        self.assertTrue(success)
+
+        nf = NotaFiscal.objects.get(invoice=self.invoice)
+        self.assertEqual(nf.nf_number, "DEBUG-101")
+        self.assertTrue(bool(nf.xml_autorizacao))
+
+        # Verify XML contains tpNFe and authentic metadata
+        with nf.xml_autorizacao.open("r") as f:
+            xml_text = f.read()
+        self.assertIn("tpNFe", xml_text)
+        self.assertIn("Test Company", xml_text)
+        self.assertIn("Canadian Tech Inc", xml_text)
+        self.assertIn("<TributacaoNFe>P</TributacaoNFe>", xml_text)
+        self.assertIn("<AliquotaServicos>0.0000</AliquotaServicos>", xml_text)
+        self.assertIn("<ValorISS>0.00</ValorISS>", xml_text)
+        self.assertEqual(nf.aliquota_iss, Decimal("0.00"))
+        self.assertEqual(nf.valor_iss, Decimal("0.00"))
+
+        # Verify PDF was generated
+        self.assertTrue(bool(nf.danfse_pdf))
+        with nf.danfse_pdf.open("rb") as f:
+            pdf_data = f.read()
+        self.assertTrue(pdf_data.startswith(b"%PDF"))
+
+    @patch("core.nfse.paulistana.client.NFeClient.testar_envio_lote_rps")
+    def test_paulistana_debug_cancellation_marks_xml_and_pdf_as_cancelled(
+        self, mock_testar_lote
+    ):
+        from core.services import (
+            enviar_nfe_para_prefeitura,
+            cancel_nota_fiscal,
+            fetch_and_save_nfse_pdf,
+        )
+        from core.nfse.paulistana.provider import PaulistanaProvider
+        from core.nfse.paulistana.schemas_v1.retorno_envio_lote_rps_v01 import (
+            RetornoEnvioLoteRps as RetornoEnvioLoteRpsV1,
+        )
+
+        self.company.nfse_provider = "PAULISTANA"
+        self.company.debug_mode = True
+        self.company.save()
+
+        self.invoice.document_number = 102
+        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.save()
+
+        mock_testar_lote.return_value = (
+            RetornoEnvioLoteRpsV1(
+                cabecalho=RetornoEnvioLoteRpsV1.Cabecalho(sucesso=True)
+            ),
+            "<signedXml/>",
+            "<retornoXml/>",
+        )
+
+        success = enviar_nfe_para_prefeitura(self.invoice)
+        self.assertTrue(success)
+
+        # Cancel the emitted Nota Fiscal
+        result = cancel_nota_fiscal(self.invoice)
+        self.assertTrue(result.sucesso)
+
+        nf = NotaFiscal.objects.get(invoice=self.invoice)
+        self.assertTrue(nf.is_canceled)
+        self.assertIsNotNone(nf.cancelation_date)
+
+        # Verify updated XML has StatusNFe = C and DataCancelamento
+        with nf.xml_autorizacao.open("r") as f:
+            canceled_xml = f.read()
+        self.assertIn("<StatusNFe>C</StatusNFe>", canceled_xml)
+        self.assertIn("<DataCancelamento>", canceled_xml)
+
+        # Verify re-generated PDF
+        provider = PaulistanaProvider()
+        pdf_bytes = fetch_and_save_nfse_pdf(self.invoice, provider, force=True)
+        self.assertIsNotNone(pdf_bytes)
+        self.assertTrue(pdf_bytes.startswith(b"%PDF"))
+
 
 class InvoiceBankDetailsTests(TestCase):
     def setUp(self):
@@ -1364,6 +1704,274 @@ class InvoiceBankDetailsTests(TestCase):
 
     def test_company_settings_has_no_bank_details_raw(self):
         self.assertFalse(hasattr(self.company, "bank_details_raw"))
+
+
+class InvoiceNfseDescriptionTests(TestCase):
+    def setUp(self):
+        from django.core.cache import cache
+
+        cache.clear()
+        self.user = User.objects.create_superuser("testadmin", "admin@test.com", "pass")
+        self.client_http = HttpClient()
+        self.client_http.force_login(self.user)
+        self.company = CompanySettings.objects.create(
+            company_name="Acme Corp Test",
+            cnpj="12.345.678/0001-90",
+            inscricao_municipal="12345678",
+            opening_date=date(2024, 1, 1),
+            email="test@test.com",
+            next_document_number=1,
+            document_series="1",
+            nfse_provider="PAULISTANA",
+            address_city_ibge="3550308",
+            debug_mode=True,
+        )
+        self.foreign_client = Client.objects.create(
+            name="Foreign Test Client LLC",
+            address_country_code="US",
+            country="United States",
+            address_postal_code="10001",
+            address_city="New York",
+            address_neighborhood="Downtown",
+            address_line1="123 Fifth Ave",
+            email="client@example.com",
+        )
+
+    def test_default_nfse_description_on_invoice_and_template(self):
+        inv = Invoice(client=self.foreign_client, invoice_number="INV-TEST-001", issue_date=date(2026, 8, 1))
+        self.assertEqual(inv.nfse_description, "Descrição dos Serviços")
+
+        tpl = InvoiceTemplate(name="Test Template", currency="USD")
+        self.assertEqual(tpl.nfse_description, "Descrição dos Serviços")
+
+    def test_invoice_template_nfse_description_and_htmx_endpoint(self):
+        custom_text = "Serviços de consultoria para {{ client_name }}. Câmbio: {{ exchange_rate }}."
+        template = InvoiceTemplate.objects.create(
+            name="Global Client Template",
+            currency="USD",
+            bank_details="Routing: 12345",
+            nfse_description=custom_text,
+        )
+        InvoiceTemplateItem.objects.create(
+            template=template,
+            description="Consulting",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("1000.00"),
+        )
+        response = self.client_http.get(f"/htmx/template-details/{template.id}/")
+        self.assertEqual(response.status_code, 200)
+        data = response.json()
+        self.assertEqual(data["nfse_description"], custom_text)
+
+    def test_clone_invoice_preserves_nfse_description(self):
+        original = Invoice.objects.create(
+            client=self.foreign_client,
+            invoice_number="INV-ORIG-NFSE",
+            issue_date=date(2026, 9, 1),
+            currency="USD",
+            bank_details="Bank info",
+            nfse_description="Custom NFSe description with {{ invoice_number }} and {{ exchange_rate }}",
+        )
+        InvoiceItem.objects.create(
+            invoice=original,
+            description="Service item",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("2000.00"),
+        )
+        response = self.client_http.post(f"/invoices/{original.id}/clone/")
+        self.assertEqual(response.status_code, 302)
+
+        cloned = (
+            Invoice.objects.filter(client=self.foreign_client)
+            .exclude(id=original.id)
+            .first()
+        )
+        self.assertIsNotNone(cloned)
+        self.assertEqual(cloned.nfse_description, original.nfse_description)
+
+    def test_htmx_update_nfse_description_draft_success(self):
+        invoice = Invoice.objects.create(
+            client=self.foreign_client,
+            invoice_number="INV-UPDATE-01",
+            issue_date=date(2026, 9, 1),
+            currency="USD",
+            nfse_description="Old description",
+            status="DRAFT",
+        )
+        new_desc = "Nova descrição com {{ currency }} {{ value_original }} e taxa {{ exchange_rate }}."
+        response = self.client_http.post(
+            f"/invoices/{invoice.id}/update-nfse-description/",
+            {"nfse_description": new_desc},
+        )
+        self.assertEqual(response.status_code, 200)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.nfse_description, new_desc)
+        self.assertIn(new_desc, response.content.decode())
+
+    def test_htmx_update_nfse_description_validation_errors(self):
+        invoice = Invoice.objects.create(
+            client=self.foreign_client,
+            invoice_number="INV-ERR-01",
+            issue_date=date(2026, 9, 1),
+            currency="USD",
+            nfse_description="Initial valid description",
+            status="DRAFT",
+        )
+
+        # Empty description fails
+        resp_empty = self.client_http.post(
+            f"/invoices/{invoice.id}/update-nfse-description/",
+            {"nfse_description": "   "},
+        )
+        self.assertEqual(resp_empty.status_code, 400)
+        self.assertIn("A descrição da NFS-e é obrigatória.", resp_empty.content.decode())
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.nfse_description, "Initial valid description")
+
+        # Invalid macro fails
+        resp_macro = self.client_http.post(
+            f"/invoices/{invoice.id}/update-nfse-description/",
+            {"nfse_description": "Texto com macro errada {{ macro_que_nao_existe }}"},
+        )
+        self.assertEqual(resp_macro.status_code, 400)
+        self.assertIn("Macro inválida: {{ macro_que_nao_existe }}", resp_macro.content.decode())
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.nfse_description, "Initial valid description")
+
+        # Non-draft invoice cannot be updated
+        invoice.status = "FINALIZED"
+        invoice.save()
+        resp_finalized = self.client_http.post(
+            f"/invoices/{invoice.id}/update-nfse-description/",
+            {"nfse_description": "Tentativa em finalizada"},
+        )
+        self.assertEqual(resp_finalized.status_code, 400)
+
+    def test_forms_validation_nfse_description(self):
+        from core.forms import InvoiceForm, InvoiceTemplateForm
+
+        # InvoiceForm validation
+        form_empty = InvoiceForm(data={
+            "client": str(self.foreign_client.id),
+            "invoice_number": "INV-FORM-01",
+            "issue_date": "2026-09-01",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "   ",
+        })
+        self.assertFalse(form_empty.is_valid())
+        self.assertIn("nfse_description", form_empty.errors)
+
+        form_invalid_macro = InvoiceForm(data={
+            "client": str(self.foreign_client.id),
+            "invoice_number": "INV-FORM-02",
+            "issue_date": "2026-09-01",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "Serviço com {{ unknown_placeholder }}",
+        })
+        self.assertFalse(form_invalid_macro.is_valid())
+        self.assertIn("nfse_description", form_invalid_macro.errors)
+
+        form_valid = InvoiceForm(data={
+            "client": str(self.foreign_client.id),
+            "invoice_number": "INV-FORM-03",
+            "issue_date": "2026-09-01",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "Serviço {{ invoice_number }} - taxa {{ exchange_rate }} - imposto {{ effective_tax_rate }}%",
+            "codigo_tributacao_nacional": "010101",
+            "codigo_servico_municipio": "02668",
+            "codigo_nbs": "115022000",
+        })
+        self.assertTrue(form_valid.is_valid(), form_valid.errors)
+
+        # InvoiceTemplateForm validation
+        tpl_form_empty = InvoiceTemplateForm(data={
+            "name": "Template Empty",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "",
+        })
+        self.assertFalse(tpl_form_empty.is_valid())
+        self.assertIn("nfse_description", tpl_form_empty.errors)
+
+        tpl_form_invalid = InvoiceTemplateForm(data={
+            "name": "Template Bad Macro",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "Serviço {{ bad_tag }}",
+        })
+        self.assertFalse(tpl_form_invalid.is_valid())
+        self.assertIn("nfse_description", tpl_form_invalid.errors)
+
+        tpl_form_valid = InvoiceTemplateForm(data={
+            "name": "Template Good",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "Serviço válido {{ currency }} {{ exchange_rate }}",
+            "codigo_tributacao_nacional": "010101",
+            "codigo_servico_municipio": "02668",
+            "codigo_nbs": "115022000",
+        })
+        self.assertTrue(tpl_form_valid.is_valid(), tpl_form_valid.errors)
+
+    def test_prepare_nf_data_with_templated_nfse_description(self):
+        from core.services import _prepare_nf_data
+
+        invoice = Invoice.objects.create(
+            client=self.foreign_client,
+            invoice_number="INV-PREPARE-01",
+            issue_date=date(2026, 9, 15),
+            currency="USD",
+            exchange_rate_to_brl=Decimal("5.0000"),
+            nfse_description=(
+                "Prestação de serviços no exterior.\n"
+                "Ref: {{ prev_month_start }} até {{ prev_month_end }}.\n"
+                "Valor em moeda estrangeira: {{ currency }} {{ value_original }}.\n"
+                "Câmbio: {{ exchange_rate }}.\n"
+                "Valor em BRL: R$ {{ value_brl }}.\n"
+                "Alíquota efetiva estimada: {{ effective_tax_rate }}%."
+            ),
+        )
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            description="Software Engineering",
+            quantity=Decimal("2.00"),
+            unit_price_foreign=Decimal("1000.00"),
+        )
+        amount_brl, desc, eff_rate = _prepare_nf_data(invoice)
+        self.assertEqual(amount_brl, Decimal("10000.00"))
+        self.assertIn("Ref: 01/08/2026 até 31/08/2026.", desc)
+        self.assertIn("Valor em moeda estrangeira: USD 2.000,00.", desc)
+        self.assertIn("Câmbio: 5,0000.", desc)
+        self.assertIn("Valor em BRL: R$ 10.000,00.", desc)
+        self.assertIn(f"Alíquota efetiva estimada: {eff_rate:.2f}%".replace(".", ","), desc)
+
+        # Ensure raw invoice.nfse_description is unmutated
+        invoice.refresh_from_db()
+        self.assertIn("{{ exchange_rate }}", invoice.nfse_description)
+
+    def test_invoice_create_get_renders_template_with_and_without_templates(self):
+        # Case 1: templates exist
+        InvoiceTemplate.objects.create(name="Tpl 1", currency="USD")
+        resp = self.client_http.get("/invoices/new/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn('<select id="template-selector"', resp.content.decode())
+        self.assertIn("macroAccordion", resp.content.decode())
+
+        # Case 2: no templates
+        InvoiceTemplate.objects.all().delete()
+        resp_no_tpl = self.client_http.get("/invoices/new/")
+        self.assertEqual(resp_no_tpl.status_code, 200)
+        self.assertNotIn('<select id="template-selector"', resp_no_tpl.content.decode())
+        self.assertIn("macroAccordion", resp_no_tpl.content.decode())
+
+    def test_invoice_template_create_get_renders_template(self):
+        resp = self.client_http.get("/templates/invoice/new/")
+        self.assertEqual(resp.status_code, 200)
+        self.assertIn("macroAccordion", resp.content.decode())
+        self.assertIn("nfse_description", resp.content.decode())
 
 
 class NfseCancelRestrictionTests(TestCase):
@@ -1627,12 +2235,178 @@ class NfseCancelRestrictionTests(TestCase):
         self.assertFalse(NotaFiscal.objects.filter(nf_number="7").exists())
         self.assertEqual(NotaFiscal.objects.count(), 6)
 
-    def test_import_nfses_nacional_stub(self):
+    @patch("core.nfse.nacional.provider.NacionalProvider.consultar_dfe_por_nsu")
+    @patch("core.nfse.nacional.provider.NacionalProvider.baixar_pdf")
+    def test_import_nfses_nacional(self, mock_pdf, mock_consultar):
+        import gzip
+        import base64
         from core.services.nfse_services import import_nfses
+        from core.models import NotaFiscalEvent
+
+        mock_pdf.return_value = b"%PDF mock"
+
+        # CNPJ of self.company is "00.000.000/0001-00" -> cleaned is "00000000000100"
+        # Chave de acesso length 50: cMun(7) + ambGer(1='2') + tpEmis(1='1') + CNPJ(14) + rest(27)
+        chave_nfse = "35503082100000000000100000000000000000000000000001"
+        xml_nfse = f"""<NFSe xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.00">
+  <infNFSe Id="NFS{chave_nfse}">
+    <ambGer>2</ambGer>
+    <tpAmb>2</tpAmb>
+    <nNFSe>123</nNFSe>
+    <cVerif>ABCDEF12</cVerif>
+    <dhProc>2026-10-17T10:00:00-03:00</dhProc>
+    <DPS xmlns="http://www.sped.fazenda.gov.br/nfse">
+      <infDPS Id="DPS000000000123456780001994242000000000000005">
+        <nDPS>5</nDPS>
+        <serie>4242</serie>
+        <dCompet>2026-10-17</dCompet>
+        <prest>
+          <CNPJ>00000000000100</CNPJ>
+        </prest>
+        <valores>
+          <vServPrest>
+            <vServ>1000.00</vServ>
+          </vServPrest>
+        </valores>
+      </infDPS>
+    </DPS>
+  </infNFSe>
+</NFSe>"""
+        b64_nfse = base64.b64encode(gzip.compress(xml_nfse.encode("utf-8"))).decode("utf-8")
+
+        xml_evento = f"""<evento xmlns="http://www.sped.fazenda.gov.br/nfse" versao="1.01">
+  <infEvento Id="EVT{chave_nfse}1011011">
+    <tpAmb>2</tpAmb>
+    <dhEvento>2026-10-17T11:00:00-03:00</dhEvento>
+    <tpEvento>101101</tpEvento>
+    <nSeqEvento>1</nSeqEvento>
+    <chNFSe>{chave_nfse}</chNFSe>
+    <e101101>
+      <xDesc>Cancelamento de NFS-e</xDesc>
+      <cMotivo>1</cMotivo>
+      <xMotivo>Erro na emissao</xMotivo>
+    </e101101>
+  </infEvento>
+</evento>"""
+        b64_evento = base64.b64encode(gzip.compress(xml_evento.encode("utf-8"))).decode("utf-8")
+
+        # Third party tomador document that must NOT create a NotaFiscal
+        chave_third_party = "35503089999999999999990000000000000000000000000002"
+
+        mock_consultar.return_value = (
+            [
+                {
+                    "NSU": 10,
+                    "ChaveAcesso": chave_nfse,
+                    "TipoDocumento": "NFSE",
+                    "TipoEvento": None,
+                    "ArquivoXml": b64_nfse,
+                },
+                {
+                    "NSU": 11,
+                    "ChaveAcesso": chave_nfse,
+                    "TipoDocumento": "EVENTO",
+                    "TipoEvento": "CANCELAMENTO",
+                    "ArquivoXml": b64_evento,
+                },
+                {
+                    "NSU": 12,
+                    "ChaveAcesso": chave_third_party,
+                    "TipoDocumento": "NFSE",
+                    "TipoEvento": None,
+                    "ArquivoXml": b64_nfse,
+                },
+            ],
+            12,
+        )
+
+        self.company.document_series = "4242"
+        self.company.next_document_number = 1
+        self.company.last_adn_nsu = 0
+        self.company.save()
 
         count, msg = import_nfses("NACIONAL")
-        self.assertEqual(count, 0)
-        self.assertIn("não está disponível", msg)
+        self.assertEqual(count, 2)  # 1 NF + 1 event
+        self.assertIn("Importação concluída", msg)
+
+        # Check NotaFiscal was created and marked canceled
+        nf = NotaFiscal.objects.get(chave_acesso_nacional=chave_nfse)
+        self.assertEqual(nf.nf_number, "123")
+        self.assertTrue(nf.is_canceled)
+        self.assertEqual(nf.amount_brl, Decimal("1000.00"))
+
+        # Check event was created
+        evt = NotaFiscalEvent.objects.get(nota_fiscal=nf)
+        self.assertEqual(evt.codigo_evento, "101101")
+        self.assertEqual(evt.nsu, 11)
+        self.assertTrue(evt.is_cancellation)
+
+        # Third party NF should NOT be created
+        self.assertFalse(NotaFiscal.objects.filter(chave_acesso_nacional=chave_third_party).exists())
+
+        # Check CompanySettings updated: next_document_number advanced to 6 (since DPS was 5), last_adn_nsu to 12
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.last_adn_nsu, 12)
+        self.assertEqual(self.company.next_document_number, 6)
+
+    @patch("core.nfse.nacional.provider.NacionalProvider.buscar_nfse_por_chave")
+    def test_sync_nota_fiscal_nacional_events(self, mock_buscar):
+        from core.services.nfse_services import sync_nota_fiscal
+        from core.models import NotaFiscalEvent
+        from django.utils import timezone
+
+        invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-SYNC-NAC",
+            issue_date=date(2026, 9, 1),
+            currency="USD",
+            status="FINALIZED",
+        )
+        nf = NotaFiscal.objects.create(
+            invoice=invoice,
+            nf_number="456",
+            chave_acesso_nacional="35503080000000000001000000000000000000000000000045",
+            issue_date=date(2026, 9, 1),
+            amount_brl=Decimal("800.00"),
+            is_canceled=False,
+        )
+
+        now = timezone.now()
+        mock_buscar.return_value = {
+            "nf_number": "456",
+            "verification_code": "",
+            "chave_acesso_nacional": nf.chave_acesso_nacional,
+            "amount_brl": "800.00",
+            "description": "Consultoria",
+            "issue_date": date(2026, 9, 1),
+            "is_canceled": True,
+            "cancelation_date": now,
+            "events": [
+                {
+                    "nsu": 99,
+                    "id_evento": "EVT123",
+                    "tipo_evento": "CANCELAMENTO",
+                    "codigo_evento": "101101",
+                    "n_seq_evento": 1,
+                    "dh_evento": now,
+                    "motivo": "Cancelado externamente",
+                    "is_cancellation": True,
+                    "raw_xml": "<evento/>",
+                }
+            ],
+            "raw_xml": "<nfse/>",
+        }
+
+        with patch("core.services.nfse_services.fetch_and_save_nfse_pdf"):
+            success, msg = sync_nota_fiscal(nf)
+            self.assertTrue(success)
+            self.assertIn("identificada como CANCELADA", msg)
+
+        nf.refresh_from_db()
+        self.assertTrue(nf.is_canceled)
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.status, "CANCELED")
+        self.assertTrue(NotaFiscalEvent.objects.filter(nota_fiscal=nf, codigo_evento="101101").exists())
 
     @patch("core.nfse.paulistana.provider.PaulistanaProvider.buscar_nfse_por_numero")
     def test_sync_nota_fiscal_externally_canceled(self, mock_buscar):
@@ -2053,7 +2827,6 @@ class CompanySettingsAutoEmitNfseTests(TestCase):
             nfse_provider="PAULISTANA",
             next_document_number=1,
             document_series="1",
-            default_codigo_tributacao_nacional="010101",
             auto_finalize_invoices=False,
             auto_emit_nfse=False,
         )
@@ -2076,7 +2849,6 @@ class CompanySettingsAutoEmitNfseTests(TestCase):
             "nfse_provider": self.company.nfse_provider,
             "next_document_number": self.company.next_document_number,
             "document_series": self.company.document_series,
-            "default_codigo_tributacao_nacional": self.company.default_codigo_tributacao_nacional,
             "auto_invoice_hour": 8,
             "auto_finalize_invoices": "on",
             "auto_send_emails": "on",
@@ -2089,6 +2861,92 @@ class CompanySettingsAutoEmitNfseTests(TestCase):
         self.assertTrue(self.company.auto_finalize_invoices)
         self.assertTrue(self.company.auto_send_emails)
         self.assertTrue(self.company.auto_emit_nfse)
+
+
+class CompanySettingsPhoneNumberTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_phone", "admin_phone@test.com", "pass")
+        self.client_http = HttpClient()
+        self.client_http.force_login(self.user)
+        self.company = CompanySettings.objects.create(
+            company_name="Acme Tech Ltda",
+            cnpj="12.345.678/0001-95",
+            opening_date=date(2024, 1, 1),
+            inscricao_municipal="123456",
+            email="tech@example.com",
+            phone_number="+55 11 98765-4321",
+            address_line1="Main St",
+            address_city_ibge="3550308",
+            nfse_provider="PAULISTANA",
+            next_document_number=1,
+            document_series="1",
+        )
+
+    def test_phone_number_and_property_alias(self):
+        self.assertEqual(self.company.phone_number, "+55 11 98765-4321")
+        self.assertEqual(self.company.phoneNumber, "+55 11 98765-4321")
+
+        # Test setter alias
+        self.company.phoneNumber = "+55 11 91234-5678"
+        self.company.save()
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.phone_number, "+55 11 91234-5678")
+        self.assertEqual(self.company.phoneNumber, "+55 11 91234-5678")
+
+    def test_company_settings_form_renders_and_saves_phone_number(self):
+        resp = self.client_http.get(reverse("company_settings"))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'name="phone_number"')
+        self.assertContains(resp, "Telefone")
+
+        data = {
+            "company_name": self.company.company_name,
+            "cnpj": self.company.cnpj,
+            "opening_date": self.company.opening_date.strftime("%d/%m/%Y"),
+            "inscricao_municipal": self.company.inscricao_municipal,
+            "email": self.company.email,
+            "phone_number": "+55 11 99999-0000",
+            "address_line1": self.company.address_line1,
+            "address_city_ibge": self.company.address_city_ibge,
+            "nfse_provider": self.company.nfse_provider,
+            "next_document_number": self.company.next_document_number,
+            "document_series": self.company.document_series,
+            "auto_invoice_hour": 9,
+        }
+        post_resp = self.client_http.post(reverse("company_settings"), data=data)
+        self.assertEqual(post_resp.status_code, 302)
+
+        self.company.refresh_from_db()
+        self.assertEqual(self.company.phone_number, "+55 11 99999-0000")
+        self.assertEqual(self.company.phoneNumber, "+55 11 99999-0000")
+
+    def test_invoice_pdf_includes_company_phone_number(self):
+        from core.pdf_service import generate_pdf_bytes
+
+        client = Client.objects.create(
+            name="Foreign Client LLC",
+            address_neighborhood="Downtown",
+            address_city="New York",
+            address_country_code="US",
+        )
+        invoice = Invoice.objects.create(
+            client=client,
+            invoice_number="INV-PHONE-001",
+            issue_date=date.today(),
+            currency="USD",
+            status="DRAFT",
+        )
+        InvoiceItem.objects.create(
+            invoice=invoice,
+            description="Consulting services",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("1000.00"),
+        )
+        invoice.status = "FINALIZED"
+        invoice.save()
+        pdf_bytes = generate_pdf_bytes(invoice, self.company)
+        self.assertIsNotNone(pdf_bytes)
+        self.assertTrue(len(pdf_bytes) > 0)
 
 
 class SecuritySettingsTests(TestCase):
@@ -2362,4 +3220,966 @@ class ProxyHeaderAuthTests(TestCase):
             )
             self.assertEqual(resp_untrusted.status_code, 302)
             self.assertTrue(resp_untrusted.url.startswith("/accounts/login/"))
+
+
+class NfseMultiProviderAndReliabilityTests(TestCase):
+    def setUp(self):
+        self.user = User.objects.create_superuser("admin_multi", "admin_multi@test.com", "pass")
+        self.client.force_login(self.user)
+        self.company = CompanySettings.objects.create(
+            company_name="Acme Tech Ltda",
+            cnpj="12.345.678/0001-95",
+            opening_date=date(2024, 1, 1),
+            inscricao_municipal="123456",
+            email="tech@example.com",
+            address_line1="Main St",
+            address_neighborhood="Centro",
+            address_city_ibge="3550308",
+            nfse_provider="NACIONAL",
+            next_document_number=1,
+            document_series="1",
+        )
+        self.client_obj = Client.objects.create(
+            name="Global Client Inc",
+            address_line1="Market St",
+            address_number="100",
+            address_neighborhood="Downtown",
+            address_city="San Francisco",
+            address_state_province="CA",
+            country="United States",
+            address_country_code="US",
+            email="accounting@globalclient.com",
+        )
+
+    def test_notafiscal_number_collision_coexistence(self):
+        from django.db import IntegrityError, transaction
+
+        # Create Paulistana NF #2
+        nf_paulistana = NotaFiscal.objects.create(
+            nf_number="2",
+            issue_date=date(2026, 1, 15),
+            amount_brl=Decimal("5000.00"),
+            description="Paulistana service",
+            verification_code="ABCDEF",
+            chave_acesso_nacional="35503081123456780001950000000000000222061168275466",
+        )
+        self.assertEqual(nf_paulistana.provider_type, "PAULISTANA")
+
+        # Create Nacional NF #2 with same number
+        nf_nacional = NotaFiscal.objects.create(
+            nf_number="2",
+            issue_date=date(2026, 10, 16),
+            amount_brl=Decimal("15000.00"),
+            description="Nacional service",
+            verification_code="",
+            chave_acesso_nacional="35503082123456780001950000000000000226100822290116",
+        )
+        self.assertEqual(nf_nacional.provider_type, "NACIONAL")
+
+        # Confirm both exist
+        self.assertEqual(NotaFiscal.objects.filter(nf_number="2").count(), 2)
+
+        # Confirm duplicate non-empty chave_acesso_nacional is blocked by constraint
+        with self.assertRaises(IntegrityError):
+            with transaction.atomic():
+                NotaFiscal.objects.create(
+                    nf_number="999",
+                    issue_date=date(2026, 10, 16),
+                    amount_brl=Decimal("1000.00"),
+                    description="Duplicate chave",
+                    chave_acesso_nacional="35503082123456780001950000000000000226100822290116",
+                )
+
+    def test_provider_type_resolution(self):
+        # 8th character is ambGer: '2' = NACIONAL, '1' = PAULISTANA
+        nf_nac = NotaFiscal(
+            nf_number="10",
+            issue_date=date.today(),
+            amount_brl=Decimal("100.00"),
+            chave_acesso_nacional="35503082000000000000000000000000000000000000000000",
+        )
+        self.assertEqual(nf_nac.provider_type, "NACIONAL")
+
+        nf_paul = NotaFiscal(
+            nf_number="11",
+            issue_date=date.today(),
+            amount_brl=Decimal("100.00"),
+            chave_acesso_nacional="35503081000000000000000000000000000000000000000000",
+        )
+        self.assertEqual(nf_paul.provider_type, "PAULISTANA")
+
+        nf_code_only = NotaFiscal(
+            nf_number="12",
+            issue_date=date.today(),
+            amount_brl=Decimal("100.00"),
+            verification_code="XYZ123",
+        )
+        self.assertEqual(nf_code_only.provider_type, "PAULISTANA")
+
+    def test_transient_error_classification(self):
+        import requests
+        from core.tasks.nfse_tasks import _is_transient_error
+
+        # Transient: connection error, timeout
+        self.assertTrue(_is_transient_error(requests.ConnectionError("Network drop")))
+        self.assertTrue(_is_transient_error(requests.Timeout("Timed out")))
+
+        # Transient: HTTP 500, 502, 503, 504
+        resp_503 = requests.Response()
+        resp_503.status_code = 503
+        err_503 = requests.HTTPError(response=resp_503)
+        self.assertTrue(_is_transient_error(err_503))
+
+        # Non-transient: HTTP 400, 422, 404
+        resp_400 = requests.Response()
+        resp_400.status_code = 400
+        err_400 = requests.HTTPError(response=resp_400)
+        self.assertFalse(_is_transient_error(err_400))
+
+        resp_422 = requests.Response()
+        resp_422.status_code = 422
+        err_422 = requests.HTTPError(response=resp_422)
+        self.assertFalse(_is_transient_error(err_422))
+
+        # Non-transient: ValueError, local validation errors
+        self.assertFalse(_is_transient_error(ValueError("Invalid CPF/CNPJ")))
+
+        # Transient: prefeitura / Sefin temporary outages & async processing
+        self.assertTrue(_is_transient_error(Exception("Prefeitura fora do ar")))
+        self.assertTrue(_is_transient_error(Exception("Serviço temporariamente indisponível")))
+        self.assertTrue(_is_transient_error(Exception("PDF not ready yet for NF 100")))
+        self.assertTrue(_is_transient_error(Exception("NFS-e batch submitted but not processed yet. Waiting for prefeitura.")))
+        self.assertTrue(_is_transient_error(Exception("Falha na comunicação com Sefin Nacional (HTTP 502)")))
+
+        # Deterministic: fiscal code validation, timeout > 24h, certificate/signature
+        self.assertFalse(_is_transient_error(Exception("Código de Serviço do Município ('02668') possui mais de 3 dígitos.")))
+        self.assertFalse(_is_transient_error(Exception("NFS-e 5 foi autorizada há mais de 24 horas e não pode ser cancelada.")))
+        self.assertFalse(_is_transient_error(Exception("Rejeição: Certificado Inválido.")))
+        self.assertFalse(_is_transient_error(Exception("Assinatura digital inválida: CNPJ do certificado não confere com prestador.")))
+        self.assertFalse(_is_transient_error(Exception("NFS-e já cancelada.")))
+        self.assertFalse(_is_transient_error(Exception("CompanySettings not found.")))
+
+    def test_cancel_invoice_task_deterministic_failure(self):
+        from unittest.mock import patch
+        from core.tasks.invoices_tasks import cancel_invoice_task
+        from celery.exceptions import Retry
+
+        client = Client.objects.create(name="Cancel Test Client", email="cancel@example.com")
+        inv = Invoice.objects.create(
+            client=client,
+            currency="USD",
+            issue_date=date.today(),
+            document_number=888,
+            status="PROCESSING",
+        )
+        nf = NotaFiscal.objects.create(
+            invoice=inv,
+            nf_number="888",
+            issue_date=date.today(),
+            amount_brl=Decimal("1000.00"),
+            description="Test",
+        )
+
+        # Mock cancel_nota_fiscal to raise deterministic error
+        with patch("core.services.nfse_services.cancel_nota_fiscal", side_effect=Exception("NFS-e 888 foi autorizada há mais de 24 horas e não pode ser cancelada.")):
+            with self.assertRaises(Exception) as ctx:
+                cancel_invoice_task.apply(args=[inv.id], throw=True)
+            self.assertIn("há mais de 24 horas", str(ctx.exception))
+            self.assertNotIsInstance(ctx.exception, Retry)
+
+        inv.refresh_from_db()
+        self.assertEqual(inv.status, "FINALIZED")
+        self.assertEqual(inv.task_id, "")
+        self.assertEqual(inv.task_retry_count, 0)
+
+    def test_cancel_invoice_task_transient_retry(self):
+        import requests
+        from unittest.mock import patch
+        from core.tasks.invoices_tasks import cancel_invoice_task
+        from celery.exceptions import Retry
+
+        client = Client.objects.create(name="Retry Test Client", email="retry@example.com")
+        inv = Invoice.objects.create(
+            client=client,
+            currency="USD",
+            issue_date=date.today(),
+            document_number=889,
+            status="PROCESSING",
+        )
+        nf = NotaFiscal.objects.create(
+            invoice=inv,
+            nf_number="889",
+            issue_date=date.today(),
+            amount_brl=Decimal("1000.00"),
+            description="Test",
+        )
+
+        with patch("core.services.nfse_services.cancel_nota_fiscal", side_effect=requests.ConnectionError("Connection timed out")):
+            with self.assertRaises(Retry):
+                cancel_invoice_task.apply(args=[inv.id], throw=True)
+
+        inv.refresh_from_db()
+        self.assertEqual(inv.task_retry_count, 1)
+
+    def test_cancel_nfse_standalone_deterministic_failure(self):
+        from unittest.mock import patch
+        from core.tasks.nfse_tasks import cancel_nfse_standalone_task
+        from celery.exceptions import Retry
+
+        nf = NotaFiscal.objects.create(
+            nf_number="890",
+            issue_date=date.today(),
+            amount_brl=Decimal("1000.00"),
+            description="Standalone Test",
+        )
+
+        with patch("core.services.nfse_services.cancel_nota_fiscal", side_effect=Exception("CompanySettings not found.")):
+            with self.assertRaises(Exception) as ctx:
+                cancel_nfse_standalone_task.apply(args=[nf.id], throw=True)
+            self.assertIn("CompanySettings not found", str(ctx.exception))
+            self.assertNotIsInstance(ctx.exception, Retry)
+
+    def test_email_invoice_task_deterministic_failure(self):
+        import smtplib
+        from unittest.mock import patch
+        from core.tasks.invoices_tasks import email_invoice_task
+        from celery.exceptions import Retry
+
+        client = Client.objects.create(name="Email Test Client", email="email@example.com")
+        inv = Invoice.objects.create(
+            client=client,
+            currency="USD",
+            issue_date=date.today(),
+            document_number=891,
+            status="PROCESSING",
+        )
+
+        with patch("core.tasks.invoices_tasks.send_email_with_debug", side_effect=smtplib.SMTPAuthenticationError(535, b"Authentication failed")):
+            with self.assertRaises(smtplib.SMTPAuthenticationError):
+                email_invoice_task.apply(args=[inv.id], kwargs={"send_to_client": True}, throw=True)
+
+    def test_email_invoice_task_transient_retry(self):
+        import smtplib
+        from unittest.mock import patch
+        from core.tasks.invoices_tasks import email_invoice_task
+        from celery.exceptions import Retry
+
+        client = Client.objects.create(name="Email Test Client", email="email@example.com")
+        inv = Invoice.objects.create(
+            client=client,
+            currency="USD",
+            issue_date=date.today(),
+            document_number=892,
+            status="PROCESSING",
+        )
+
+        with patch("core.tasks.invoices_tasks.send_email_with_debug", side_effect=smtplib.SMTPServerDisconnected("Connection unexpectedly closed")):
+            with self.assertRaises(Retry):
+                email_invoice_task.apply(args=[inv.id], kwargs={"send_to_client": True}, throw=True)
+
+    def test_fetch_nfse_pdf_task_deterministic_failure(self):
+        from unittest.mock import patch
+        from core.tasks.nfse_tasks import fetch_nfse_pdf_task
+        from celery.exceptions import Retry
+
+        nf = NotaFiscal.objects.create(
+            nf_number="893",
+            issue_date=date.today(),
+            amount_brl=Decimal("1000.00"),
+            description="PDF Test",
+        )
+
+        with patch("core.services.nfse_services.fetch_and_save_nfse_pdf", side_effect=Exception("Rejeição: Certificado Inválido.")):
+            with self.assertRaises(Exception) as ctx:
+                fetch_nfse_pdf_task.apply(args=[None, nf.id], throw=True)
+            self.assertIn("Certificado Inválido", str(ctx.exception))
+            self.assertNotIsInstance(ctx.exception, Retry)
+
+    def test_fetch_nfse_pdf_task_transient_retry(self):
+        from unittest.mock import patch
+        from core.tasks.nfse_tasks import fetch_nfse_pdf_task
+        from celery.exceptions import Retry
+
+        nf = NotaFiscal.objects.create(
+            nf_number="894",
+            issue_date=date.today(),
+            amount_brl=Decimal("1000.00"),
+            description="PDF Test",
+        )
+
+        with patch("core.services.nfse_services.fetch_and_save_nfse_pdf", return_value=None):
+            with self.assertRaises(Retry):
+                fetch_nfse_pdf_task.apply(args=[None, nf.id], throw=True)
+
+    def test_nfse_list_and_detail_views(self):
+        # Create Paulistana NF
+        nf_p = NotaFiscal.objects.create(
+            nf_number="50",
+            issue_date=date(2026, 5, 1),
+            amount_brl=Decimal("2000.00"),
+            description="Service P",
+            verification_code="VERIF1",
+            chave_acesso_nacional="355030811234567800019500000000000000502061168275466",
+            is_canceled=False,
+        )
+
+        # Create Nacional NF
+        inv = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-VIEW-001",
+            issue_date=date(2026, 10, 1),
+            currency="USD",
+            status="FINALIZED",
+        )
+        nf_n = NotaFiscal.objects.create(
+            invoice=inv,
+            nf_number="50",
+            issue_date=date(2026, 10, 1),
+            amount_brl=Decimal("8000.00"),
+            description="Service N",
+            chave_acesso_nacional="3550308212345678000195000000000000005026100822290116",
+            is_canceled=True,
+        )
+
+        # Create NfseLog
+        from core.models import NfseLog
+
+        NfseLog.objects.create(
+            invoice=inv,
+            nota_fiscal=nf_n,
+            payload_enviado="<DPS>sample</DPS>",
+            payload_retorno="<NFSe>sample</NFSe>",
+            origem="Test Runner",
+        )
+
+        # Test list view with provider filter
+        resp_all = self.client.get(reverse("nfse_list"))
+        self.assertEqual(resp_all.status_code, 200)
+        self.assertContains(resp_all, "Sefin Nacional")
+        self.assertContains(resp_all, "Paulistana")
+
+        resp_nac = self.client.get(reverse("nfse_list") + "?provider=NACIONAL")
+        self.assertEqual(resp_nac.status_code, 200)
+        self.assertEqual(len(resp_nac.context["notas"]), 1)
+        self.assertEqual(resp_nac.context["notas"][0].id, nf_n.id)
+
+        resp_paul = self.client.get(reverse("nfse_list") + "?provider=PAULISTANA")
+        self.assertEqual(resp_paul.status_code, 200)
+        self.assertEqual(len(resp_paul.context["notas"]), 1)
+        self.assertEqual(resp_paul.context["notas"][0].id, nf_p.id)
+
+        # Test status filter
+        resp_act = self.client.get(reverse("nfse_list") + "?status=ACTIVE")
+        self.assertEqual(resp_act.status_code, 200)
+        self.assertEqual(len(resp_act.context["notas"]), 1)
+        self.assertEqual(resp_act.context["notas"][0].id, nf_p.id)
+
+        resp_canc = self.client.get(reverse("nfse_list") + "?status=CANCELED")
+        self.assertEqual(resp_canc.status_code, 200)
+        self.assertEqual(len(resp_canc.context["notas"]), 1)
+        self.assertEqual(resp_canc.context["notas"][0].id, nf_n.id)
+
+        # Test detail view
+        resp_detail = self.client.get(reverse("nfse_detail", args=[nf_n.id]))
+        self.assertEqual(resp_detail.status_code, 200)
+        self.assertContains(resp_detail, "Sefin Nacional")
+        self.assertContains(resp_detail, "Cancelada")
+        self.assertContains(resp_detail, "Histórico de Transmissão e Logs")
+        self.assertContains(resp_detail, "&lt;DPS&gt;sample&lt;/DPS&gt;")
+
+    def test_paulistana_cancel_idempotent_when_already_canceled_externally(self):
+        from unittest.mock import MagicMock
+        from core.nfse.paulistana.provider import PaulistanaProvider
+        from core.services.nfse_services import cancel_nota_fiscal
+        from django.utils import timezone
+
+        nf = NotaFiscal.objects.create(
+            nf_number="12345",
+            issue_date=date.today(),
+            amount_brl=Decimal("1500.00"),
+            description="Paulistana already canceled externally",
+            verification_code="VALID99",
+            chave_acesso_nacional="3550308112345678000195000000000000123452061168275466",
+            is_canceled=False,
+        )
+
+        provider = PaulistanaProvider()
+        now = timezone.now()
+        mock_client = MagicMock()
+        mock_client.cancelar_nfe.return_value = (
+            False,
+            "",
+            "<retorno/>",
+            ["Erro: 1206 - Nota Fiscal já cancelada."],
+        )
+
+        with patch.object(provider, "_get_client", return_value=(mock_client, "123456")):
+            with patch.object(
+                provider,
+                "buscar_nfse_por_numero",
+                return_value={
+                    "is_canceled": True,
+                    "cancelation_date": now,
+                    "raw_xml": "<NFe><StatusNFe>C</StatusNFe></NFe>",
+                },
+            ):
+                with patch("core.services.nfse_services.fetch_and_save_nfse_pdf"):
+                    with patch("core.nfse.provider_factory.get_provider", return_value=provider):
+                        with patch.object(CompanySettings, "load") as mock_load:
+                            comp = CompanySettings.objects.get(id=self.company.id)
+                            comp.debug_mode = False
+                            mock_load.return_value = comp
+                            result = cancel_nota_fiscal(nf)
+
+        self.assertTrue(result.sucesso)
+        nf.refresh_from_db()
+        self.assertTrue(nf.is_canceled)
+        self.assertEqual(nf.cancelation_date, now)
+
+    def test_nacional_cancel_idempotent_when_already_canceled_externally(self):
+        from unittest.mock import MagicMock
+        from contextlib import contextmanager
+        from lxml import etree
+        from core.nfse.nacional.provider import NacionalProvider
+        from core.services.nfse_services import cancel_nota_fiscal
+        from django.utils import timezone
+
+        nf = NotaFiscal.objects.create(
+            nf_number="54321",
+            issue_date=date.today(),
+            amount_brl=Decimal("2500.00"),
+            description="Nacional already canceled externally",
+            chave_acesso_nacional="35503082123456780001950000000000005432126100822290116",
+            is_canceled=False,
+        )
+
+        provider = NacionalProvider()
+        now = timezone.now()
+
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.text = "Sefin HTTP 400: Pedido de cancelamento rejeitado"
+
+        @contextmanager
+        def mock_temp_cert(cert, key):
+            yield "/tmp/fake.pem"
+
+        dummy_elem = etree.Element("root")
+
+        with patch.object(provider, "_get_cert_pems", return_value=("fake_key", "fake_cert")):
+            with patch("core.nfse.nacional.provider.XMLSigner.sign", return_value=dummy_elem):
+                with patch("core.nfse.nacional.provider._temp_cert_file", side_effect=mock_temp_cert):
+                    with patch("core.nfse.nacional.provider._logged_post", return_value=mock_resp):
+                        with patch.object(
+                            provider,
+                            "consultar_eventos_nfse",
+                            return_value=[
+                                {
+                                    "tipo_evento": "101101",
+                                    "desc_evento": "Cancelamento de NFS-e",
+                                    "dh_evento": now,
+                                    "is_cancellation": True,
+                                    "raw_xml": "<eventoCancelamento/>",
+                                }
+                            ],
+                        ):
+                            with patch("core.services.nfse_services.fetch_and_save_nfse_pdf"):
+                                with patch("core.nfse.provider_factory.get_provider", return_value=provider):
+                                    result = cancel_nota_fiscal(nf)
+
+        self.assertTrue(result.sucesso)
+        nf.refresh_from_db()
+        self.assertTrue(nf.is_canceled)
+        self.assertEqual(nf.cancelation_date, now)
+
+
+class InvoiceFiscalCodesTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        cls.test_key_pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+
+        subject = issuer = x509.Name(
+            [x509.NameAttribute(NameOID.COMMON_NAME, "fiscaltest.com")]
+        )
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
+            .not_valid_after(datetime.now(timezone.utc) + timedelta(days=365))
+            .sign(key, hashes.SHA256())
+        )
+        cls.test_cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode(
+            "utf-8"
+        )
+
+    def setUp(self):
+        self.user = User.objects.create_superuser("fiscal_admin", "admin@fiscal.test", "pass")
+        self.client_http = HttpClient()
+        self.client_http.force_login(self.user)
+        self.company = CompanySettings.objects.create(
+            company_name="Fiscal Test Ltda",
+            cnpj="12.345.678/0001-95",
+            opening_date=date(2024, 1, 1),
+            inscricao_municipal="123456",
+            email="fiscal@test.com",
+            address_line1="Rua Teste",
+            address_city_ibge="3550308",
+            nfse_provider="NACIONAL",
+            next_document_number=1,
+            document_series="1",
+            pfx_cert_pem=self.test_cert_pem,
+            pfx_key_pem=self.test_key_pem,
+            debug_mode=True,
+        )
+        self.client_obj = Client.objects.create(
+            name="Global Client Inc",
+            address_neighborhood="Downtown",
+            address_country_code="CA",
+            address_city="Montreal",
+            address_postal_code="H2Y 1M6",
+            address_state_province="QC",
+            email="client@global.test",
+        )
+        self.invoice = Invoice.objects.create(
+            client=self.client_obj,
+            invoice_number="INV-FISC-01",
+            issue_date=date(2026, 10, 1),
+            currency="USD",
+            exchange_rate_to_brl=Decimal("5.00"),
+            codigo_tributacao_nacional="010101",
+            codigo_servico_municipio="",
+            codigo_nbs="115022000",
+            status="DRAFT",
+        )
+        InvoiceItem.objects.create(
+            invoice=self.invoice,
+            description="Software Consulting",
+            quantity=Decimal("1.00"),
+            unit_price_foreign=Decimal("1000.00"),
+        )
+
+    def test_invoice_form_validation(self):
+        from core.forms import InvoiceForm
+        # Empty fiscal codes -> invalid
+        form_empty = InvoiceForm(data={
+            "client": str(self.client_obj.id),
+            "invoice_number": "INV-NEW-01",
+            "issue_date": "2026-10-01",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "Service description",
+            "codigo_tributacao_nacional": "",
+            "codigo_servico_municipio": "",
+            "codigo_nbs": "",
+        })
+        self.assertFalse(form_empty.is_valid())
+        self.assertIn("codigo_tributacao_nacional", form_empty.errors)
+        self.assertIn("codigo_nbs", form_empty.errors)
+        # codigo_servico_municipio is optional
+        self.assertNotIn("codigo_servico_municipio", form_empty.errors)
+
+        # Valid without codigo_servico_municipio
+        form_valid = InvoiceForm(data={
+            "client": str(self.client_obj.id),
+            "invoice_number": "INV-NEW-02",
+            "issue_date": "2026-10-01",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "Service description",
+            "codigo_tributacao_nacional": "010101",
+            "codigo_servico_municipio": "",
+            "codigo_nbs": "115022000",
+        })
+        self.assertTrue(form_valid.is_valid(), form_valid.errors)
+
+        # Fresh form has no pre-filled default for fiscal codes
+        fresh_form = InvoiceForm()
+        self.assertFalse(fresh_form.initial.get("codigo_tributacao_nacional"))
+        self.assertFalse(fresh_form.initial.get("codigo_servico_municipio"))
+        self.assertFalse(fresh_form.initial.get("codigo_nbs"))
+
+    def test_invoice_template_form_validation(self):
+        from core.forms import InvoiceTemplateForm
+        form_empty = InvoiceTemplateForm(data={
+            "name": "Template Fiscal Empty",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "Service description",
+            "codigo_tributacao_nacional": "",
+            "codigo_servico_municipio": "",
+            "codigo_nbs": "",
+        })
+        self.assertFalse(form_empty.is_valid())
+        self.assertIn("codigo_tributacao_nacional", form_empty.errors)
+        self.assertIn("codigo_nbs", form_empty.errors)
+        self.assertNotIn("codigo_servico_municipio", form_empty.errors)
+
+        form_valid = InvoiceTemplateForm(data={
+            "name": "Template Fiscal Valid",
+            "currency": "USD",
+            "bank_details": "",
+            "nfse_description": "Service description",
+            "codigo_tributacao_nacional": "010101",
+            "codigo_servico_municipio": "02668",
+            "codigo_nbs": "115022000",
+        })
+        self.assertTrue(form_valid.is_valid(), form_valid.errors)
+
+    def test_htmx_get_invoice_template_returns_fiscal_codes(self):
+        tmpl = InvoiceTemplate.objects.create(
+            name="Template Codes",
+            currency="EUR",
+            bank_details="Bank info",
+            nfse_description="NFSe info",
+            codigo_tributacao_nacional="010101",
+            codigo_servico_municipio="02668",
+            codigo_nbs="115022000",
+        )
+        resp = self.client_http.get(reverse("htmx_get_invoice_template", args=[tmpl.id]))
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data["codigo_tributacao_nacional"], "010101")
+        self.assertEqual(data["codigo_servico_municipio"], "02668")
+        self.assertEqual(data["codigo_nbs"], "115022000")
+
+    def test_clone_invoice_copies_fiscal_codes(self):
+        self.invoice.codigo_tributacao_nacional = "010203"
+        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.codigo_nbs = "115022999"
+        self.invoice.save()
+
+        resp = self.client_http.post(reverse("clone_invoice", args=[self.invoice.id]))
+        self.assertEqual(resp.status_code, 302)
+
+        cloned = Invoice.objects.exclude(id=self.invoice.id).first()
+        self.assertIsNotNone(cloned)
+        self.assertEqual(cloned.codigo_tributacao_nacional, "010203")
+        self.assertEqual(cloned.codigo_servico_municipio, "02668")
+        self.assertEqual(cloned.codigo_nbs, "115022999")
+
+    def test_htmx_update_fiscal_codes_flow(self):
+        url = reverse("htmx_update_fiscal_codes", args=[self.invoice.id])
+
+        # Valid update
+        resp = self.client_http.post(url, data={
+            "codigo_tributacao_nacional": "010102",
+            "codigo_servico_municipio": "001",
+            "codigo_nbs": "115022001",
+        })
+        self.assertEqual(resp.status_code, 200)
+        self.invoice.refresh_from_db()
+        self.assertEqual(self.invoice.codigo_tributacao_nacional, "010102")
+        self.assertEqual(self.invoice.codigo_servico_municipio, "001")
+        self.assertEqual(self.invoice.codigo_nbs, "115022001")
+
+        # Invalid update (missing required)
+        resp_err = self.client_http.post(url, data={
+            "codigo_tributacao_nacional": "",
+            "codigo_servico_municipio": "",
+            "codigo_nbs": "",
+        })
+        self.assertEqual(resp_err.status_code, 400)
+        self.assertContains(resp_err, "O Código de Tributação Nacional é obrigatório.", status_code=400)
+
+        # Cannot update finalized invoice
+        self.invoice.status = "FINALIZED"
+        self.invoice.save()
+        resp_final = self.client_http.post(url, data={
+            "codigo_tributacao_nacional": "010101",
+            "codigo_nbs": "115022000",
+        })
+        self.assertEqual(resp_final.status_code, 400)
+
+    def test_nacional_provider_fiscal_code_rules(self):
+        from core.nfse.nacional.provider import NacionalProvider
+        nacional_provider = NacionalProvider()
+
+        # 1. When codigo_servico_municipio is empty -> <cTribMun> omitted
+        self.invoice.codigo_tributacao_nacional = "010101"
+        self.invoice.codigo_servico_municipio = ""
+        self.invoice.codigo_nbs = "115022000"
+        self.invoice.save()
+
+        _, signed_xml, _ = nacional_provider._build_and_sign_dps(
+            self.invoice, self.company, 1, "1"
+        )
+        self.assertIn("<cTribNac>010101</cTribNac>", signed_xml)
+        self.assertIn("<cNBS>115022000</cNBS>", signed_xml)
+        self.assertNotIn("<cTribMun>", signed_xml)
+
+        # 2. When codigo_servico_municipio has <= 3 digits -> <cTribMun> sent
+        self.invoice.codigo_servico_municipio = "001"
+        self.invoice.save()
+        _, signed_xml_mun, _ = nacional_provider._build_and_sign_dps(
+            self.invoice, self.company, 2, "1"
+        )
+        self.assertIn("<cTribMun>001</cTribMun>", signed_xml_mun)
+
+        # 3. When codigo_servico_municipio has > 3 digits -> emitir_nfse fails with clear error
+        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.save()
+        emit_res = nacional_provider.emitir_nfse(self.invoice)
+        self.assertFalse(emit_res.sucesso)
+        self.assertTrue(any("possui mais de 3 dígitos" in err for err in emit_res.erros))
+
+    def test_paulistana_provider_fiscal_code_rules(self):
+        from core.nfse.paulistana.provider import PaulistanaProvider
+        paulistana_provider = PaulistanaProvider()
+
+        # 1. When codigo_servico_municipio is empty -> rejected
+        self.invoice.codigo_servico_municipio = ""
+        self.invoice.save()
+        res_empty = paulistana_provider.emitir_nfse(self.invoice)
+        self.assertFalse(res_empty.sucesso)
+        self.assertTrue(any("Código de Serviço do Município é obrigatório" in err for err in res_empty.erros))
+
+        # 2. When codigo_servico_municipio is provided -> accepted and passed to RPS
+        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.save()
+        with patch("core.nfse.paulistana.client.NFeClient.testar_envio_lote_rps") as mock_test:
+            from core.nfse.paulistana.schemas_v1.retorno_envio_lote_rps_v01 import (
+                RetornoEnvioLoteRps as RetornoEnvioLoteRpsV1,
+            )
+            mock_test.return_value = (
+                RetornoEnvioLoteRpsV1(cabecalho=RetornoEnvioLoteRpsV1.Cabecalho(sucesso=True)),
+                "<signed/>",
+                "<retorno/>",
+            )
+            res_ok = paulistana_provider.emitir_nfse(self.invoice)
+            self.assertTrue(res_ok.sucesso)
+            call_args = mock_test.call_args[0][0]
+            self.assertEqual(call_args[0].codigo_servico, "02668")
+
+    def test_create_nf_preserves_invoice_fiscal_codes(self):
+        from core.services.nfse_services import _create_nf_from_emit_result
+        from core.nfse.base import EmitResult
+
+        self.invoice.codigo_tributacao_nacional = "010101"
+        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.codigo_nbs = "115022000"
+        self.invoice.save()
+
+        # Provider result missing fiscal codes
+        result = EmitResult(
+            sucesso=True,
+            numero_nf="9999",
+            codigo_verificacao="XYZ-123",
+            codigo_tributacao_nacional="",
+            codigo_servico_municipio="",
+            codigo_nbs="",
+        )
+        from unittest.mock import MagicMock
+        mock_provider = MagicMock()
+        mock_provider.baixar_pdf.return_value = b"%PDF mock"
+        nf = _create_nf_from_emit_result(self.invoice, result, mock_provider)
+        self.assertEqual(nf.codigo_tributacao_nacional, "010101")
+        self.assertEqual(nf.codigo_servico_municipio, "02668")
+        self.assertEqual(nf.codigo_nbs, "115022000")
+
+
+class PastConsolidationsImportTests(TestCase):
+    def setUp(self):
+        self.company = CompanySettings.objects.create(
+            company_name="Synthetic Test Services Ltda",
+            cnpj="00.000.000/0001-99",
+            inscricao_municipal="987654",
+            opening_date=date(2024, 1, 1),
+            email="finance@example.com",
+            address_city_ibge="3550308",
+            nfse_provider="NACIONAL",
+        )
+
+    def test_populate_past_consolidations_leaves_closed_months_zero_unless_synced(self):
+        from core.services.consolidation import populate_consolidations_for_imported_notes
+        from core.models import NotaFiscal, MonthlyConsolidation
+
+        # Notes in past months
+        NotaFiscal.objects.create(
+            nf_number="101",
+            issue_date=date(2024, 2, 10),
+            amount_brl=Decimal("10000.00"),
+            description="Software Services",
+            is_export=True,
+        )
+        NotaFiscal.objects.create(
+            nf_number="102",
+            issue_date=date(2024, 3, 10),
+            amount_brl=Decimal("10000.00"),
+            description="Software Services",
+            is_export=True,
+        )
+
+        populate_consolidations_for_imported_notes([date(2024, 2, 10), date(2024, 3, 10)])
+
+        cons_feb = MonthlyConsolidation.objects.get(month_year=date(2024, 2, 1))
+        cons_mar = MonthlyConsolidation.objects.get(month_year=date(2024, 3, 1))
+
+        # Closed months without eSocial sync must remain at 0.00 and not assume ideal pró-labore
+        self.assertEqual(cons_feb.actual_pro_labore_paid, Decimal("0.00"))
+        self.assertEqual(cons_mar.actual_pro_labore_paid, Decimal("0.00"))
+
+    def test_populate_past_consolidations_resets_unsynced_closed_month_pro_labore_to_zero(self):
+        from core.services.consolidation import populate_consolidations_for_imported_notes
+        from core.models import NotaFiscal, MonthlyConsolidation
+
+        # Pre-existing consolidation with minimum salary on a closed month
+        cons = MonthlyConsolidation.objects.create(
+            month_year=date(2024, 2, 1),
+            status="CONSOLIDATED",
+            actual_pro_labore_paid=Decimal("1412.00"),
+        )
+        NotaFiscal.objects.create(
+            nf_number="103",
+            issue_date=date(2024, 2, 10),
+            amount_brl=Decimal("20000.00"),
+            description="Software Services",
+            is_export=True,
+        )
+
+        populate_consolidations_for_imported_notes([date(2024, 2, 10)])
+
+        cons.refresh_from_db()
+        # Closed months without eSocial sync must reset to 0.00, not force ideal or minimum salary
+        self.assertEqual(cons.actual_pro_labore_paid, Decimal("0.00"))
+
+    def test_audit_consolidations_leaves_unsynced_closed_months_at_zero(self):
+        from core.services.consolidation import audit_consolidations
+        from core.models import NotaFiscal, MonthlyConsolidation
+
+        NotaFiscal.objects.create(
+            nf_number="104",
+            issue_date=date(2024, 4, 10),
+            amount_brl=Decimal("20000.00"),
+            description="Software Services",
+            is_export=True,
+        )
+        NotaFiscal.objects.create(
+            nf_number="105",
+            issue_date=date(2024, 5, 10),
+            amount_brl=Decimal("20000.00"),
+            description="Software Services",
+            is_export=True,
+        )
+
+        # Note creation in April 2024 flagged months outdated with default 0.00 pro-labore
+        cons_apr = MonthlyConsolidation.objects.get(month_year=date(2024, 4, 1))
+        self.assertEqual(cons_apr.actual_pro_labore_paid, Decimal("0.00"))
+
+        audit_consolidations()
+
+        cons_apr = MonthlyConsolidation.objects.get(month_year=date(2024, 4, 1))
+        cons_may = MonthlyConsolidation.objects.get(month_year=date(2024, 5, 1))
+
+        # Closed months without eSocial sync remain at 0.00
+        self.assertEqual(cons_apr.actual_pro_labore_paid, Decimal("0.00"))
+        self.assertEqual(cons_may.actual_pro_labore_paid, Decimal("0.00"))
+
+
+class NfseEmissionErrorHandlingTests(NFSeProviderAbstractionTests):
+    def test_nacional_parse_error_response_pascal_case_keys(self):
+        from unittest.mock import MagicMock
+        from core.nfse.nacional.provider import NacionalProvider
+
+        provider = NacionalProvider()
+        mock_resp = MagicMock()
+        mock_resp.status_code = 400
+        mock_resp.json.return_value = {
+            "tipoAmbiente": 2,
+            "idDPS": "DPS355030824579135100010404242000000000000001",
+            "erros": [
+                {
+                    "Codigo": "E1235",
+                    "Descricao": "Falha no esquema XML do DF-e.",
+                    "Complemento": "The 'cEndPost' element is invalid.",
+                }
+            ],
+        }
+
+        errs = provider._parse_error_response(mock_resp)
+        self.assertEqual(len(errs), 1)
+        self.assertIn("E1235", errs[0])
+        self.assertIn("Falha no esquema XML do DF-e.", errs[0])
+        self.assertIn("The 'cEndPost' element is invalid.", errs[0])
+
+    def test_nfse_log_properties(self):
+        from core.models import NfseLog
+
+        # Error in payload_retorno with empty erro_mensagem
+        log_err = NfseLog(
+            payload_retorno='{"erros":[{"Codigo":"E1235","Descricao":"Falha no esquema XML","Complemento":"detalhe"}]}',
+            erro_mensagem="",
+        )
+        self.assertFalse(log_err.is_success)
+        self.assertIn("E1235 - Falha no esquema XML (detalhe)", log_err.display_error)
+
+        # Successful log
+        log_ok = NfseLog(
+            payload_retorno='{"chaveAcesso":"3550308...","numeroNFSe":"1"}',
+            erro_mensagem="",
+        )
+        self.assertTrue(log_ok.is_success)
+        self.assertEqual(log_ok.display_error, "")
+
+    def test_nacional_build_dps_foreign_address_fallback(self):
+        from core.models import Client, Invoice
+        from core.nfse.nacional.provider import NacionalProvider
+        from datetime import date
+        from decimal import Decimal
+
+        company = self.company
+
+        client = Client.objects.create(
+            name="Foreign Test Client LLC",
+            email="client@example.com",
+            address_country_code="US",
+            address_city="San Francisco",
+            address_state_province="",  # Empty
+            address_postal_code="",     # Empty
+        )
+
+        from core.models import InvoiceItem
+
+        inv = Invoice.objects.create(
+            invoice_number="999",
+            client=client,
+            issue_date=date.today(),
+            currency="USD",
+            exchange_rate_to_brl=Decimal("5.0000"),
+            codigo_tributacao_nacional="010101",
+            codigo_nbs="115022000",
+            codigo_servico_municipio="001",
+            status="DRAFT",
+        )
+        InvoiceItem.objects.create(
+            invoice=inv,
+            description="Service item",
+            quantity=1,
+            unit_price_foreign=Decimal("100.00"),
+        )
+        inv.status = "FINALIZED"
+        inv.save()
+
+        provider = NacionalProvider()
+        dps, signed_xml, id_dps = provider._build_and_sign_dps(inv, company, 999, "4242")
+        self.assertNotIn("<cEndPost/>", signed_xml)
+        self.assertNotIn("<xEstProvReg/>", signed_xml)
+        self.assertIn("<cEndPost>N/A</cEndPost>", signed_xml)
+        self.assertIn("<xEstProvReg>N/A</xEstProvReg>", signed_xml)
+
+
+from core.tests_esocial import (
+    EsocialSignerTests,
+    EsocialParserTests,
+    EsocialClientAndSyncTests,
+    EsocialBackupTests,
+)
 

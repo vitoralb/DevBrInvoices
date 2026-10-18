@@ -299,6 +299,57 @@ def calculate_simples_tax(
     return total_tax, cpp_tax
 
 
+def is_month_closed(month_year: date, today: date | None = None) -> bool:
+    """Retorna True se o mês for considerado fechado:
+    - Qualquer mês anterior ao mês passado (month_year < prev_month)
+    - O mês passado (month_year == prev_month) se today.day > 7
+    """
+    if today is None:
+        from django.utils import timezone
+        today = timezone.localdate()
+    first_day = month_year.replace(day=1)
+    current_month = today.replace(day=1)
+    prev_month = current_month - relativedelta(months=1)
+    if first_day < prev_month:
+        return True
+    if first_day == prev_month and today.day > 7:
+        return True
+    return False
+
+
+def get_unsynced_prior_months_for_ideal_pl(target_month: date, all_cons_dict: dict | None = None) -> list[date]:
+    """Retorna lista de meses anteriores na janela de cálculo do pró-labore ideal
+    (últimos 11 meses até target_month-1, respeitando a data de abertura da empresa)
+    que ainda não foram sincronizados com o eSocial.
+    """
+    company = CompanySettings.load()
+    if not company:
+        return []
+
+    start_date = target_month.replace(day=1) - relativedelta(months=11)
+    if company.opening_date and company.opening_date.replace(day=1) > start_date:
+        start_date = company.opening_date.replace(day=1)
+
+    end_date = target_month.replace(day=1) - relativedelta(months=1)
+    if start_date > end_date:
+        return []
+
+    unsynced = []
+    curr = start_date
+    while curr <= end_date:
+        if all_cons_dict is not None:
+            c = all_cons_dict.get(curr)
+            if not c or not getattr(c, "esocial_synced", False):
+                unsynced.append(curr)
+        else:
+            c = MonthlyConsolidation.objects.filter(month_year=curr).first()
+            if not c or not c.esocial_synced:
+                unsynced.append(curr)
+        curr += relativedelta(months=1)
+
+    return unsynced
+
+
 def attach_recommended_pl(consolidation, all_cons_dict=None):
     """Computes and attaches Fator R projection attributes to a MonthlyConsolidation instance.
 
@@ -315,6 +366,17 @@ def attach_recommended_pl(consolidation, all_cons_dict=None):
         consolidation.month_year, estimated_current_revenue=consolidation.total_revenue
     )
     consolidation.recommended_pl = pl_total
+    consolidation.is_closed = is_month_closed(consolidation.month_year)
+    consolidation.unsynced_prior_months = get_unsynced_prior_months_for_ideal_pl(
+        consolidation.month_year, all_cons_dict
+    )
+    consolidation.has_incomplete_esocial_window = bool(consolidation.unsynced_prior_months)
+    consolidation.net_pro_labore = max(
+        Decimal("0.00"),
+        (consolidation.actual_pro_labore_paid or Decimal("0.00"))
+        - (consolidation.inss_tax or Decimal("0.00"))
+        - (consolidation.irrf_tax or Decimal("0.00")),
+    )
 
     start_date = consolidation.month_year - relativedelta(months=11)
     end_date = consolidation.month_year - relativedelta(months=1)

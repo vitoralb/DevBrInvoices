@@ -4,6 +4,9 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}{{ PROJECT_NAME }}{% endblock %}</title>
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/bootstrap-icons@1.11.3/font/bootstrap-icons.min.css">
     <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/flatpickr/dist/flatpickr.min.css">
@@ -11,78 +14,499 @@
     <script src="https://cdn.jsdelivr.net/npm/flatpickr"></script>
     <script src="https://npmcdn.com/flatpickr/dist/l10n/pt.js"></script>
     {% block extra_head %}{% endblock %}
+    <style>
+      :root {
+        --app-font-sans: 'Inter', system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+        --app-font-mono: 'JetBrains Mono', SFMono-Regular, Menlo, Monaco, Consolas, monospace;
+      }
+      body {
+        font-family: var(--app-font-sans);
+        background-color: var(--bs-body-bg);
+        color: var(--bs-body-color);
+        -webkit-font-smoothing: antialiased;
+      }
+      code, kbd, samp, pre, .font-monospace {
+        font-family: var(--app-font-mono) !important;
+      }
+      .table td, .table th, .font-monospace {
+        font-variant-numeric: tabular-nums;
+      }
+      [data-bs-theme="light"] {
+        --app-bg: #f8fafc;
+        --app-card-bg: #ffffff;
+        --app-border: #e2e8f0;
+        --bs-body-bg: #f8fafc;
+        --bs-border-color: #e2e8f0;
+      }
+      [data-bs-theme="dark"] {
+        --app-bg: #0f172a;
+        --app-card-bg: #1e293b;
+        --app-border: #334155;
+        --bs-body-bg: #0f172a;
+        --bs-border-color: #334155;
+      }
+      .card {
+        background-color: var(--app-card-bg);
+        border-color: var(--app-border);
+      }
+      /* Flatpickr dark theme integration */
+      [data-bs-theme="dark"] .flatpickr-calendar {
+        background: #1e293b;
+        box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.5), 0 4px 6px -4px rgba(0, 0, 0, 0.5);
+        border: 1px solid #334155;
+        color: #e2e8f0;
+      }
+      [data-bs-theme="dark"] .flatpickr-calendar .flatpickr-month,
+      [data-bs-theme="dark"] .flatpickr-calendar .flatpickr-weekdays,
+      [data-bs-theme="dark"] .flatpickr-calendar span.flatpickr-weekday {
+        background: #1e293b;
+        color: #94a3b8;
+        fill: #94a3b8;
+      }
+      [data-bs-theme="dark"] .flatpickr-calendar .flatpickr-day {
+        color: #e2e8f0;
+      }
+      [data-bs-theme="dark"] .flatpickr-calendar .flatpickr-day:hover,
+      [data-bs-theme="dark"] .flatpickr-calendar .flatpickr-day:focus {
+        background: #334155;
+      }
+      [data-bs-theme="dark"] .flatpickr-calendar .flatpickr-day.selected {
+        background: #3b82f6;
+        border-color: #3b82f6;
+        color: #ffffff;
+      }
+      [data-bs-theme="dark"] .flatpickr-calendar .flatpickr-day.today {
+        border-color: #60a5fa;
+      }
+      [data-bs-theme="dark"] .flatpickr-months .flatpickr-prev-month,
+      [data-bs-theme="dark"] .flatpickr-months .flatpickr-next-month,
+      [data-bs-theme="dark"] .flatpickr-months .flatpickr-prev-month svg,
+      [data-bs-theme="dark"] .flatpickr-months .flatpickr-next-month svg {
+        fill: #e2e8f0;
+        color: #e2e8f0;
+      }
+      [data-bs-theme="dark"] .flatpickr-current-month .flatpickr-monthDropdown-months,
+      [data-bs-theme="dark"] .flatpickr-current-month input.cur-year {
+        color: #e2e8f0;
+      }
+      ul.errorlist {
+        list-style: none;
+        padding-left: 0;
+        margin-bottom: 0.25rem;
+        font-size: 0.875rem;
+        color: var(--bs-danger);
+      }
+      .navbar {
+        border-bottom: 1px solid rgba(255, 255, 255, 0.1);
+      }
+    </style>
     <script>
-      const getPreferredTheme = () => window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
-      const setTheme = theme => document.documentElement.setAttribute('data-bs-theme', theme);
-      setTheme(getPreferredTheme());
-      window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => setTheme(getPreferredTheme()));
+      (function() {
+        const storedTheme = localStorage.getItem('notas-theme') || 'auto';
+        function getEffectiveTheme(theme) {
+          if (theme === 'auto') {
+            return window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+          }
+          return theme;
+        }
+        document.documentElement.setAttribute('data-bs-theme', getEffectiveTheme(storedTheme));
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => {
+          const current = localStorage.getItem('notas-theme') || 'auto';
+          if (current === 'auto') {
+            document.documentElement.setAttribute('data-bs-theme', getEffectiveTheme('auto'));
+          }
+        });
+      })();
     </script>
 </head>
 <body hx-headers='{"X-CSRFToken": "{{ csrf_token }}"}'>
     <nav class="navbar navbar-expand-lg navbar-dark bg-dark mb-4">
         <div class="container">
-            <a class="navbar-brand" href="{% url 'dashboard' %}">{{ PROJECT_NAME }}</a>
+            <a class="navbar-brand fw-bold" href="{% url 'dashboard' %}">{{ PROJECT_NAME }}</a>
             {% if ENVIRONMENT == "dev" or FORCE_DEBUG_MODE %}
-            <span class="badge bg-warning text-dark ms-2 fs-6"><i class="bi bi-tools"></i> AMBIENTE DEV (MODO DEBUG)</span>
+            <span class="badge bg-warning text-dark ms-2 small d-inline-flex align-items-center gap-1"><i class="bi bi-tools"></i> DEV</span>
             {% elif company and company.debug_mode %}
-            <span class="badge bg-danger ms-2 fs-6">MODO DEBUG ATIVADO</span>
+            <span class="badge bg-danger ms-2 small">DEBUG</span>
             {% endif %}
             <button class="navbar-toggler" type="button" data-bs-toggle="collapse" data-bs-target="#navbarNav" aria-controls="navbarNav" aria-expanded="false" aria-label="Alternar navegação">
                 <span class="navbar-toggler-icon"></span>
             </button>
             <div class="collapse navbar-collapse" id="navbarNav">
+                {% with url_name=request.resolver_match.url_name %}
                 <ul class="navbar-nav me-auto">
                     {% if user.is_authenticated %}
-                    <li class="nav-item"><a class="nav-link" href="{% url 'dashboard' %}">Painel</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{% url 'invoice_list' %}">Invoices</a></li>
-                    <li class="nav-item"><a class="nav-link" href="{% url 'nfse_list' %}">NFS-es</a></li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if url_name == 'dashboard' or url_name == 'mes_detail' %}active fw-semibold{% endif %}" href="{% url 'dashboard' %}">Painel do Mês</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if url_name == 'consolidation_history' %}active fw-semibold{% endif %}" href="{% url 'consolidation_history' %}">Histórico Mensal</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'invoice' in url_name and url_name != 'invoice_template_list' and url_name != 'invoice_template_create' and url_name != 'invoice_template_update' %}active fw-semibold{% endif %}" href="{% url 'invoice_list' %}">Invoices</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'nfse' in url_name %}active fw-semibold{% endif %}" href="{% url 'nfse_list' %}">NFS-es</a>
+                    </li>
+                    <li class="nav-item">
+                        <a class="nav-link {% if 'client' in url_name %}active fw-semibold{% endif %}" href="{% url 'client_list' %}">Clientes</a>
+                    </li>
                     {% endif %}
                 </ul>
-                <ul class="navbar-nav ms-auto">
+                <ul class="navbar-nav ms-auto align-items-lg-center">
                     {% if user.is_authenticated %}
+                    <!-- Theme Switcher Dropdown -->
+                    <li class="nav-item dropdown me-2 my-2 my-lg-0">
+                        <button class="btn btn-sm btn-outline-secondary dropdown-toggle d-flex align-items-center gap-1 text-light border-secondary" id="bd-theme" type="button" aria-expanded="false" data-bs-toggle="dropdown" aria-label="Alternar tema">
+                            <i class="bi bi-circle-half theme-icon-active" id="theme-active-icon"></i>
+                            <span class="d-none d-lg-inline small ms-1" id="bd-theme-text">Tema</span>
+                        </button>
+                        <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="bd-theme">
+                            <li>
+                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" data-bs-theme-value="light">
+                                    <i class="bi bi-sun-fill text-warning"></i> Claro
+                                </button>
+                            </li>
+                            <li>
+                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" data-bs-theme-value="dark">
+                                    <i class="bi bi-moon-stars-fill text-info"></i> Escuro
+                                </button>
+                            </li>
+                            <li>
+                                <button type="button" class="dropdown-item d-flex align-items-center gap-2" data-bs-theme-value="auto">
+                                    <i class="bi bi-circle-half text-secondary"></i> Sistema
+                                </button>
+                            </li>
+                        </ul>
+                    </li>
                     <li class="nav-item dropdown">
-                        <a class="nav-link dropdown-toggle" href="#" id="navbarConfigDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
+                        <a class="nav-link dropdown-toggle {% if 'settings' in url_name or 'template' in url_name or 'task' in url_name %}active fw-semibold{% endif %}" href="#" id="navbarConfigDropdown" role="button" data-bs-toggle="dropdown" aria-expanded="false">
                             Configurações
                         </a>
                         <ul class="dropdown-menu dropdown-menu-end" aria-labelledby="navbarConfigDropdown">
-                            <li><a class="dropdown-item" href="{% url 'company_settings' %}">Sua Empresa</a></li>
-                            <li><a class="dropdown-item" href="{% url 'email_template_list' %}">Emails</a></li>
-                            <li><a class="dropdown-item" href="{% url 'invoice_template_list' %}">Invoice Templates</a></li>
+                            <li><a class="dropdown-item" href="{% url 'company_settings' %}"><i class="bi bi-building me-2"></i>Sua Empresa</a></li>
+                            <li><a class="dropdown-item" href="{% url 'invoice_template_list' %}"><i class="bi bi-file-earmark-text me-2"></i>Modelos (Templates)</a></li>
                             {% if company and company.debug_mode %}
                             <li><hr class="dropdown-divider"></li>
                             {% if user.is_staff %}
-                            <li><a class="dropdown-item" href="{% url 'tasks_view' %}">Tarefas em Andamento</a></li>
+                            <li><a class="dropdown-item" href="{% url 'tasks_view' %}"><i class="bi bi-list-task me-2"></i>Tarefas em Andamento</a></li>
                             {% endif %}
-                            <li><a class="dropdown-item text-warning" href="{% url 'admin:index' %}">Configurações Admin</a></li>
+                            <li><a class="dropdown-item text-warning" href="{% url 'admin:index' %}"><i class="bi bi-shield-lock me-2"></i>Configurações Admin</a></li>
                             {% endif %}
                         </ul>
                     </li>
                     <li class="nav-item">
                         <form method="post" action="{% url 'logout' %}" class="d-inline">
                             {% csrf_token %}
-                            <button type="submit" class="btn btn-link nav-link text-secondary">Sair ({{ user.username }})</button>
+                            <button type="submit" class="btn btn-link nav-link text-secondary px-0 px-lg-2">Sair ({{ user.username }})</button>
                         </form>
                     </li>
                     {% else %}
                     <li class="nav-item"><a class="nav-link" href="{% url 'login' %}">Entrar</a></li>
                     {% endif %}
                 </ul>
+                {% endwith %}
             </div>
         </div>
     </nav>
     <main class="container mb-5">
         {% if messages %}
             {% for message in messages %}
-                <div class="alert alert-{{ message.tags|default:'info' }} alert-dismissible fade show" role="alert">
-                    {{ message }}
+                <div class="alert {% if message.tags == 'error' %}alert-danger{% elif message.tags == 'success' %}alert-success{% elif message.tags == 'warning' %}alert-warning{% else %}alert-info{% endif %} alert-dismissible fade show d-flex align-items-center" role="alert">
+                    {% if message.tags == 'error' %}
+                        <i class="bi bi-exclamation-triangle-fill flex-shrink-0 me-2 fs-5"></i>
+                    {% elif message.tags == 'success' %}
+                        <i class="bi bi-check-circle-fill flex-shrink-0 me-2 fs-5"></i>
+                    {% elif message.tags == 'warning' %}
+                        <i class="bi bi-exclamation-circle-fill flex-shrink-0 me-2 fs-5"></i>
+                    {% else %}
+                        <i class="bi bi-info-circle-fill flex-shrink-0 me-2 fs-5"></i>
+                    {% endif %}
+                    <div class="flex-grow-1">{{ message }}</div>
                     <button type="button" class="btn-close" data-bs-dismiss="alert" aria-label="Fechar"></button>
                 </div>
             {% endfor %}
         {% endif %}
         {% block content %}{% endblock %}
     </main>
+
+    <!-- Global Confirmation Modal -->
+    <div class="modal fade" id="globalConfirmModal" tabindex="-1" aria-labelledby="globalConfirmModalLabel" aria-hidden="true">
+        <div class="modal-dialog modal-dialog-centered">
+            <div class="modal-content">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="globalConfirmModalLabel"><i class="bi bi-question-circle me-2"></i>Confirmar Ação</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body" id="globalConfirmModalBody">
+                    Tem certeza de que deseja realizar esta operação?
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="button" class="btn btn-danger" id="globalConfirmModalSubmit">Confirmar</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
     <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
     <script>
+        // Theme switcher logic
+        function updateThemeUI(theme) {
+            const iconMap = {
+                light: 'bi-sun-fill text-warning',
+                dark: 'bi-moon-stars-fill text-info',
+                auto: 'bi-circle-half text-secondary'
+            };
+            const activeIcon = document.getElementById('theme-active-icon');
+            if (activeIcon) {
+                activeIcon.className = `bi ${iconMap[theme] || iconMap.auto} theme-icon-active`;
+            }
+            document.querySelectorAll('[data-bs-theme-value]').forEach(btn => {
+                const isCurrent = btn.getAttribute('data-bs-theme-value') === theme;
+                btn.classList.toggle('active', isCurrent);
+            });
+        }
+
+        function setTheme(theme) {
+            localStorage.setItem('notas-theme', theme);
+            const effective = theme === 'auto'
+                ? (window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light')
+                : theme;
+            document.documentElement.setAttribute('data-bs-theme', effective);
+            updateThemeUI(theme);
+        }
+
+        document.querySelectorAll('[data-bs-theme-value]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                setTheme(btn.getAttribute('data-bs-theme-value'));
+            });
+        });
+        updateThemeUI(localStorage.getItem('notas-theme') || 'auto');
+
+        // Global Confirmation Modal logic
+        let pendingConfirmAction = null;
+        let confirmModal = null;
+        const confirmModalEl = document.getElementById('globalConfirmModal');
+        if (confirmModalEl && typeof bootstrap !== 'undefined') {
+            confirmModal = new bootstrap.Modal(confirmModalEl);
+        }
+
+        window.showConfirmModal = function({ message, title = 'Confirmar Ação', variant = 'danger', onConfirm }) {
+            const modalEl = document.getElementById('globalConfirmModal');
+            if (!modalEl || typeof bootstrap === 'undefined') {
+                if (confirm(message)) {
+                    if (typeof onConfirm === 'function') onConfirm();
+                }
+                return;
+            }
+            document.getElementById('globalConfirmModalLabel').innerHTML = `<i class="bi bi-question-circle me-2"></i>` + title;
+            document.getElementById('globalConfirmModalBody').innerText = message;
+
+            const submitBtn = document.getElementById('globalConfirmModalSubmit');
+            if (submitBtn) {
+                submitBtn.className = `btn btn-${variant}`;
+            }
+
+            pendingConfirmAction = onConfirm;
+            const modalInstance = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
+            modalInstance.show();
+        };
+
+        // HTMX confirmation handling
+        document.addEventListener('htmx:confirm', function(evt) {
+            const trigger = evt.detail.elt;
+            const msg = trigger ? (trigger.getAttribute('data-confirm-message') || evt.detail.question) : evt.detail.question;
+            if (!msg) return;
+
+            evt.preventDefault();
+            const title = (trigger && trigger.getAttribute('data-confirm-title')) || 'Confirmar Ação';
+            const variant = (trigger && trigger.getAttribute('data-confirm-variant')) || 'danger';
+
+            window.showConfirmModal({
+                message: msg,
+                title: title,
+                variant: variant,
+                onConfirm: () => {
+                    evt.detail.issueRequest(true);
+                }
+            });
+        });
+
+        // Standard links and form buttons confirmation handling (capture phase)
+        document.addEventListener('click', function(e) {
+            const trigger = e.target.closest('[data-confirm-message]');
+            if (!trigger) return;
+
+            // Allow HTMX to handle confirmation for elements managed by htmx
+            const isHtmx = trigger.matches('[hx-post], [hx-get], [hx-delete], [hx-patch], [hx-put]') ||
+                           trigger.closest('[hx-post], [hx-get], [hx-delete], [hx-patch], [hx-put]') ||
+                           (trigger.form && trigger.form.matches('[hx-post], [hx-get], [hx-delete], [hx-patch], [hx-put]'));
+            if (isHtmx) return;
+
+            e.preventDefault();
+            e.stopPropagation();
+
+            const msg = trigger.getAttribute('data-confirm-message');
+            const title = trigger.getAttribute('data-confirm-title') || 'Confirmar Ação';
+            const variant = trigger.getAttribute('data-confirm-variant') || 'danger';
+
+            window.showConfirmModal({
+                message: msg,
+                title: title,
+                variant: variant,
+                onConfirm: () => {
+                    if (trigger.tagName === 'FORM') {
+                        if (typeof trigger.requestSubmit === 'function') {
+                            trigger.requestSubmit();
+                        } else {
+                            trigger.submit();
+                        }
+                    } else if (trigger.tagName === 'A' && trigger.getAttribute('href') && trigger.getAttribute('href') !== '#') {
+                        window.location.href = trigger.getAttribute('href');
+                    } else {
+                        // Button or input associated with a form
+                        const parentForm = trigger.form || trigger.closest('form') || (trigger.getAttribute('form') ? document.getElementById(trigger.getAttribute('form')) : null);
+                        if (parentForm && (trigger.type === 'submit' || trigger.tagName === 'BUTTON')) {
+                            if (typeof parentForm.requestSubmit === 'function') {
+                                parentForm.requestSubmit(trigger);
+                            } else {
+                                parentForm.submit();
+                            }
+                        } else {
+                            const originalConfirm = trigger.getAttribute('data-confirm-message');
+                            trigger.removeAttribute('data-confirm-message');
+                            trigger.click();
+                            setTimeout(() => {
+                                if (trigger && originalConfirm) {
+                                    trigger.setAttribute('data-confirm-message', originalConfirm);
+                                }
+                            }, 500);
+                        }
+                    }
+                }
+            });
+        }, true);
+
+        document.getElementById('globalConfirmModalSubmit')?.addEventListener('click', function() {
+            if (confirmModal) confirmModal.hide();
+            if (typeof pendingConfirmAction === 'function') {
+                const act = pendingConfirmAction;
+                pendingConfirmAction = null;
+                act();
+            }
+        });
+
+        // Auto-spinner on regular form submission
+        document.addEventListener('submit', function(e) {
+            const form = e.target;
+            // Prevent disabling button if HTML5 client-side validation failed
+            if (form.checkValidity && !form.checkValidity()) return;
+            
+            const submitBtn = form.querySelector('button[type="submit"]:not([disabled])');
+            if (submitBtn && !form.getAttribute('data-no-spinner')) {
+                // If it's not handled by HTMX
+                if (!form.hasAttribute('hx-post') && !form.hasAttribute('hx-get')) {
+                    setTimeout(() => {
+                        submitBtn.disabled = true;
+                        const spinner = document.createElement('span');
+                        spinner.className = 'spinner-border spinner-border-sm me-1';
+                        spinner.setAttribute('role', 'status');
+                        spinner.setAttribute('aria-hidden', 'true');
+                        submitBtn.prepend(spinner);
+                    }, 0);
+                }
+            }
+        });
+
+        // HTMX auto-spinners on hx-post forms / actions
+        document.addEventListener('htmx:beforeRequest', function(evt) {
+            const elt = evt.detail.elt;
+            if (!elt) return;
+            const btn = elt.matches('button, input[type="submit"]') 
+                ? elt 
+                : (elt.querySelector('button[type="submit"]:not([disabled])') || elt.closest('button'));
+            if (btn && !btn.getAttribute('data-no-spinner')) {
+                btn.disabled = true;
+                btn.setAttribute('data-htmx-disabled', 'true');
+                if (btn.tagName !== 'INPUT' && !btn.querySelector('.spinner-border')) {
+                    const spinner = document.createElement('span');
+                    spinner.className = 'spinner-border spinner-border-sm me-1 htmx-spinner-icon';
+                    spinner.setAttribute('role', 'status');
+                    spinner.setAttribute('aria-hidden', 'true');
+                    btn.prepend(spinner);
+                }
+            }
+        });
+
+        document.addEventListener('htmx:afterRequest', function(evt) {
+            const elt = evt.detail.elt;
+            if (!elt) return;
+            const btn = elt.matches('button, input[type="submit"]') 
+                ? elt 
+                : (elt.querySelector('button[type="submit"], input[type="submit"]') || elt.closest('button'));
+            if (btn) {
+                const spinner = btn.querySelector('.htmx-spinner-icon');
+                if (spinner) spinner.remove();
+                if (btn.getAttribute('data-htmx-disabled') === 'true') {
+                    btn.disabled = false;
+                    btn.removeAttribute('data-htmx-disabled');
+                }
+            }
+        });
+
+        // Allow swapping 400 response when target/form has data-inline-error="true"
+        document.addEventListener('htmx:beforeSwap', function(evt) {
+            const trigger = evt.detail.elt;
+            const target = evt.detail.target;
+            const hasInlineError = (trigger && (trigger.closest('[data-inline-error="true"]') || trigger.getAttribute('data-inline-error') === 'true')) ||
+                                   (target && (target.closest('[data-inline-error="true"]') || target.getAttribute('data-inline-error') === 'true'));
+            if (evt.detail.xhr && evt.detail.xhr.status === 400 && hasInlineError) {
+                evt.detail.shouldSwap = true;
+                evt.detail.isError = false;
+            }
+        });
+
+        // Global HTMX error handling
+        document.addEventListener('htmx:responseError', function(evt) {
+            const trigger = evt.detail.elt;
+            const target = evt.detail.target;
+            if ((trigger && (trigger.closest('[data-inline-error="true"]') || trigger.getAttribute('data-inline-error') === 'true')) ||
+                (target && (target.closest('[data-inline-error="true"]') || target.getAttribute('data-inline-error') === 'true'))) {
+                return;
+            }
+            const status = evt.detail.xhr ? evt.detail.xhr.status : 500;
+            const respText = evt.detail.xhr && evt.detail.xhr.responseText ? evt.detail.xhr.responseText.trim() : '';
+            let errorMsg = `Ocorreu um erro ao processar a requisição (HTTP ${status}).`;
+            if (respText && respText.length < 200 && !respText.startsWith('<') && !respText.includes('<!DOCTYPE')) {
+                errorMsg = respText;
+            }
+            console.error("HTMX response error:", status, respText);
+            let alertBox = document.getElementById('htmx-global-error');
+            if (!alertBox) {
+                alertBox = document.createElement('div');
+                alertBox.id = 'htmx-global-error';
+                alertBox.className = 'alert alert-danger alert-dismissible fade show position-fixed top-0 start-50 translate-middle-x mt-3 shadow';
+                alertBox.style.zIndex = '9999';
+                alertBox.style.maxWidth = '90vw';
+                alertBox.setAttribute('role', 'alert');
+                document.body.appendChild(alertBox);
+            }
+            alertBox.innerHTML = `
+                <div class="d-flex align-items-center">
+                    <i class="bi bi-exclamation-triangle-fill me-2 fs-5"></i>
+                    <div class="flex-grow-1 htmx-error-msg"></div>
+                    <button type="button" class="btn-close ms-2" data-bs-dismiss="alert" aria-label="Fechar"></button>
+                </div>
+            `;
+            const msgEl = alertBox.querySelector('.htmx-error-msg');
+            if (msgEl) msgEl.textContent = errorMsg;
+            setTimeout(() => {
+                if (alertBox && alertBox.parentNode) {
+                    alertBox.remove();
+                }
+            }, 6000);
+        });
+
         function initDatePickers(element) {
             const inputs = element.querySelectorAll("input[type=date]");
             inputs.forEach(function(input) {
@@ -106,12 +530,26 @@
             });
         }
         
+        function initTooltips(element) {
+            const container = element || document;
+            if (typeof bootstrap !== 'undefined' && bootstrap.Tooltip) {
+                const triggers = container.querySelectorAll('[data-bs-toggle="tooltip"]');
+                triggers.forEach(el => {
+                    if (!bootstrap.Tooltip.getInstance(el)) {
+                        new bootstrap.Tooltip(el);
+                    }
+                });
+            }
+        }
+        
         document.addEventListener("DOMContentLoaded", function() {
             initDatePickers(document);
+            initTooltips(document);
         });
         
         document.addEventListener("htmx:afterSwap", function(evt) {
             initDatePickers(evt.detail.target);
+            initTooltips(evt.detail.target);
         });
     </script>
     {% block extra_js %}{% endblock %}

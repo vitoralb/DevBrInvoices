@@ -1,0 +1,34 @@
+<div class="modal fade" id="modalImportEsocial" tabindex="-1" aria-labelledby="modalImportEsocialLabel" aria-hidden="true">
+    <div class="modal-dialog">
+        <div class="modal-content">
+            <form method="POST" action="{% url 'import_esocial_backup' %}" enctype="multipart/form-data">
+                {% csrf_token %}
+                <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                <div class="modal-header">
+                    <h5 class="modal-title" id="modalImportEsocialLabel"><i class="bi bi-upload me-2 text-primary"></i>Subir Backup / XMLs do eSocial</h5>
+                    <button type="button" class="btn-close" data-bs-dismiss="modal" aria-label="Fechar"></button>
+                </div>
+                <div class="modal-body">
+                    <p class="text-muted small">
+                        Envie um ou múltiplos arquivos <strong>.ZIP</strong> (backups exportados ou pacotes do eSocial BX / Portal) ou arquivos <strong>.XML</strong> avulsos (eventos <strong>S-5011</strong>, <strong>S-5012</strong> ou <strong>S-1299</strong>).
+                    </p>
+                    <div class="mb-3">
+                        <label for="backup_file" class="form-label fw-bold">Selecione o(s) arquivo(s):</label>
+                        <input class="form-control" type="file" id="backup_file" name="backup_file" accept=".zip,.xml,.json" multiple required>
+                        <div class="form-text">Você pode selecionar múltiplos arquivos ZIP ou XML simultaneamente (segurando Ctrl ou Shift).</div>
+                    </div>
+                    <div class="alert alert-info py-2 small mb-0 d-flex align-items-center">
+                        <i class="bi bi-info-circle me-2 flex-shrink-0"></i>
+                        <div>Todos os eventos enviados serão processados e consolidados exatamente como se tivessem sido retornados pelas chamadas de API do eSocial.</div>
+                    </div>
+                </div>
+                <div class="modal-footer">
+                    <button type="button" class="btn btn-outline-secondary" data-bs-dismiss="modal">Cancelar</button>
+                    <button type="submit" class="btn btn-primary fw-semibold d-flex align-items-center gap-1">
+                        <i class="bi bi-upload"></i> Processar e Importar
+                    </button>
+                </div>
+            </form>
+        </div>
+    </div>
+</div>

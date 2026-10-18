@@ -39,6 +39,7 @@ class CompanySettingsAdmin(admin.ModelAdmin):
     list_display = (
         "company_name",
         "cnpj",
+        "phone_number",
         "opening_date",
         "nfse_provider",
         "document_series",

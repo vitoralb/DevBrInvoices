@@ -1,24 +1,36 @@
 {% extends 'core/base.html' %}
+{% load humanize %}
 {% block title %}Invoices - {{ PROJECT_NAME }}{% endblock %}
 
 {% block content %}
 <div class="d-flex justify-content-between align-items-center mb-4 flex-column flex-sm-row gap-2">
-    <h2>Invoices</h2>
     <div>
+        <h2 class="mb-0 fw-bold">Invoices</h2>
+        <span class="text-muted small">Gerenciamento de faturamento e emissão de notas</span>
+    </div>
+    <div class="d-flex align-items-center gap-2 flex-wrap">
         {% if user.is_staff and debug_mode %}
         <form method="POST" action="{% url 'force_process_daily_invoices' %}" class="d-inline">
             {% csrf_token %}
-            <button type="submit" class="btn btn-warning me-2" onclick="return confirm('Isso forçará a execução da tarefa diária agora mesmo. Confirmar?');">Forçar Tarefa Diária</button>
+            <input type="hidden" name="next" value="{{ request.get_full_path }}">
+            <button type="submit" class="btn btn-outline-secondary d-flex align-items-center gap-1"
+                    data-confirm-message="Isso forçará a execução da tarefa diária de processamento agora mesmo. Confirmar?"
+                    data-confirm-title="Forçar Tarefa Diária"
+                    data-confirm-variant="warning">
+                <i class="bi bi-lightning-charge"></i> Forçar Tarefa Diária
+            </button>
         </form>
         {% endif %}
-        <a href="{% url 'invoice_create' %}" class="btn btn-success">Criar Nova Invoice</a>
+        <a href="{% url 'invoice_create' %}" class="btn btn-primary fw-semibold d-flex align-items-center gap-1">
+            <i class="bi bi-plus-lg"></i> Criar Nova Invoice
+        </a>
     </div>
 </div>
 
 <div class="card shadow-sm mb-4">
     <div class="card-body">
         <form method="GET" class="row gx-3 gy-2 align-items-center">
-            <div class="col-sm-3">
+            <div class="col-sm-6 col-md-3">
                 <select class="form-select" name="client_id" aria-label="Filtrar por Cliente">
                     <option value="">Todos os Clientes</option>
                     {% for client in clients %}
@@ -26,15 +38,16 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-sm-3">
+            <div class="col-sm-6 col-md-3">
                 <select class="form-select" name="status" aria-label="Filtrar por Status">
                     <option value="">Todos os Status</option>
                     <option value="DRAFT" {% if selected_status == 'DRAFT' %}selected{% endif %}>Rascunho</option>
                     <option value="PROCESSING" {% if selected_status == 'PROCESSING' %}selected{% endif %}>Processando</option>
                     <option value="FINALIZED" {% if selected_status == 'FINALIZED' %}selected{% endif %}>Finalizado</option>
+                    <option value="CANCELED" {% if selected_status == 'CANCELED' %}selected{% endif %}>Cancelado</option>
                 </select>
             </div>
-            <div class="col-sm-3">
+            <div class="col-sm-6 col-md-3">
                 <select class="form-select" name="year" aria-label="Filtrar por Ano">
                     <option value="">Todos os Anos</option>
                     {% for y in available_years %}
@@ -42,8 +55,13 @@
                     {% endfor %}
                 </select>
             </div>
-            <div class="col-sm-3">
-                <button type="submit" class="btn btn-primary w-100">Filtrar</button>
+            <div class="col-sm-6 col-md-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary flex-grow-1 fw-semibold">Filtrar</button>
+                {% if selected_client or selected_status or selected_year %}
+                <a href="{% url 'invoice_list' %}" class="btn btn-outline-secondary" title="Limpar Filtros">
+                    <i class="bi bi-x-lg"></i>
+                </a>
+                {% endif %}
             </div>
         </form>
     </div>
@@ -53,41 +71,74 @@
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
-                <thead>
+                <thead class="bg-body-tertiary">
                     <tr>
                         <th scope="col">Invoice #</th>
                         <th scope="col">Data</th>
                         <th scope="col">Cliente</th>
-                        <th scope="col">Moeda</th>
+                        <th scope="col">Valor Total</th>
                         <th scope="col">Status</th>
-                        <th scope="col">Ações</th>
+                        <th scope="col">NFS-e</th>
+                        <th scope="col" class="text-end">Ações</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for invoice in invoices %}
                     <tr>
-                        <td>{{ invoice.invoice_number }}</td>
+                        <td class="font-monospace">
+                            <a href="{% url 'invoice_detail' invoice.id %}?next={{ request.get_full_path|urlencode }}" class="fw-bold text-decoration-none font-monospace">
+                                {{ invoice.invoice_number }}
+                            </a>
+                        </td>
                         <td>{{ invoice.issue_date|date:"SHORT_DATE_FORMAT" }}</td>
                         <td>{{ invoice.client.name }}</td>
-                        <td>{{ invoice.currency }}</td>
+                        <td class="fw-semibold font-monospace">{{ invoice.currency }} {{ invoice.total_foreign|floatformat:2|intcomma }}</td>
                         <td>
-                            <span class="badge {% if invoice.status == 'FINALIZED' %}bg-success{% elif invoice.status == 'PROCESSING' %}bg-warning text-dark{% else %}bg-secondary{% endif %}">
+                            <span class="badge {% if invoice.status == 'FINALIZED' %}bg-success{% elif invoice.status == 'PROCESSING' %}bg-warning-subtle text-warning-emphasis border border-warning{% elif invoice.status == 'CANCELED' %}bg-danger{% else %}bg-secondary{% endif %}">
                                 {{ invoice.get_status_display }}
                             </span>
                         </td>
                         <td>
-                            <a href="{% url 'invoice_detail' invoice.id %}" class="btn btn-sm btn-outline-primary">Gerenciar</a>
-                            {% if invoice.status == 'DRAFT' %}
-                            <form method="POST" action="{% url 'invoice_delete' invoice.id %}" class="d-inline" onsubmit="return confirm('Tem certeza que deseja excluir esta invoice?');">
-                                {% csrf_token %}
-                                <button type="submit" class="btn btn-sm btn-outline-danger" aria-label="Excluir invoice {{ invoice.invoice_number }}">Excluir</button>
-                            </form>
+                            {% if invoice.nota_fiscal %}
+                            <a href="{% url 'nfse_detail' invoice.nota_fiscal.id %}?next={{ request.get_full_path|urlencode }}" class="badge bg-primary-subtle text-primary-emphasis border border-primary-subtle text-decoration-none font-monospace">
+                                #{{ invoice.nota_fiscal.nf_number }}
+                            </a>
+                            {% elif invoice.status == 'FINALIZED' %}
+                            <span class="badge bg-warning-subtle text-warning-emphasis border border-warning-subtle">
+                                Pendente
+                            </span>
+                            {% else %}
+                            <span class="text-muted">-</span>
                             {% endif %}
+                        </td>
+                        <td class="text-end text-nowrap">
+                            <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+                                <a href="{% url 'invoice_detail' invoice.id %}?next={{ request.get_full_path|urlencode }}" class="btn btn-sm btn-outline-primary" title="Ver Detalhes">
+                                    <i class="bi bi-eye"></i>
+                                </a>
+                                <a href="{% url 'generate_invoice_pdf' invoice.id %}" target="_blank" class="btn btn-sm btn-outline-secondary" title="Baixar PDF">
+                                    <i class="bi bi-file-earmark-pdf"></i>
+                                </a>
+                                {% if invoice.status == 'DRAFT' %}
+                                <form method="POST" action="{% url 'invoice_delete' invoice.id %}" class="d-inline">
+                                    {% csrf_token %}
+                                    <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                                    <button type="submit" class="btn btn-sm btn-outline-danger"
+                                            data-confirm-message="Tem certeza que deseja excluir esta invoice ({{ invoice.invoice_number }})?"
+                                            data-confirm-title="Excluir Invoice"
+                                            data-confirm-variant="danger"
+                                            title="Excluir Invoice"
+                                            aria-label="Excluir invoice {{ invoice.invoice_number }}">
+                                        <i class="bi bi-trash"></i>
+                                    </button>
+                                </form>
+                                {% endif %}
+                            </div>
                         </td>
                     </tr>
                     {% empty %}
                     <tr>
-                        <td colspan="6" class="text-center py-4 text-muted">Nenhuma invoice encontrada.</td>
+                        <td colspan="7" class="text-center py-4 text-muted">Nenhuma invoice encontrada.</td>
                     </tr>
                     {% endfor %}
                 </tbody>

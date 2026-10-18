@@ -1,39 +1,58 @@
 {% load humanize %}
 <div class="table-responsive">
-    <table class="table table-sm">
-        <thead>
+    <table class="table table-sm table-hover align-middle mb-0">
+        <thead class="bg-body-tertiary">
             <tr>
                 <th scope="col">Descrição</th>
-                <th scope="col">Qtd</th>
-                <th scope="col">Preço Unitário ({{ invoice.currency }})</th>
-                <th scope="col" class="text-end">Total ({{ invoice.currency }})</th>
+                <th scope="col" style="width: 80px;">Qtd</th>
+                <th scope="col" style="width: 140px;">Preço Unitário ({{ invoice.currency }})</th>
+                <th scope="col" class="text-end" style="width: 140px;">Total ({{ invoice.currency }})</th>
                 {% if invoice.status == 'DRAFT' %}
-                <th scope="col"></th>
+                <th scope="col" class="text-end" style="width: 90px;">Ações</th>
                 {% endif %}
             </tr>
         </thead>
         <tbody>
             {% for item in invoice.items.all %}
-            <tr>
-                <td>{{ item.description }}</td>
+            <tr id="item-row-{{ item.id }}">
+                <td style="white-space: pre-wrap;">{{ item.description }}</td>
                 <td>{{ item.quantity }}</td>
-                <td>{{ item.unit_price_foreign|floatformat:2|intcomma }}</td>
-                <td class="text-end fw-bold">{{ item.total_price_foreign|floatformat:2|intcomma }}</td>
+                <td class="font-monospace">{{ item.unit_price_foreign|floatformat:2|intcomma }}</td>
+                <td class="text-end fw-bold font-monospace">{{ item.total_price_foreign|floatformat:2|intcomma }}</td>
                 {% if invoice.status == 'DRAFT' %}
-                <td class="text-end">
-                    <button class="btn btn-sm btn-outline-danger" 
-                            hx-post="{% url 'htmx_delete_invoice_item' item.id %}" 
-                            hx-target="#invoice-items-container"
-                            hx-confirm="Tem certeza de que deseja excluir este item?"
-                            aria-label="Excluir item: {{ item.description }}">
-                        &times;
-                    </button>
+                <td class="text-end text-nowrap">
+                    <div class="d-inline-flex align-items-center gap-1 text-nowrap">
+                        <button type="button" class="btn btn-outline-secondary btn-sm"
+                                hx-get="{% url 'htmx_edit_invoice_item' item.id %}"
+                                hx-target="#item-row-{{ item.id }}"
+                                hx-swap="outerHTML"
+                                title="Editar item">
+                            <i class="bi bi-pencil"></i>
+                        </button>
+                        <button type="button" class="btn btn-outline-danger btn-sm" 
+                                hx-post="{% url 'htmx_delete_invoice_item' item.id %}" 
+                                hx-target="#invoice-items-container"
+                                data-confirm-message="Tem certeza de que deseja excluir este item?"
+                                data-confirm-title="Excluir Item"
+                                data-confirm-variant="danger"
+                                title="Excluir item: {{ item.description }}">
+                            <i class="bi bi-trash"></i>
+                        </button>
+                    </div>
                 </td>
                 {% endif %}
             </tr>
             {% empty %}
-            <tr><td colspan="{% if invoice.status == 'DRAFT' %}5{% else %}4{% endif %}" class="text-center text-muted">Nenhum item adicionado ainda.</td></tr>
+            <tr><td colspan="{% if invoice.status == 'DRAFT' %}5{% else %}4{% endif %}" class="text-center text-muted py-3">Nenhum item adicionado ainda.</td></tr>
             {% endfor %}
         </tbody>
+        <tfoot class="border-top">
+            <tr class="table-active fw-bold">
+                <td colspan="3" class="text-end">Total ({{ invoice.currency }}):</td>
+                <td class="text-end font-monospace">{{ invoice.total_foreign|floatformat:2|intcomma }}</td>
+                {% if invoice.status == 'DRAFT' %}<td></td>{% endif %}
+            </tr>
+        </tfoot>
     </table>
 </div>
+<span id="invoice-total-badge" hx-swap-oob="true" class="fs-4 fw-bold font-monospace text-primary">{{ invoice.currency }} {{ invoice.total_foreign|floatformat:2|intcomma }}</span>

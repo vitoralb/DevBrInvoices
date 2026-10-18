@@ -62,11 +62,28 @@ BACEN_CURRENCY_MAP = {
 
 
 def _decompress_gzip_b64(b64_str: str) -> Optional[str]:
-    """Decompresses base64-encoded gzip content to string."""
+    """Decompresses base64-encoded gzip content to string.
+    Handles standard base64 gzip, double base64-encoded gzip, and plain base64 XML.
+    """
     if not b64_str:
         return None
     try:
-        return gzip.decompress(base64.b64decode(b64_str)).decode("utf-8")
+        raw_bytes = base64.b64decode(b64_str)
+        # Check if output is double base64-encoded (e.g. begins with ASCII 'H4sI' or other base64 header)
+        if raw_bytes.startswith(b"H4sI") or (not raw_bytes.startswith(b"\x1f\x8b") and b"<" not in raw_bytes[:10]):
+            try:
+                second_decode = base64.b64decode(raw_bytes)
+                if second_decode.startswith(b"\x1f\x8b") or b"<" in second_decode[:10]:
+                    raw_bytes = second_decode
+            except Exception:
+                pass
+
+        if raw_bytes.startswith(b"\x1f\x8b"):
+            return gzip.decompress(raw_bytes).decode("utf-8")
+        elif b"<" in raw_bytes[:50]:
+            return raw_bytes.decode("utf-8")
+        else:
+            return gzip.decompress(raw_bytes).decode("utf-8")
     except Exception as ex:
         logger.warning("Error decompressing base64 gzip XML: %s", ex)
         return None
@@ -77,11 +94,17 @@ def _parse_decompressed_nfse_xml(decompressed_xml: str) -> dict:
     data = {
         "numero_nf": "",
         "data_hora_autorizacao": None,
+        "issue_date": None,
         "codigo_tributacao_nacional": "",
         "codigo_nbs": "",
         "codigo_servico_municipio": "",
         "aliquota_iss": None,
         "valor_iss": None,
+        "amount_brl": "0.00",
+        "description": "",
+        "emit_cnpj": "",
+        "dps_number": "",
+        "dps_series": "",
     }
     if not decompressed_xml:
         return data
@@ -100,6 +123,15 @@ def _parse_decompressed_nfse_xml(decompressed_xml: str) -> dict:
             )
         except Exception:
             pass
+
+    match_compet = re.search(r"<dCompet>([^<]+)</dCompet>", decompressed_xml)
+    if match_compet:
+        try:
+            data["issue_date"] = datetime.date.fromisoformat(match_compet.group(1))
+        except Exception:
+            pass
+    if not data["issue_date"] and data["data_hora_autorizacao"]:
+        data["issue_date"] = data["data_hora_autorizacao"].date()
 
     c_trib_nac = re.search(r"<cTribNac>([^<]+)</cTribNac>", decompressed_xml)
     if c_trib_nac:
@@ -129,6 +161,109 @@ def _parse_decompressed_nfse_xml(decompressed_xml: str) -> dict:
         except Exception:
             pass
 
+    v_liq = re.search(r"<vLiq>([^<]+)</vLiq>", decompressed_xml)
+    if not v_liq:
+        v_liq = re.search(r"<vServ>([^<]+)</vServ>", decompressed_xml)
+    if v_liq:
+        data["amount_brl"] = v_liq.group(1)
+
+    desc_match = re.search(r"<xDescServ>([^<]+)</xDescServ>", decompressed_xml)
+    if desc_match:
+        data["description"] = desc_match.group(1)
+
+    cnpj_match = re.search(r"<emit>.*?<CNPJ>([^<]+)</CNPJ>", decompressed_xml, re.DOTALL)
+    if not cnpj_match:
+        cnpj_match = re.search(r"<prest>.*?<CNPJ>([^<]+)</CNPJ>", decompressed_xml, re.DOTALL)
+    if cnpj_match:
+        data["emit_cnpj"] = cnpj_match.group(1)
+
+    dps_num_match = re.search(r"<nDPS>([^<]+)</nDPS>", decompressed_xml)
+    if dps_num_match:
+        data["dps_number"] = dps_num_match.group(1)
+
+    dps_ser_match = re.search(r"<serie>([^<]+)</serie>", decompressed_xml)
+    if dps_ser_match:
+        data["dps_series"] = dps_ser_match.group(1)
+
+    return data
+
+
+def _parse_decompressed_evento_xml(
+    decompressed_xml: str, nsu: Optional[int] = None, tipo_evento_adn: Optional[str] = None
+) -> dict:
+    """Extracts common fields from Sefin Nacional / ADN Event XML."""
+    data = {
+        "nsu": nsu,
+        "id_evento": "",
+        "tipo_evento": tipo_evento_adn or "",
+        "codigo_evento": "",
+        "n_seq_evento": 1,
+        "dh_evento": None,
+        "descricao": "",
+        "codigo_motivo": "",
+        "motivo": "",
+        "is_cancellation": False,
+        "raw_xml": decompressed_xml,
+    }
+    if not decompressed_xml or not decompressed_xml.strip():
+        return {}
+
+    match_id = re.search(r'Id="([^"]+)"', decompressed_xml)
+    if match_id:
+        data["id_evento"] = match_id.group(1)
+
+    match_code = re.search(r"<e(\d{6})[ >]", decompressed_xml)
+    if match_code:
+        data["codigo_evento"] = match_code.group(1)
+    elif tipo_evento_adn and "CANCELAMENTO" in tipo_evento_adn:
+        data["codigo_evento"] = "101101"
+
+    match_seq = re.search(r"<nSeqEvento>(\d+)</nSeqEvento>", decompressed_xml)
+    if match_seq:
+        try:
+            data["n_seq_evento"] = int(match_seq.group(1))
+        except Exception:
+            pass
+
+    match_dh = re.search(r"<dhProc>([^<]+)</dhProc>", decompressed_xml)
+    if not match_dh:
+        match_dh = re.search(r"<dhEvento>([^<]+)</dhEvento>", decompressed_xml)
+    if match_dh:
+        try:
+            data["dh_evento"] = datetime.datetime.fromisoformat(
+                match_dh.group(1).replace("Z", "+00:00")
+            )
+        except Exception:
+            pass
+
+    match_desc = re.search(r"<xDesc>([^<]+)</xDesc>", decompressed_xml)
+    if match_desc:
+        data["descricao"] = match_desc.group(1).strip()
+
+    match_cmotivo = re.search(r"<cMotivo>([^<]+)</cMotivo>", decompressed_xml)
+    if match_cmotivo:
+        data["codigo_motivo"] = match_cmotivo.group(1).strip()
+
+    match_xmotivo = re.search(r"<xMotivo>([^<]+)</xMotivo>", decompressed_xml)
+    if not match_xmotivo:
+        match_xmotivo = re.search(r"<xProcAdm>([^<]+)</xProcAdm>", decompressed_xml)
+    if match_xmotivo:
+        data["motivo"] = match_xmotivo.group(1).strip()
+
+    canc_codes = {"101101", "101103", "105102", "105104", "305101"}
+    canc_types = {
+        "CANCELAMENTO",
+        "CANCELAMENTO_POR_SUBSTITUICAO",
+        "CANCELAMENTO_DEFERIDO_ANALISE_FISCAL",
+        "CANCELAMENTO_POR_OFICIO",
+    }
+    if (
+        data["codigo_evento"] in canc_codes
+        or (tipo_evento_adn and tipo_evento_adn.upper() in canc_types)
+        or re.search(r"Cancelamento\s+de\s+NFS-e", decompressed_xml, re.IGNORECASE)
+    ):
+        data["is_cancellation"] = True
+
     return data
 
 
@@ -157,6 +292,19 @@ class NacionalProvider(NFSeProvider):
                 "https://adn.nfse.gov.br/danfse",
             )
         return base_url.rstrip("/"), danfse_url.rstrip("/")
+
+    def _get_adn_contribuintes_url(self, debug_mode: bool) -> str:
+        if debug_mode:
+            return getattr(
+                settings,
+                "NFSE_NACIONAL_ADN_DEBUG_URL",
+                "https://adn.producaorestrita.nfse.gov.br/contribuintes",
+            ).rstrip("/")
+        return getattr(
+            settings,
+            "NFSE_NACIONAL_ADN_PROD_URL",
+            "https://adn.nfse.gov.br/contribuintes",
+        ).rstrip("/")
 
     def _get_cert_pems(self) -> Tuple[bytes, bytes]:
 
@@ -192,10 +340,10 @@ class NacionalProvider(NFSeProvider):
         tp_amb = "2" if company.debug_mode else "1"
 
         client_obj = invoice.client
-        country_code = (client_obj.address_country_code).upper()
-        postal_code = (client_obj.address_postal_code)[:11]
-        city_name = (client_obj.address_city)[:60]
-        state_province = (client_obj.address_state_province)[:60]
+        country_code = ((client_obj.address_country_code or "US").strip()).upper()
+        postal_code = ((client_obj.address_postal_code or "").strip())[:11] or "N/A"
+        city_name = ((client_obj.address_city or "").strip())[:60] or "N/A"
+        state_province = ((client_obj.address_state_province or "").strip())[:60] or "N/A"
         bairro = (client_obj.address_neighborhood or "Centro")[:60]
         logradouro = (client_obj.address_line1 or "")[:255]
         numero = (client_obj.address_number or "1")[:60]
@@ -213,11 +361,33 @@ class NacionalProvider(NFSeProvider):
         d_compet = invoice.issue_date.strftime("%Y-%m-%d")
 
         c_trib_nac = str(
-            getattr(company, "default_codigo_tributacao_nacional", None) or "010101"
+            getattr(invoice, "codigo_tributacao_nacional", "") or ""
         ).strip()[:6]
-        c_nbs = getattr(company, "default_codigo_nbs", None)
+        if not c_trib_nac:
+            raise ValueError(
+                "Código de Tributação Nacional é obrigatório para emissão da DPS Nacional."
+            )
+
+        c_nbs = getattr(invoice, "codigo_nbs", None)
         if c_nbs:
             c_nbs = str(c_nbs).strip()[:9]
+        if not c_nbs:
+            raise ValueError(
+                "Código NBS é obrigatório para emissão da DPS Nacional."
+            )
+
+        c_trib_mun = str(
+            getattr(invoice, "codigo_servico_municipio", "") or ""
+        ).strip()
+        if c_trib_mun:
+            if len(c_trib_mun) > 3 or not c_trib_mun.isdigit():
+                raise ValueError(
+                    f"Código de Serviço do Município ('{c_trib_mun}') possui mais de 3 dígitos. "
+                    "Para emissão via DPS Nacional, o cTribMun deve ter no máximo 3 dígitos."
+                )
+            c_trib_mun_val = c_trib_mun.zfill(3)
+        else:
+            c_trib_mun_val = None
 
         if effective_rate_pct > Decimal("0.00"):
             tot_trib = TctribTotal(p_tot_trib_sn=f"{effective_rate_pct:.2f}")
@@ -259,7 +429,7 @@ class NacionalProvider(NFSeProvider):
                 prest=TcinfoPrestador(
                     cnpj=cnpj_prestador,
                     im=None,  # IM is optional and rejected with E0120 when municipality has no CNC complementary records
-                    x_nome=company.company_name[:150],
+                    x_nome=None,  # E0121: O nome ou razão social do prestador não deve ser informado quando tpEmit=1 (o próprio prestador)
                     reg_trib=TcregTrib(
                         op_simp_nac="3",  # 3 = Optante - ME/EPP (Simples Nacional)
                         reg_ap_trib_sn="1",  # 1 = Apuração SN
@@ -268,9 +438,10 @@ class NacionalProvider(NFSeProvider):
                 ),
                 toma=toma,
                 serv=Tcserv(
-                    loc_prest=TclocPrest(c_pais_prestacao=country_code),
+                    loc_prest=TclocPrest(c_loc_prestacao=cod_mun),
                     c_serv=Tccserv(
                         c_trib_nac=c_trib_nac,
+                        c_trib_mun=c_trib_mun_val,
                         c_nbs=c_nbs,
                         x_desc_serv=service_desc,
                     ),
@@ -338,68 +509,79 @@ class NacionalProvider(NFSeProvider):
             data = resp.json()
             if isinstance(data, dict):
                 # Format 1: NFSePostResponseErro: {"erros": [{"codigo": "...", "descricao": "...", "complemento": "..."}]}
-                if "erros" in data and isinstance(data["erros"], list):
-                    for err in data["erros"]:
+                raw_erros = data.get("erros") or data.get("Erros")
+                if raw_erros and isinstance(raw_erros, list):
+                    for err in raw_erros:
                         if isinstance(err, dict):
-                            cod = err.get("codigo", "")
-                            desc = err.get("descricao", "")
-                            comp = err.get("complemento", "")
-                            msg = f"{cod} - {desc}" + (f" ({comp})" if comp else "")
-                            erros.append(msg.strip(" -"))
-                        else:
-                            erros.append(str(err))
+                            cod = err.get("codigo") or err.get("Codigo") or ""
+                            desc = err.get("descricao") or err.get("Descricao") or ""
+                            comp = err.get("complemento") or err.get("Complemento") or ""
+                            msg = f"{cod} - {desc}".strip(" -")
+                            if comp:
+                                msg = f"{msg} ({comp})" if msg else str(comp)
+                            if msg.strip():
+                                erros.append(msg.strip())
+                        elif err:
+                            erros.append(str(err).strip())
                 # Format 2: ResponseErro: {"erro": {"codigo": "...", "descricao": "..."}}
-                elif "erro" in data:
-                    err = data["erro"]
+                elif "erro" in data or "Erro" in data:
+                    err = data.get("erro") or data.get("Erro")
                     if isinstance(err, dict):
-                        cod = err.get("codigo", "")
-                        desc = err.get("descricao", "")
-                        comp = err.get("complemento", "")
-                        msg = f"{cod} - {desc}" + (f" ({comp})" if comp else "")
-                        erros.append(msg.strip(" -"))
-                    else:
-                        erros.append(str(err))
+                        cod = err.get("codigo") or err.get("Codigo") or ""
+                        desc = err.get("descricao") or err.get("Descricao") or ""
+                        comp = err.get("complemento") or err.get("Complemento") or ""
+                        msg = f"{cod} - {desc}".strip(" -")
+                        if comp:
+                            msg = f"{msg} ({comp})" if msg else str(comp)
+                        if msg.strip():
+                            erros.append(msg.strip())
+                    elif err:
+                        erros.append(str(err).strip())
                 # Format 3: ASP.NET Core ProblemDetails: {"title": "...", "errors": {"fieldName": ["err1", "err2"]}}
-                if "errors" in data:
-                    err_dict = data["errors"]
+                if "errors" in data or "Errors" in data:
+                    err_dict = data.get("errors") or data.get("Errors")
                     if isinstance(err_dict, dict):
                         for field_name, msgs in err_dict.items():
                             if isinstance(msgs, list):
                                 for m in msgs:
-                                    erros.append(f"{field_name}: {m}")
-                            else:
+                                    if m:
+                                        erros.append(f"{field_name}: {m}")
+                            elif msgs:
                                 erros.append(f"{field_name}: {msgs}")
                     elif isinstance(err_dict, list):
                         for m in err_dict:
-                            erros.append(str(m))
+                            if m:
+                                erros.append(str(m))
                 # Format 4: Standard API message fields
                 for key in (
                     "message",
                     "Message",
                     "detail",
+                    "Detail",
                     "title",
+                    "Title",
                     "error_description",
                     "error",
                 ):
-                    if (
-                        key in data
-                        and data[key]
-                        and isinstance(data[key], str)
-                        and data[key] not in erros
-                    ):
-                        erros.append(data[key])
+                    val = data.get(key)
+                    if val and isinstance(val, str) and val.strip() and val not in erros:
+                        erros.append(val.strip())
             elif isinstance(data, list):
                 for item in data:
-                    erros.append(str(item))
+                    if item:
+                        erros.append(str(item).strip())
         except Exception:
             text = resp.text.strip() if hasattr(resp, "text") and resp.text else ""
             if text:
                 clean_text = re.sub(r"<[^>]+>", " ", text)[:300].strip()
                 erros.append(f"HTTP {resp.status_code}: {clean_text}")
 
+        erros = [e.strip() for e in erros if e and e.strip()]
+
         if not erros:
+            status = getattr(resp, "status_code", "Unknown")
             erros.append(
-                f"Falha na comunicação com Sefin Nacional (HTTP {resp.status_code})"
+                f"Falha na comunicação com Sefin Nacional (HTTP {status})"
             )
         return erros
 
@@ -440,7 +622,7 @@ class NacionalProvider(NFSeProvider):
                 return EmitResult(
                     sucesso=True,
                     chave_acesso_nacional=chave_acesso,
-                    codigo_verificacao=chave_acesso,
+                    codigo_verificacao="",
                     numero_nf=numero_nf,
                     xml_retorno=decompressed_xml or nfse_resp.text,
                     data_hora_autorizacao=parsed["data_hora_autorizacao"],
@@ -512,9 +694,20 @@ class NacionalProvider(NFSeProvider):
         serie_dps = str(invoice.document_series or "1")
         numero_dps = invoice.document_number
 
-        _, signed_xml, id_dps = self._build_and_sign_dps(
-            invoice, company, numero_dps, serie_dps
-        )
+        try:
+            _, signed_xml, id_dps = self._build_and_sign_dps(
+                invoice, company, numero_dps, serie_dps
+            )
+        except Exception as e:
+            logger.error(
+                "Erro ao preparar/assinar DPS Nacional para invoice %s: %s",
+                invoice.invoice_number,
+                e,
+            )
+            return EmitResult(
+                sucesso=False,
+                erros=[str(e)],
+            )
 
         base_url, _ = self._get_urls(company.debug_mode)
         endpoint = f"{base_url}/nfse"
@@ -576,7 +769,7 @@ class NacionalProvider(NFSeProvider):
                     data = resp.json()
                     result.sucesso = True
                     result.chave_acesso_nacional = data.get("chaveAcesso", "")
-                    result.codigo_verificacao = result.chave_acesso_nacional
+                    result.codigo_verificacao = ""
 
                     nfse_b64 = data.get("nfseXmlGZipB64")
                     decompressed_xml = _decompress_gzip_b64(nfse_b64)
@@ -631,38 +824,63 @@ class NacionalProvider(NFSeProvider):
             return None
 
         nf = extract_nota_fiscal(invoice_or_nf)
+        if not nf:
+            return None
+
+        xml_content = None
+        if nf.xml_autorizacao:
+            try:
+                if nf.xml_autorizacao.storage.exists(nf.xml_autorizacao.name):
+                    with nf.xml_autorizacao.open("rb") as f:
+                        xml_content = f.read().decode("utf-8", errors="replace")
+            except Exception as e:
+                logger.warning("Could not read existing xml_autorizacao: %s", e)
+
         chave_acesso = getattr(nf, "chave_acesso_nacional", None) or getattr(
             nf, "verification_code", None
         )
-        if not chave_acesso:
+
+        if not xml_content and chave_acesso:
+            try:
+                data = self.buscar_nfse_por_chave(chave_acesso)
+                if data and data.get("raw_xml"):
+                    xml_content = data["raw_xml"]
+                    from django.core.files.base import ContentFile
+
+                    nf.xml_autorizacao.save(
+                        f"NFS-e_{nf.nf_number}.xml",
+                        ContentFile(xml_content.encode("utf-8")),
+                        save=True,
+                    )
+            except Exception as e:
+                logger.warning(
+                    "Failed to retrieve XML from Nacional API for chave %s: %s",
+                    chave_acesso,
+                    e,
+                )
+
+        if not xml_content:
+            logger.warning(
+                "Cannot generate DANFSe PDF: XML not available for NFS-e %s",
+                getattr(nf, "nf_number", None),
+            )
             return None
 
-        _, danfse_base_url = self._get_urls(company.debug_mode)
-        url = f"{danfse_base_url}/{chave_acesso}"
+        try:
+            from brazilfiscalreport.danfse import Danfse, DanfseConfig
 
-        key_pem, cert_pem = self._get_cert_pems()
-        with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
-            try:
-
-                headers = {"Accept": "application/pdf"}
-                resp = _logged_get(
-                    url,
-                    headers=headers,
-                    cert=temp_cert_path,
-                    timeout=30,
-                )
-                if resp.status_code == 200 and resp.content.startswith(b"%PDF"):
-                    return resp.content
-                else:
-                    logger.warning(
-                        "DANFSe PDF download returned status %s for chave %s",
-                        resp.status_code,
-                        chave_acesso,
-                    )
-                    return None
-            except Exception as e:
-                logger.warning("Error downloading DANFSe PDF: %s", e)
-                return None
+            config = DanfseConfig(
+                watermark_cancelled=bool(getattr(nf, "is_canceled", False)),
+                display_canhoto=False,
+            )
+            danfse = Danfse(xml=xml_content, config=config)
+            pdf_output = danfse.output()
+            return bytes(pdf_output) if pdf_output else None
+        except Exception as e:
+            logger.exception(
+                "Error generating DANFSe PDF via BrazilFiscalReport: %s", e
+            )
+            return None
 
     def cancelar_nfse(
         self, invoice_or_nf: Union[Invoice, NotaFiscal]
@@ -707,7 +925,7 @@ class NacionalProvider(NFSeProvider):
         id_evento = f"PRE{chave_acesso}101101"
 
         ped_reg = PedRegEvento(
-            versao="1.00",
+            versao="1.01",
             inf_ped_reg=TcinfPedReg(
                 id=id_evento,
                 tp_amb=tp_amb,
@@ -718,7 +936,7 @@ class NacionalProvider(NFSeProvider):
                 e101101=Te101101(
                     x_desc=Te101101XDesc.CANCELAMENTO_DE_NFS_E,
                     c_motivo=TscodJustCanc.VALUE_1,  # 1 - Erro na Emissão
-                    x_motivo="Erro na Emissão",
+                    x_motivo="Cancelamento solicitado pelo prestador por erro na emissao",
                 ),
             ),
         )
@@ -751,49 +969,69 @@ class NacionalProvider(NFSeProvider):
         )
 
         base_url, _ = self._get_urls(company.debug_mode)
-        endpoint = f"{base_url}/nfse/eventos"
+        endpoint = f"{base_url}/nfse/{chave_acesso}/eventos"
+
+        compressed_ped = gzip.compress(signed_xml.encode("utf-8"))
+        ped_b64 = base64.b64encode(compressed_ped).decode("utf-8")
 
         with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
             try:
-
                 headers = {
-                    "Content-Type": "application/xml",
+                    "Content-Type": "application/json",
                     "Accept": "application/json",
                 }
+                body = {"pedidoRegistroEventoXmlGZipB64": ped_b64}
 
                 logger.info("Sending Cancel Event to Sefin Nacional: %s", endpoint)
                 resp = _logged_post(
                     endpoint,
-                    data=signed_xml.encode("utf-8"),
+                    json=body,
                     headers=headers,
                     cert=temp_cert_path,
                     timeout=40,
                 )
 
-                cancelation_date = None
                 if resp.status_code == 201:
-                    match = re.search(r"<dhEvento>([^<]+)</dhEvento>", resp.text)
-                    if match:
-                        try:
-                            cancelation_date = datetime.datetime.fromisoformat(
-                                match.group(1).replace("Z", "+00:00")
-                            )
-                        except Exception:
-                            pass
+                    data = resp.json()
+                    ev_b64 = data.get("eventoXmlGZipB64")
+                    decompressed_ev = _decompress_gzip_b64(ev_b64) or resp.text
+                    parsed_ev = _parse_decompressed_evento_xml(
+                        decompressed_ev, tipo_evento_adn="CANCELAMENTO"
+                    )
+                    from django.utils import timezone
 
-                result = CancelResult(
-                    sucesso=False,
-                    xml_enviado=signed_xml,
-                    xml_retorno=resp.text,
-                    cancelation_date=cancelation_date,
-                )
-
-                if resp.status_code == 201:
-                    result.sucesso = True
-                    return result
+                    return CancelResult(
+                        sucesso=True,
+                        xml_enviado=signed_xml,
+                        xml_retorno=decompressed_ev,
+                        cancelation_date=parsed_ev.get("dh_evento") or timezone.now(),
+                    )
                 else:
-                    result.erros = self._parse_error_response(resp)
-                    return result
+                    # Idempotency check: was it already canceled?
+                    try:
+                        events = self.consultar_eventos_nfse(chave_acesso)
+                        canc_ev = next(
+                            (ev for ev in events if ev.get("is_cancellation")), None
+                        )
+                        if canc_ev:
+                            from django.utils import timezone
+
+                            return CancelResult(
+                                sucesso=True,
+                                xml_enviado=signed_xml,
+                                xml_retorno=canc_ev.get("raw_xml") or resp.text,
+                                cancelation_date=canc_ev.get("dh_evento")
+                                or timezone.now(),
+                            )
+                    except Exception:
+                        pass
+
+                    return CancelResult(
+                        sucesso=False,
+                        xml_enviado=signed_xml,
+                        xml_retorno=resp.text,
+                        erros=self._parse_error_response(resp),
+                    )
 
             except Exception as e:
                 logger.exception("Error transmitting Cancel Event to Nacional: %s", e)
@@ -814,6 +1052,93 @@ class NacionalProvider(NFSeProvider):
                     xml_retorno=raw_retorno,
                     erros=err_list,
                 )
+
+    def consultar_eventos_nfse(self, chave_acesso: str) -> List[dict]:
+        """Queries all events associated with a national access key.
+        Checks ADN /NFSe/{chaveAcesso}/Eventos first, then falls back to Sefin
+        /nfse/{chaveAcesso}/eventos/101101/1 if ADN has not yet indexed a cancellation.
+        """
+        company = CompanySettings.load()
+        if not company or not chave_acesso:
+            return []
+
+        adn_url = self._get_adn_contribuintes_url(company.debug_mode)
+        base_url, _ = self._get_urls(company.debug_mode)
+        endpoint_adn = f"{adn_url}/NFSe/{chave_acesso}/Eventos"
+        headers = {"Accept": "application/json"}
+
+        key_pem, cert_pem = self._get_cert_pems()
+        events: List[dict] = []
+        with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
+            # 1. Query ADN
+            try:
+                resp_adn = _logged_get(
+                    endpoint_adn, headers=headers, cert=temp_cert_path, timeout=20
+                )
+                if resp_adn.status_code == 200:
+                    data = resp_adn.json()
+                    lote = data.get("LoteDFe") or []
+                    for item in lote:
+                        if item.get("TipoDocumento") == "EVENTO":
+                            xml_b64 = item.get("ArquivoXml")
+                            decompressed = _decompress_gzip_b64(xml_b64) or ""
+                            ev = _parse_decompressed_evento_xml(
+                                decompressed,
+                                nsu=item.get("NSU"),
+                                tipo_evento_adn=item.get("TipoEvento"),
+                            )
+                            if ev:
+                                events.append(ev)
+            except Exception as adn_ex:
+                logger.warning(
+                    "Error querying ADN events for chave %s: %s", chave_acesso, adn_ex
+                )
+
+            # 2. Fallback to Sefin if no cancellation event was found
+            has_cancellation = any(ev.get("is_cancellation") for ev in events)
+            if not has_cancellation:
+                try:
+                    endpoint_sefin = (
+                        f"{base_url}/nfse/{chave_acesso}/eventos/101101/1"
+                    )
+                    resp_sefin = _logged_get(
+                        endpoint_sefin,
+                        headers=headers,
+                        cert=temp_cert_path,
+                        timeout=15,
+                    )
+                    if resp_sefin.status_code == 200:
+                        data_sefin = resp_sefin.json()
+                        ev_list = data_sefin.get("eventos") or []
+                        if ev_list:
+                            for sev in ev_list:
+                                ev_xml_b64 = sev.get("arquivoXml")
+                                decompressed_sev = (
+                                    _decompress_gzip_b64(ev_xml_b64) or ""
+                                )
+                                ev = _parse_decompressed_evento_xml(
+                                    decompressed_sev, tipo_evento_adn="CANCELAMENTO"
+                                )
+                                if ev:
+                                    events.append(ev)
+                        elif data_sefin.get("eventoXmlGZipB64"):
+                            decompressed_sev = (
+                                _decompress_gzip_b64(
+                                    data_sefin.get("eventoXmlGZipB64")
+                                )
+                                or ""
+                            )
+                            ev = _parse_decompressed_evento_xml(
+                                decompressed_sev, tipo_evento_adn="CANCELAMENTO"
+                            )
+                            if ev:
+                                events.append(ev)
+                except Exception as sefin_ex:
+                    logger.debug(
+                        "Fallback check for Sefin event 101101 returned: %s", sefin_ex
+                    )
+
+        return events
 
     def buscar_nfse_por_numero(self, numero: str | int) -> Optional[dict]:
         """Stub: busca de NFS-e por número não implementada no momento para Nacional."""
@@ -840,53 +1165,104 @@ class NacionalProvider(NFSeProvider):
                 decompressed_xml = _decompress_gzip_b64(nfse_b64)
                 if decompressed_xml:
                     parsed = _parse_decompressed_nfse_xml(decompressed_xml)
-                    numero_nf = (
-                        parsed["numero_nf"]
-                        or chave_acesso[-15:].lstrip("0")
-                    )
-                    dt_emi = (
-                        parsed["data_hora_autorizacao"].date()
-                        if parsed["data_hora_autorizacao"]
-                        else datetime.date.today()
-                    )
+                    numero_nf = parsed["numero_nf"] or chave_acesso[-15:].lstrip("0")
 
-                    val = "0.00"
-                    val_match = re.search(
-                        r"<vServ>([^<]+)</vServ>", decompressed_xml
+                    events = self.consultar_eventos_nfse(chave_acesso)
+                    is_canceled = any(ev.get("is_cancellation") for ev in events)
+                    cancelation_date = next(
+                        (
+                            ev.get("dh_evento")
+                            for ev in events
+                            if ev.get("is_cancellation")
+                        ),
+                        None,
                     )
-                    if val_match:
-                        val = val_match.group(1)
-
-                    desc = ""
-                    desc_match = re.search(
-                        r"<xDescServ>([^<]+)</xDescServ>", decompressed_xml
-                    )
-                    if desc_match:
-                        desc = desc_match.group(1)
-
-                    # In Sefin Nacional, cancellation is usually represented by an attached event
-                    # like <e101101> or <xDesc>Cancelamento de NFS-e</xDesc>.
-                    is_canceled = False
-                    if (
-                        re.search(
-                            r"Cancelamento\s+de\s+NFS-e",
-                            decompressed_xml,
-                            re.IGNORECASE,
-                        )
-                        or "<e101101>" in decompressed_xml
-                    ):
-                        is_canceled = True
 
                     return {
                         "nf_number": numero_nf,
-                        "verification_code": chave_acesso,
+                        "verification_code": "",
                         "chave_acesso_nacional": chave_acesso,
-                        "amount_brl": val,
-                        "description": desc,
-                        "issue_date": dt_emi,
+                        "amount_brl": parsed["amount_brl"],
+                        "description": parsed["description"],
+                        "issue_date": parsed["issue_date"] or datetime.date.today(),
+                        "data_hora_autorizacao": parsed["data_hora_autorizacao"],
+                        "codigo_tributacao_nacional": parsed[
+                            "codigo_tributacao_nacional"
+                        ],
+                        "codigo_servico_municipio": parsed["codigo_servico_municipio"],
+                        "codigo_nbs": parsed["codigo_nbs"],
+                        "aliquota_iss": parsed["aliquota_iss"],
+                        "valor_iss": parsed["valor_iss"],
                         "provider": "NACIONAL",
                         "is_canceled": is_canceled,
+                        "cancelation_date": cancelation_date,
+                        "events": events,
                         "raw_xml": decompressed_xml,
+                        "dps_series": parsed["dps_series"],
+                        "dps_number": parsed["dps_number"],
+                        "emit_cnpj": parsed["emit_cnpj"],
                     }
 
             return None
+
+    def consultar_dfe_por_nsu(
+        self, ultimo_nsu: int = 0
+    ) -> Tuple[List[dict], int]:
+        """Queries the ADN Distribution API for all DF-e records newer than ultimo_nsu.
+        Paginates through /DFe/{current_nsu} until no further documents are available.
+        Returns (documents_list, highest_nsu_reached).
+        """
+        company = CompanySettings.load()
+        if not company:
+            return [], ultimo_nsu
+
+        adn_url = self._get_adn_contribuintes_url(company.debug_mode)
+        headers = {"Accept": "application/json"}
+        key_pem, cert_pem = self._get_cert_pems()
+
+        current_nsu = int(ultimo_nsu or 0)
+        all_items: List[dict] = []
+
+        with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
+            while True:
+                endpoint = f"{adn_url}/DFe/{current_nsu}"
+                logger.info("Querying ADN DFe distribution at %s", endpoint)
+                try:
+                    resp = _logged_get(
+                        endpoint, headers=headers, cert=temp_cert_path, timeout=30
+                    )
+                except Exception as ex:
+                    logger.error(
+                        "Error communicating with ADN DFe at %s: %s", endpoint, ex
+                    )
+                    break
+
+                if resp.status_code == 200:
+                    data = resp.json()
+                    lote = data.get("LoteDFe") or []
+                    if not lote:
+                        break
+
+                    for item in lote:
+                        nsu = item.get("NSU")
+                        if nsu is not None and nsu > current_nsu:
+                            current_nsu = nsu
+                        all_items.append(item)
+
+                    if len(lote) < 50:
+                        break
+                elif resp.status_code == 404:
+                    logger.debug(
+                        "ADN DFe reached end of backlog at NSU %s", current_nsu
+                    )
+                    break
+                else:
+                    logger.warning(
+                        "ADN DFe query at NSU %s returned HTTP %s: %s",
+                        current_nsu,
+                        resp.status_code,
+                        resp.text[:300],
+                    )
+                    break
+
+        return all_items, current_nsu

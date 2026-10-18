@@ -1,0 +1,168 @@
+{% extends 'core/base.html' %}
+{% block title %}{% if form.instance.pk %}Editar Cliente - {{ form.instance.name }}{% else %}Novo Cliente{% endif %} - {{ PROJECT_NAME }}{% endblock %}
+
+{% block content %}
+<div class="row justify-content-center">
+    <div class="col-lg-9 col-xl-8">
+        <div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+            <div>
+                <a href="{{ next_url|default:'/clients/' }}" class="btn btn-outline-secondary btn-sm mb-2">
+                    <i class="bi bi-arrow-left me-1"></i>Voltar
+                </a>
+                <h2 class="mb-0">
+                    <i class="bi bi-people me-2 text-primary"></i>
+                    {% if form.instance.pk %}Editar Cliente: {{ form.instance.name }}{% else %}Novo Cliente{% endif %}
+                </h2>
+            </div>
+            {% if form.instance.pk %}
+            <form method="POST" action="{% url 'client_delete' form.instance.pk %}" class="d-inline">
+                {% csrf_token %}
+                <button type="submit" class="btn btn-outline-danger btn-sm"
+                        data-confirm-message="Tem certeza que deseja excluir o cliente '{{ form.instance.name }}'?"
+                        data-confirm-title="Excluir Cliente"
+                        data-confirm-variant="danger">
+                    <i class="bi bi-trash me-1"></i>Excluir
+                </button>
+            </form>
+            {% endif %}
+        </div>
+
+        <form method="POST" novalidate>
+            {% csrf_token %}
+            {% if next_url %}
+            <input type="hidden" name="next" value="{{ next_url }}">
+            {% endif %}
+
+            {% if form.non_field_errors %}
+            <div class="alert alert-danger mb-4 shadow-sm">
+                {% for error in form.non_field_errors %}
+                <div><i class="bi bi-exclamation-triangle-fill me-1"></i>{{ error }}</div>
+                {% endfor %}
+            </div>
+            {% endif %}
+
+            <!-- Identification & Contacts Card -->
+            <div class="card shadow-sm mb-4">
+                <div class="card-header py-3 bg-body-tertiary">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-person-lines-fill me-2 text-primary"></i>Identificação e Contato
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <label class="form-label fw-semibold" for="{{ form.name.id_for_label }}">{{ form.name.label }} <span class="text-danger">*</span></label>
+                            {{ form.name }}
+                            {% if form.name.errors %}
+                            <div class="text-danger small mt-1">{{ form.name.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="{{ form.email.id_for_label }}">{{ form.email.label }}</label>
+                            {{ form.email }}
+                            {% if form.email.errors %}
+                            <div class="text-danger small mt-1">{{ form.email.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="{{ form.email_cc.id_for_label }}">{{ form.email_cc.label }}</label>
+                            {{ form.email_cc }}
+                            <div class="form-text small">Separe múltiplos emails por vírgula.</div>
+                            {% if form.email_cc.errors %}
+                            <div class="text-danger small mt-1">{{ form.email_cc.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Address Card -->
+            <div class="card shadow-sm mb-4">
+                <div class="card-header py-3 bg-body-tertiary">
+                    <h5 class="card-title mb-0">
+                        <i class="bi bi-geo-alt me-2 text-primary"></i>Endereço do Tomador / Cliente
+                    </h5>
+                </div>
+                <div class="card-body">
+                    <div class="row g-3">
+                        <div class="col-md-8">
+                            <label class="form-label fw-semibold" for="{{ form.address_line1.id_for_label }}">{{ form.address_line1.label }}</label>
+                            {{ form.address_line1 }}
+                            {% if form.address_line1.errors %}
+                            <div class="text-danger small mt-1">{{ form.address_line1.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold" for="{{ form.address_number.id_for_label }}">{{ form.address_number.label }}</label>
+                            {{ form.address_number }}
+                            {% if form.address_number.errors %}
+                            <div class="text-danger small mt-1">{{ form.address_number.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="{{ form.address_line2.id_for_label }}">{{ form.address_line2.label }}</label>
+                            {{ form.address_line2 }}
+                            {% if form.address_line2.errors %}
+                            <div class="text-danger small mt-1">{{ form.address_line2.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-6">
+                            <label class="form-label fw-semibold" for="{{ form.address_neighborhood.id_for_label }}">{{ form.address_neighborhood.label }} <span class="text-danger">*</span></label>
+                            {{ form.address_neighborhood }}
+                            {% if form.address_neighborhood.errors %}
+                            <div class="text-danger small mt-1">{{ form.address_neighborhood.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-5">
+                            <label class="form-label fw-semibold" for="{{ form.address_city.id_for_label }}">{{ form.address_city.label }}</label>
+                            {{ form.address_city }}
+                            {% if form.address_city.errors %}
+                            <div class="text-danger small mt-1">{{ form.address_city.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold" for="{{ form.address_state_province.id_for_label }}">{{ form.address_state_province.label }}</label>
+                            {{ form.address_state_province }}
+                            {% if form.address_state_province.errors %}
+                            <div class="text-danger small mt-1">{{ form.address_state_province.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-3">
+                            <label class="form-label fw-semibold" for="{{ form.address_postal_code.id_for_label }}">{{ form.address_postal_code.label }}</label>
+                            {{ form.address_postal_code }}
+                            {% if form.address_postal_code.errors %}
+                            <div class="text-danger small mt-1">{{ form.address_postal_code.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold" for="{{ form.address_country_code.id_for_label }}">{{ form.address_country_code.label }}</label>
+                            {{ form.address_country_code }}
+                            {% if form.address_country_code.errors %}
+                            <div class="text-danger small mt-1">{{ form.address_country_code.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-8">
+                            <label class="form-label fw-semibold" for="{{ form.country.id_for_label }}">{{ form.country.label }}</label>
+                            {{ form.country }}
+                            {% if form.country.errors %}
+                            <div class="text-danger small mt-1">{{ form.country.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Action Buttons -->
+            <div class="d-flex justify-content-end gap-2 mb-5">
+                <a href="{{ next_url|default:'/clients/' }}" class="btn btn-outline-secondary">
+                    Cancelar
+                </a>
+                <button type="submit" class="btn btn-primary px-4">
+                    <i class="bi bi-check-lg me-1"></i>Salvar Cliente
+                </button>
+            </div>
+        </form>
+    </div>
+</div>
+{% endblock %}
+

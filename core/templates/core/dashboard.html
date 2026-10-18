@@ -1,15 +1,50 @@
 {% extends 'core/base.html' %}
 {% load humanize %}
+{% block title %}Histórico de Consolidação Mensal - {{ PROJECT_NAME }}{% endblock %}
+
 {% block content %}
-<div class="d-flex justify-content-between align-items-center mb-4">
-    <h2>Painel Financeiro Mensal</h2>
-    <div class="d-flex gap-2">
-        <form method="POST" action="{% url 'run_audit' %}" class="mb-0">
-            {% csrf_token %}
-            <button type="submit" class="btn btn-outline-secondary fw-bold">
-                🔍 Executar Auditoria
+<div class="d-flex justify-content-between align-items-center mb-4 flex-wrap gap-2">
+    <div>
+        <h2 class="mb-0 fw-bold">Histórico de Consolidação Mensal</h2>
+        <span class="text-muted small">Visão consolidada multi-mensal e relatórios</span>
+    </div>
+    <div class="d-flex gap-2 flex-wrap">
+        <div class="dropdown">
+            <button class="btn btn-outline-primary dropdown-toggle fw-semibold d-flex align-items-center gap-1" type="button" id="esocialAuditoriaDropdown" data-bs-toggle="dropdown" aria-expanded="false">
+                <i class="bi bi-gear-wide-connected"></i> eSocial & Auditoria
             </button>
-        </form>
+            <ul class="dropdown-menu dropdown-menu-end shadow" aria-labelledby="esocialAuditoriaDropdown">
+                <li>
+                    <form method="POST" action="{% url 'sync_esocial' %}" class="mb-0">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="dropdown-item d-flex align-items-center gap-2">
+                            <i class="bi bi-cloud-arrow-down text-primary"></i> Sincronizar eSocial
+                        </button>
+                    </form>
+                </li>
+                <li>
+                    <button class="dropdown-item d-flex align-items-center gap-2" type="button" data-bs-toggle="modal" data-bs-target="#modalImportEsocial">
+                        <i class="bi bi-upload text-success"></i> Subir / Importar Backup ou XMLs
+                    </button>
+                </li>
+                <li>
+                    <a class="dropdown-item d-flex align-items-center gap-2" href="{% url 'export_esocial_backup' %}">
+                        <i class="bi bi-download text-secondary"></i> Baixar Backup (.zip)
+                    </a>
+                </li>
+                <li><hr class="dropdown-divider"></li>
+                <li>
+                    <form method="POST" action="{% url 'run_audit' %}" class="mb-0">
+                        {% csrf_token %}
+                        <input type="hidden" name="next" value="{{ request.get_full_path }}">
+                        <button type="submit" class="dropdown-item d-flex align-items-center gap-2 text-warning">
+                            <i class="bi bi-search"></i> Executar Auditoria
+                        </button>
+                    </form>
+                </li>
+            </ul>
+        </div>
     </div>
 </div>
 
@@ -38,70 +73,74 @@
                 <label class="form-label text-muted small mb-1" for="end_date">Data Final</label>
                 <input type="date" class="form-control" id="end_date" name="end_date" value="{{ end_date }}">
             </div>
-            <div class="col-sm-3">
-                <button type="submit" class="btn btn-primary w-100">Filtrar</button>
+            <div class="col-sm-3 d-flex gap-2">
+                <button type="submit" class="btn btn-primary flex-grow-1 fw-semibold">Filtrar</button>
+                {% if quick_filter or start_date or end_date %}
+                <a href="{% url 'consolidation_history' %}" class="btn btn-outline-secondary" title="Limpar Filtros">
+                    Limpar
+                </a>
+                {% endif %}
             </div>
         </form>
     </div>
 </div>
 
-<div class="row mb-4">
-    <div class="col-md-3">
-        <div class="card shadow-sm text-center">
+<div class="row g-3 mb-4" id="summary-cards-row">
+    <div class="col-12 col-sm-6 col-xl-3">
+        <div class="card h-100 shadow-sm text-center">
             <div class="card-body">
                 <h6 class="card-title text-muted">Receita Total</h6>
-                <h4 class="card-text">R$ {{ total_revenue|floatformat:2|intcomma }}</h4>
+                <h4 class="card-text fw-bold">R$ {{ total_revenue|floatformat:2|intcomma }}</h4>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card shadow-sm text-center">
+    <div class="col-12 col-sm-6 col-xl-3">
+        <div class="card h-100 shadow-sm text-center">
             <div class="card-body">
                 <h6 class="card-title text-muted">Total de Impostos (DAS+INSS+IRRF)</h6>
-                <h4 class="card-text text-danger">R$ {{ total_tax|floatformat:2|intcomma }}</h4>
+                <h4 class="card-text text-danger fw-bold">R$ {{ total_tax|floatformat:2|intcomma }}</h4>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card shadow-sm text-center">
+    <div class="col-12 col-sm-6 col-xl-3">
+        <div class="card h-100 shadow-sm text-center">
             <div class="card-body">
                 <h6 class="card-title text-muted">Pró-labore Total</h6>
-                <h4 class="card-text text-info">R$ {{ total_pl|floatformat:2|intcomma }}</h4>
+                <h4 class="card-text text-info fw-bold">R$ {{ total_pl|floatformat:2|intcomma }}</h4>
             </div>
         </div>
     </div>
-    <div class="col-md-3">
-        <div class="card shadow-sm text-center">
+    <div class="col-12 col-sm-6 col-xl-3">
+        <div class="card h-100 shadow-sm text-center">
             <div class="card-body">
                 <h6 class="card-title text-muted">Lucro Líquido</h6>
-                <h4 class="card-text text-success">R$ {{ net_profit|floatformat:2|intcomma }}</h4>
+                <h4 class="card-text text-success fw-bold">R$ {{ net_profit|floatformat:2|intcomma }}</h4>
             </div>
         </div>
     </div>
 </div>
 
-
-
 <div class="card shadow-sm">
     <div class="card-body p-0">
         <div class="table-responsive">
             <table class="table table-hover align-middle mb-0">
-                <thead>
+                <thead class="bg-body-tertiary">
                     <tr>
-                        <th scope="col">Mês</th>
-                        <th scope="col">Status</th>
-                        <th scope="col">Invoicemento</th>
-                        <th scope="col">Fator R Proj.</th>
-                        <th scope="col">Impostos (DAS + INSS + IRRF)</th>
-                        <th scope="col">Pró-labore Ideal</th>
-                        <th scope="col">Pró-labore Real</th>
+                        <th scope="col" class="ps-3 py-3">Mês</th>
+                        <th scope="col" class="py-3">Status</th>
+                        <th scope="col" class="py-3">Faturamento</th>
+                        <th scope="col" class="py-3">Fator R / Proj.</th>
+                        <th scope="col" class="py-3">Impostos (DAS + INSS + IRRF)</th>
+                        <th scope="col" class="py-3">Pró-labore Ideal</th>
+                        <th scope="col" class="py-3">Pró-labore Real</th>
+                        <th scope="col" class="text-end pe-3 py-3">Ações</th>
                     </tr>
                 </thead>
                 <tbody>
                     {% for consolidation in consolidations %}
                         {% include 'core/partials/consolidation_row.html' %}
                     {% empty %}
-                        <tr><td colspan="7" class="text-center py-4 text-muted">Nenhum registro encontrado. Adicione NFs e execute uma auditoria para começar.</td></tr>
+                        <tr><td colspan="8" class="text-center py-4 text-muted">Nenhum registro encontrado. Adicione NFs e execute uma auditoria para começar.</td></tr>
                     {% endfor %}
                 </tbody>
             </table>
@@ -168,4 +207,7 @@
         endDate.addEventListener("change", handleDateChange);
     });
 </script>
+
+<!-- Modal Importar Backup eSocial -->
+{% include 'core/partials/esocial_import_modal.html' %}
 {% endblock %}

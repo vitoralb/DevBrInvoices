@@ -177,6 +177,8 @@ class RequireCompanySettingsMiddleware:
                         request,
                         "Por favor, configure os dados da sua empresa antes de continuar.",
                     )
-                    return redirect("company_settings")
+                    from urllib.parse import quote
+                    target_url = reverse("company_settings")
+                    return redirect(f"{target_url}?next={quote(request.get_full_path())}")
 
         return self.get_response(request)

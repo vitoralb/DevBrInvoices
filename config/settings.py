@@ -292,6 +292,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.tasks.invoices_tasks.process_daily_invoices_task",
         "schedule": crontab(minute=0, hour="*"),
     },
+    "sync_esocial_daily": {
+        "task": "core.tasks.esocial_tasks.sync_esocial_payroll_task",
+        "schedule": crontab(minute=30, hour=8, day_of_month="8-31"),
+    },
 }
 
 # Structured Logging

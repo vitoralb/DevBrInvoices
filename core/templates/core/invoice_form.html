@@ -1,13 +1,21 @@
 {% extends 'core/base.html' %}
+{% block title %}Nova Invoice - {{ PROJECT_NAME }}{% endblock %}
+
 {% block content %}
 <div class="row justify-content-center">
     <div class="col-md-10">
+        <div class="mb-4">
+            <a href="{{ next_url|default:'/invoices/' }}" class="btn btn-outline-secondary btn-sm mb-2">
+                <i class="bi bi-arrow-left me-1"></i>Voltar para Invoices
+            </a>
+            <h2 class="mb-0 fw-bold">Criar Nova Invoice</h2>
+        </div>
+
         <div class="card shadow-sm">
-            <div class="card-header bg-dark text-white"><h5>Nova Invoice</h5></div>
-            <div class="card-body">
+            <div class="card-body p-4">
                 {% if invoice_templates %}
                 <div class="mb-4">
-                    <label class="form-label"><strong>Carregar de Template</strong></label>
+                    <label class="form-label fw-semibold">Carregar de Template</label>
                     <select id="template-selector" class="form-select">
                         <option value="">-- Selecione um template --</option>
                         {% for t in invoice_templates %}
@@ -15,49 +23,199 @@
                         {% endfor %}
                     </select>
                 </div>
-                <hr>
+                <hr class="my-4">
                 {% endif %}
+
                 <form method="POST" id="invoice-form">
                     {% csrf_token %}
-                    <div class="row">
-                        {% for field in form %}
-                        <div class="{% if field.name == 'bank_details' %}col-12{% else %}col-md-6{% endif %} mb-3">
-                            {{ field.label_tag }}
-                            {{ field }}
-                            {% if field.help_text %}<small class="form-text text-muted">{{ field.help_text }}</small>{% endif %}
-                            {{ field.errors }}
+                    {% if next_url %}
+                    <input type="hidden" name="next" value="{{ next_url }}">
+                    {% endif %}
+                    {% if form.non_field_errors %}
+                    <div class="alert alert-danger mb-3">{{ form.non_field_errors }}</div>
+                    {% endif %}
+
+                    <!-- Primary Fields Grid -->
+                    <div class="row g-3 mb-4">
+                        <div class="col-md-6">
+                            <div class="d-flex justify-content-between align-items-center mb-1">
+                                {{ form.client.label_tag }}
+                                <a href="{% url 'client_create' %}?next={{ request.get_full_path|urlencode }}" class="small text-decoration-none">
+                                    <i class="bi bi-person-plus"></i> Novo Cliente
+                                </a>
+                            </div>
+                            {{ form.client }}
+                            {% if form.client.help_text %}<small class="form-text text-muted">{{ form.client.help_text }}</small>{% endif %}
+                            {{ form.client.errors }}
                         </div>
-                        {% endfor %}
+                        <div class="col-md-6">
+                            {{ form.invoice_number.label_tag }}
+                            {{ form.invoice_number }}
+                            {% if form.invoice_number.help_text %}<small class="form-text text-muted">{{ form.invoice_number.help_text }}</small>{% endif %}
+                            {{ form.invoice_number.errors }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.issue_date.label_tag }}
+                            {{ form.issue_date }}
+                            {% if form.issue_date.help_text %}<small class="form-text text-muted">{{ form.issue_date.help_text }}</small>{% endif %}
+                            {{ form.issue_date.errors }}
+                        </div>
+                        <div class="col-md-6">
+                            {{ form.currency.label_tag }}
+                            {{ form.currency }}
+                            {% if form.currency.help_text %}<small class="form-text text-muted">{{ form.currency.help_text }}</small>{% endif %}
+                            {{ form.currency.errors }}
+                        </div>
                     </div>
-                    
-                    <hr>
-                    <h6>Itens da Invoice</h6>
+
+                    <!-- Collapsible Boilerplate & Secondary Config Accordion -->
+                    {% with has_fiscal_errors=form.bank_details.errors|add:form.nfse_description.errors|add:form.codigo_tributacao_nacional.errors|add:form.codigo_servico_municipio.errors|add:form.codigo_nbs.errors %}
+                    <div class="accordion mb-4" id="macroAccordion">
+                        <div class="accordion-item">
+                            <h2 class="accordion-header" id="headingFiscalBank">
+                                <button class="accordion-button {% if not has_fiscal_errors %}collapsed{% endif %} py-2 bg-body-tertiary" type="button" data-bs-toggle="collapse" data-bs-target="#collapseFiscalBank" aria-expanded="{% if has_fiscal_errors %}true{% else %}false{% endif %}" aria-controls="collapseFiscalBank">
+                                    <i class="bi bi-gear me-2 text-primary"></i>Configurações Fiscais (NFS-e), Dados Bancários e Macros
+                                </button>
+                            </h2>
+                            <div id="collapseFiscalBank" class="accordion-collapse collapse {% if has_fiscal_errors %}show{% endif %}" aria-labelledby="headingFiscalBank" data-bs-parent="#macroAccordion">
+                                <div class="accordion-body">
+                                    <div class="row g-3">
+                                        <div class="col-12">
+                                            {{ form.bank_details.label_tag }}
+                                            {{ form.bank_details }}
+                                            {% if form.bank_details.help_text %}<small class="form-text text-muted">{{ form.bank_details.help_text }}</small>{% endif %}
+                                            {{ form.bank_details.errors }}
+                                        </div>
+                                        <div class="col-12">
+                                            {{ form.nfse_description.label_tag }}
+                                            {{ form.nfse_description }}
+                                            {% if form.nfse_description.help_text %}<small class="form-text text-muted">{{ form.nfse_description.help_text }}</small>{% endif %}
+                                            {{ form.nfse_description.errors }}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{ form.codigo_tributacao_nacional.label_tag }}
+                                            {{ form.codigo_tributacao_nacional }}
+                                            {% if form.codigo_tributacao_nacional.help_text %}<small class="form-text text-muted">{{ form.codigo_tributacao_nacional.help_text }}</small>{% endif %}
+                                            {{ form.codigo_tributacao_nacional.errors }}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{ form.codigo_servico_municipio.label_tag }}
+                                            {{ form.codigo_servico_municipio }}
+                                            {% if form.codigo_servico_municipio.help_text %}<small class="form-text text-muted">{{ form.codigo_servico_municipio.help_text }}</small>{% endif %}
+                                            {{ form.codigo_servico_municipio.errors }}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{ form.codigo_nbs.label_tag }}
+                                            {{ form.codigo_nbs }}
+                                            {% if form.codigo_nbs.help_text %}<small class="form-text text-muted">{{ form.codigo_nbs.help_text }}</small>{% endif %}
+                                            {{ form.codigo_nbs.errors }}
+                                        </div>
+                                    </div>
+
+                                    <hr class="my-3">
+                                    <h6 class="fw-bold small text-muted mb-2"><i class="bi bi-code-slash me-1"></i>Macros Disponíveis:</h6>
+                                    <div class="small bg-body-tertiary p-2 rounded border">
+                                        <div class="row g-1">
+                                            <div class="col-sm-6"><code>&#123;&#123; invoice_date &#125;&#125;</code> - Data de Emissão</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; invoice_number &#125;&#125;</code> - Número da Invoice</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; prev_month_start &#125;&#125;</code> - Primeiro dia mês anterior</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; prev_month_end &#125;&#125;</code> - Último dia mês anterior</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; prev_month_name &#125;&#125;</code> - Nome do mês anterior</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; prev_month_year &#125;&#125;</code> - Ano do mês anterior</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; currency &#125;&#125;</code> - Moeda</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; client_name &#125;&#125;</code> - Nome do Cliente</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; company_cnpj &#125;&#125;</code> - CNPJ da Empresa</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; value_original &#125;&#125;</code> - Valor Total Original</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; value_brl &#125;&#125;</code> - Valor Total BRL</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; exchange_rate &#125;&#125;</code> - Taxa de Conversão</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; effective_tax_rate &#125;&#125;</code> - Alíquota Efetiva Simples</div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    {% endwith %}
+
+                    <h5 class="fw-bold mb-3">Itens da Invoice</h5>
                     {{ formset.management_form }}
+                    {{ formset.non_form_errors }}
+
+                    <div id="empty-form-template" class="d-none">
+                        <div class="formset-row p-3 mb-2 border rounded bg-body-tertiary">
+                            <div class="row g-2 align-items-end">
+                                {{ formset.empty_form.id }}
+                                <div class="col-12 col-md-5">
+                                    {{ formset.empty_form.description.label_tag }}
+                                    {{ formset.empty_form.description }}
+                                </div>
+                                <div class="col-6 col-md-2">
+                                    {{ formset.empty_form.quantity.label_tag }}
+                                    {{ formset.empty_form.quantity }}
+                                </div>
+                                <div class="col-6 col-md-3">
+                                    {{ formset.empty_form.unit_price_foreign.label_tag }}
+                                    {{ formset.empty_form.unit_price_foreign }}
+                                </div>
+                                <div class="col-12 col-md-2 text-end">
+                                    <div class="d-none">
+                                        {{ formset.empty_form.DELETE }}
+                                    </div>
+                                    <button type="button" class="btn btn-outline-danger delete-row-btn w-100" title="Excluir Item">
+                                        <i class="bi bi-trash"></i> <span class="d-md-none">Excluir</span>
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
                     <div id="formset-container">
                         {% for item_form in formset %}
-                            <div class="row formset-row mb-3 align-items-center">
-                                {{ item_form.id }}
-                                <div class="col-md-5">
-                                    {{ item_form.description.label_tag }}
-                                    {{ item_form.description }}
-                                </div>
-                                <div class="col-md-2">
-                                    {{ item_form.quantity.label_tag }}
-                                    {{ item_form.quantity }}
-                                </div>
-                                <div class="col-md-3">
-                                    {{ item_form.unit_price_foreign.label_tag }}
-                                    {{ item_form.unit_price_foreign }}
-                                </div>
-                                <div class="col-md-2 text-center">
-                                    {% if item_form.instance.pk %}{{ item_form.DELETE }}{% endif %}
+                            <div class="formset-row p-3 mb-2 border rounded bg-body-tertiary">
+                                <div class="row g-2 align-items-end">
+                                    {{ item_form.id }}
+                                    <div class="col-12 col-md-5">
+                                        {{ item_form.description.label_tag }}
+                                        {{ item_form.description }}
+                                        {{ item_form.description.errors }}
+                                    </div>
+                                    <div class="col-6 col-md-2">
+                                        {{ item_form.quantity.label_tag }}
+                                        {{ item_form.quantity }}
+                                        {{ item_form.quantity.errors }}
+                                    </div>
+                                    <div class="col-6 col-md-3">
+                                        {{ item_form.unit_price_foreign.label_tag }}
+                                        {{ item_form.unit_price_foreign }}
+                                        {{ item_form.unit_price_foreign.errors }}
+                                    </div>
+                                    <div class="col-12 col-md-2 text-end">
+                                        <div class="d-none">
+                                            {{ item_form.DELETE }}
+                                        </div>
+                                        <button type="button" class="btn btn-outline-danger delete-row-btn w-100" title="Excluir Item">
+                                            <i class="bi bi-trash"></i> <span class="d-md-none">Excluir</span>
+                                        </button>
+                                    </div>
                                 </div>
                             </div>
                         {% endfor %}
                     </div>
-                    <button type="button" class="btn btn-sm btn-outline-secondary mb-3" id="add-item-btn">Adicionar Item</button>
 
-                    <button type="submit" class="btn btn-primary w-100 mt-3">Salvar Rascunho</button>
+                    <div class="d-flex justify-content-between align-items-center flex-wrap gap-2 mb-4">
+                        <button type="button" class="btn btn-sm btn-outline-secondary d-inline-flex align-items-center gap-1" id="add-item-btn">
+                            <i class="bi bi-plus-lg"></i> Adicionar Item
+                        </button>
+                        <div class="d-flex align-items-center gap-2">
+                            <span class="text-muted fw-semibold small">Valor Total Estimado:</span>
+                            <span class="fs-5 fw-bold text-success font-monospace" id="live-total-preview">0,00</span>
+                        </div>
+                    </div>
+
+                    <div class="d-flex justify-content-end gap-2 mt-4">
+                        <a href="{{ next_url|default:'/invoices/' }}" class="btn btn-outline-secondary">Cancelar</a>
+                        <button type="submit" class="btn btn-primary px-4 fw-semibold">Salvar Rascunho</button>
+                    </div>
                 </form>
             </div>
         </div>
@@ -71,110 +229,157 @@ document.addEventListener('DOMContentLoaded', function() {
     const totalFormsInput = document.getElementById('id_items-TOTAL_FORMS');
     const addItemBtn = document.getElementById('add-item-btn');
     
-    // Create an empty row template for adding new rows dynamically
-    let emptyRowHtml = '';
-    
-    function createEmptyRowTemplate() {
-        if (!formsetContainer.querySelector('.formset-row')) {
-            // Need a fallback if there are absolutely no rows
-            emptyRowHtml = `
-                <div class="row formset-row mb-3 align-items-center">
-                    <input type="hidden" name="items-__prefix__-id" id="id_items-__prefix__-id">
-                    <div class="col-md-5">
-                        <label for="id_items-__prefix__-description">Descrição:</label>
-                        <textarea name="items-__prefix__-description" cols="40" rows="2" class="form-control" placeholder="Descrição do serviço prestado..." id="id_items-__prefix__-description"></textarea>
-                    </div>
-                    <div class="col-md-2">
-                        <label for="id_items-__prefix__-quantity">Quantidade:</label>
-                        <input type="number" name="items-__prefix__-quantity" value="1.00" min="0.01" step="0.01" class="form-control" id="id_items-__prefix__-quantity">
-                    </div>
-                    <div class="col-md-3">
-                        <label for="id_items-__prefix__-unit_price_foreign">Preço Unitário:</label>
-                        <input type="number" name="items-__prefix__-unit_price_foreign" min="0.00" step="0.01" class="form-control" id="id_items-__prefix__-unit_price_foreign">
-                    </div>
-                    <div class="col-md-2 text-center">
-                    </div>
-                </div>`;
-        } else {
-            const row = formsetContainer.querySelector('.formset-row').cloneNode(true);
-            row.innerHTML = row.innerHTML.replace(/items-(\d+)-/g, 'items-__prefix__-').replace(/id_items-(\d+)-/g, 'id_items-__prefix__-');
-            emptyRowHtml = row.outerHTML;
+    function updateLiveTotal() {
+        let total = 0;
+        const rows = formsetContainer.querySelectorAll('.formset-row');
+        rows.forEach(row => {
+            const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+            if (deleteCheckbox && deleteCheckbox.checked) return;
+            if (row.style.display === 'none') return;
+
+            const qtyInput = row.querySelector('[name$="-quantity"]');
+            const priceInput = row.querySelector('[name$="-unit_price_foreign"]');
+            if (qtyInput && priceInput) {
+                const qty = parseFloat(qtyInput.value.replace(',', '.')) || 0;
+                const price = parseFloat(priceInput.value.replace(',', '.')) || 0;
+                total += qty * price;
+            }
+        });
+        const currency = document.querySelector('[name="currency"]')?.value?.trim() || '';
+        const formatted = total.toLocaleString('pt-BR', { minimumFractionDigits: 2, maximumFractionDigits: 2 });
+        const previewEl = document.getElementById('live-total-preview');
+        if (previewEl) {
+            previewEl.textContent = (currency ? currency + ' ' : '') + formatted;
         }
     }
-    createEmptyRowTemplate();
 
     function addRow(data = null) {
         const totalForms = parseInt(totalFormsInput.value);
-        const newRowHtml = emptyRowHtml.replace(/__prefix__/g, totalForms);
-        
-        const tempDiv = document.createElement('div');
-        tempDiv.innerHTML = newRowHtml;
-        const newRow = tempDiv.firstElementChild;
+        const templateEl = document.getElementById('empty-form-template').firstElementChild.cloneNode(true);
+        templateEl.innerHTML = templateEl.innerHTML.replace(/__prefix__/g, totalForms);
         
         if (data) {
-            const desc = newRow.querySelector('[name$="-description"]');
-            if(desc) desc.value = data.description || '';
-            const qty = newRow.querySelector('[name$="-quantity"]');
-            if(qty) qty.value = data.quantity || '1.00';
-            const price = newRow.querySelector('[name$="-unit_price_foreign"]');
-            if(price) price.value = data.unit_price_foreign || '';
+            const desc = templateEl.querySelector('[name$="-description"]');
+            if (desc) desc.value = data.description || '';
+            const qty = templateEl.querySelector('[name$="-quantity"]');
+            if (qty) qty.value = data.quantity || '1.00';
+            const price = templateEl.querySelector('[name$="-unit_price_foreign"]');
+            if (price) price.value = data.unit_price_foreign || '';
         } else {
-            const inputs = newRow.querySelectorAll('input, textarea, select');
-            inputs.forEach(input => {
-                if (input.type !== 'hidden' || input.name.endsWith('-DELETE')) {
-                    if(input.name.endsWith('-quantity')) {
-                        input.value = '1.00';
-                    } else {
-                        input.value = '';
-                    }
-                }
-            });
+            const qty = templateEl.querySelector('[name$="-quantity"]');
+            if (qty) qty.value = '1.00';
         }
         
-        formsetContainer.appendChild(newRow);
+        formsetContainer.appendChild(templateEl);
         totalFormsInput.value = totalForms + 1;
+        updateLiveTotal();
     }
 
     if (addItemBtn) {
         addItemBtn.addEventListener('click', () => addRow());
     }
 
+    // Handle delete row buttons
+    formsetContainer.addEventListener('click', function(e) {
+        const btn = e.target.closest('.delete-row-btn');
+        if (btn) {
+            const row = btn.closest('.formset-row');
+            const deleteCheckbox = row.querySelector('input[type="checkbox"][name$="-DELETE"]');
+            if (deleteCheckbox && deleteCheckbox.closest('.d-none') && row.querySelector('input[type="hidden"][name$="-id"]')?.value) {
+                deleteCheckbox.checked = true;
+                row.style.display = 'none';
+            } else {
+                row.remove();
+                const rows = formsetContainer.querySelectorAll('.formset-row');
+                totalFormsInput.value = rows.length;
+                rows.forEach((r, index) => {
+                    const inputs = r.querySelectorAll('input, textarea, select');
+                    inputs.forEach(input => {
+                        if (input.name) input.name = input.name.replace(/items-\d+-/, `items-${index}-`);
+                        if (input.id) input.id = input.id.replace(/id_items-\d+-/, `id_items-${index}-`);
+                    });
+                });
+            }
+            updateLiveTotal();
+        }
+    });
+
+    formsetContainer.addEventListener('input', updateLiveTotal);
+    const currencyInput = document.querySelector('[name="currency"]');
+    if (currencyInput) {
+        currencyInput.addEventListener('input', updateLiveTotal);
+    }
+
     if (templateSelector) {
+        let prevTemplateValue = "";
+        templateSelector.addEventListener('focus', function() {
+            prevTemplateValue = this.value;
+        });
+
+        function loadTemplate(templateId) {
+            fetch('/htmx/template-details/' + templateId + '/')
+                .then(response => response.json())
+                .then(data => {
+                    const currencyInput = document.querySelector('[name="currency"]');
+                    if (currencyInput && data.currency) currencyInput.value = data.currency;
+
+                    const bankDetailsInput = document.querySelector('[name="bank_details"]');
+                    if (bankDetailsInput && data.bank_details !== undefined) bankDetailsInput.value = data.bank_details;
+
+                    const nfseDescInput = document.querySelector('[name="nfse_description"]');
+                    if (nfseDescInput && data.nfse_description !== undefined) nfseDescInput.value = data.nfse_description;
+
+                    const tribNacInput = document.querySelector('[name="codigo_tributacao_nacional"]');
+                    if (tribNacInput && data.codigo_tributacao_nacional !== undefined) tribNacInput.value = data.codigo_tributacao_nacional;
+
+                    const servMunInput = document.querySelector('[name="codigo_servico_municipio"]');
+                    if (servMunInput && data.codigo_servico_municipio !== undefined) servMunInput.value = data.codigo_servico_municipio;
+
+                    const nbsInput = document.querySelector('[name="codigo_nbs"]');
+                    if (nbsInput && data.codigo_nbs !== undefined) nbsInput.value = data.codigo_nbs;
+                    
+                    formsetContainer.innerHTML = '';
+                    totalFormsInput.value = '0';
+                    
+                    if (data.items && data.items.length > 0) {
+                        data.items.forEach(item => addRow(item));
+                    } else {
+                        addRow();
+                    }
+                    prevTemplateValue = templateId;
+                    updateLiveTotal();
+                })
+                .catch(err => console.error('Error fetching template details:', err));
+        }
+
         templateSelector.addEventListener('change', function() {
             const templateId = this.value;
             if (!templateId) return;
 
-            fetch('/htmx/template-details/' + templateId + '/')
-                .then(response => response.json())
-                .then(data => {
-                    // Update currency if needed
-                    const currencyInput = document.querySelector('[name="currency"]');
-                    if (currencyInput && data.currency) {
-                        currencyInput.value = data.currency;
-                    }
+            const bankDetails = document.querySelector('[name="bank_details"]')?.value.trim();
+            const nfseDesc = document.querySelector('[name="nfse_description"]')?.value.trim();
+            const hasExisting = bankDetails || (formsetContainer.querySelectorAll('.formset-row').length > 0);
+            if (hasExisting) {
+                if (typeof window.showConfirmModal === 'function') {
+                    window.showConfirmModal({
+                        message: "Carregar este template irá substituir os dados atuais dos itens e descrições. Deseja continuar?",
+                        title: "Substituir Dados pelo Template",
+                        variant: "warning",
+                        onConfirm: () => loadTemplate(templateId)
+                    });
+                    this.value = prevTemplateValue;
+                    return;
+                } else if (!confirm("Carregar este template irá substituir os dados atuais dos itens e descrições. Deseja continuar?")) {
+                    this.value = prevTemplateValue;
+                    return;
+                }
+            }
 
-                    // Update bank details if provided
-                    const bankDetailsInput = document.querySelector('[name="bank_details"]');
-                    if (bankDetailsInput && data.bank_details !== undefined) {
-                        bankDetailsInput.value = data.bank_details;
-                    }
-                    
-                    // Clear existing formset rows
-                    formsetContainer.innerHTML = '';
-                    totalFormsInput.value = '0';
-                    
-                    // Add items from template
-                    if (data.items && data.items.length > 0) {
-                        data.items.forEach(item => {
-                            addRow(item);
-                        });
-                    } else {
-                        addRow(); // add at least one empty row
-                    }
-                })
-                .catch(err => console.error('Error fetching template details:', err));
+            loadTemplate(templateId);
         });
     }
+
+    updateLiveTotal();
 });
 </script>
 {% endblock %}
