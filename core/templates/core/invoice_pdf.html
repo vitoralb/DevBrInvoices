@@ -178,7 +178,6 @@
             <div>{{ company.address_city|smart_title }} - {{ company.address_uf }}, Brazil</div>
             <div>{{ company.address_cep|cep_format|default_if_none:"" }}</div>
             {% if company.email %}<div>{{ company.email }}</div>{% endif %}
-            {% if company.phone_number %}<div>{{ company.phone_number }}</div>{% endif %}
         </div>
     </div>
 
