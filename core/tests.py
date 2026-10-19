@@ -315,6 +315,11 @@ class NFSeProviderAbstractionTests(TestCase):
         )
 
     def setUp(self):
+        from unittest.mock import patch
+        _blocked_patcher = patch("core.models.paulistana_emission_blocked", return_value=False)
+        _blocked_patcher.start()
+        self.addCleanup(_blocked_patcher.stop)
+
         self.company = CompanySettings.objects.create(
             company_name="Test Company",
             cnpj="12.345.678/0001-90",
@@ -348,7 +353,7 @@ class NFSeProviderAbstractionTests(TestCase):
             bank_details="Test Beneficiary\n12345\n001\n0001",
             codigo_tributacao_nacional="010101",
             codigo_servico_municipio="",
-            codigo_nbs="115022000",
+            codigo_nbs="115029000",
         )
         InvoiceItem.objects.create(
             invoice=self.invoice,
@@ -1896,8 +1901,8 @@ class InvoiceNfseDescriptionTests(TestCase):
             "bank_details": "",
             "nfse_description": "Serviço {{ invoice_number }} - taxa {{ exchange_rate }} - imposto {{ effective_tax_rate }}%",
             "codigo_tributacao_nacional": "010101",
-            "codigo_servico_municipio": "02668",
-            "codigo_nbs": "115022000",
+            "codigo_servico_municipio": "001",
+            "codigo_nbs": "115029000",
         })
         self.assertTrue(form_valid.is_valid(), form_valid.errors)
 
@@ -1926,8 +1931,8 @@ class InvoiceNfseDescriptionTests(TestCase):
             "bank_details": "",
             "nfse_description": "Serviço válido {{ currency }} {{ exchange_rate }}",
             "codigo_tributacao_nacional": "010101",
-            "codigo_servico_municipio": "02668",
-            "codigo_nbs": "115022000",
+            "codigo_servico_municipio": "001",
+            "codigo_nbs": "115029000",
         })
         self.assertTrue(tpl_form_valid.is_valid(), tpl_form_valid.errors)
 
@@ -3772,7 +3777,7 @@ class InvoiceFiscalCodesTests(TestCase):
             exchange_rate_to_brl=Decimal("5.00"),
             codigo_tributacao_nacional="010101",
             codigo_servico_municipio="",
-            codigo_nbs="115022000",
+            codigo_nbs="115029000",
             status="DRAFT",
         )
         InvoiceItem.objects.create(
@@ -3812,7 +3817,7 @@ class InvoiceFiscalCodesTests(TestCase):
             "nfse_description": "Service description",
             "codigo_tributacao_nacional": "010101",
             "codigo_servico_municipio": "",
-            "codigo_nbs": "115022000",
+            "codigo_nbs": "115029000",
         })
         self.assertTrue(form_valid.is_valid(), form_valid.errors)
 
@@ -3844,8 +3849,8 @@ class InvoiceFiscalCodesTests(TestCase):
             "bank_details": "",
             "nfse_description": "Service description",
             "codigo_tributacao_nacional": "010101",
-            "codigo_servico_municipio": "02668",
-            "codigo_nbs": "115022000",
+            "codigo_servico_municipio": "001",
+            "codigo_nbs": "115029000",
         })
         self.assertTrue(form_valid.is_valid(), form_valid.errors)
 
@@ -3856,19 +3861,19 @@ class InvoiceFiscalCodesTests(TestCase):
             bank_details="Bank info",
             nfse_description="NFSe info",
             codigo_tributacao_nacional="010101",
-            codigo_servico_municipio="02668",
-            codigo_nbs="115022000",
+            codigo_servico_municipio="001",
+            codigo_nbs="115029000",
         )
         resp = self.client_http.get(reverse("htmx_get_invoice_template", args=[tmpl.id]))
         self.assertEqual(resp.status_code, 200)
         data = resp.json()
         self.assertEqual(data["codigo_tributacao_nacional"], "010101")
-        self.assertEqual(data["codigo_servico_municipio"], "02668")
-        self.assertEqual(data["codigo_nbs"], "115022000")
+        self.assertEqual(data["codigo_servico_municipio"], "001")
+        self.assertEqual(data["codigo_nbs"], "115029000")
 
     def test_clone_invoice_copies_fiscal_codes(self):
         self.invoice.codigo_tributacao_nacional = "010203"
-        self.invoice.codigo_servico_municipio = "02668"
+        self.invoice.codigo_servico_municipio = "001"
         self.invoice.codigo_nbs = "115022999"
         self.invoice.save()
 
@@ -3878,7 +3883,7 @@ class InvoiceFiscalCodesTests(TestCase):
         cloned = Invoice.objects.exclude(id=self.invoice.id).first()
         self.assertIsNotNone(cloned)
         self.assertEqual(cloned.codigo_tributacao_nacional, "010203")
-        self.assertEqual(cloned.codigo_servico_municipio, "02668")
+        self.assertEqual(cloned.codigo_servico_municipio, "001")
         self.assertEqual(cloned.codigo_nbs, "115022999")
 
     def test_htmx_update_fiscal_codes_flow(self):
@@ -3910,7 +3915,7 @@ class InvoiceFiscalCodesTests(TestCase):
         self.invoice.save()
         resp_final = self.client_http.post(url, data={
             "codigo_tributacao_nacional": "010101",
-            "codigo_nbs": "115022000",
+            "codigo_nbs": "115029000",
         })
         self.assertEqual(resp_final.status_code, 400)
 
@@ -3921,14 +3926,14 @@ class InvoiceFiscalCodesTests(TestCase):
         # 1. When codigo_servico_municipio is empty -> <cTribMun> omitted
         self.invoice.codigo_tributacao_nacional = "010101"
         self.invoice.codigo_servico_municipio = ""
-        self.invoice.codigo_nbs = "115022000"
+        self.invoice.codigo_nbs = "115029000"
         self.invoice.save()
 
         _, signed_xml, _ = nacional_provider._build_and_sign_dps(
             self.invoice, self.company, 1, "1"
         )
         self.assertIn("<cTribNac>010101</cTribNac>", signed_xml)
-        self.assertIn("<cNBS>115022000</cNBS>", signed_xml)
+        self.assertIn("<cNBS>115029000</cNBS>", signed_xml)
         self.assertNotIn("<cTribMun>", signed_xml)
 
         # 2. When codigo_servico_municipio has <= 3 digits -> <cTribMun> sent
@@ -3946,7 +3951,8 @@ class InvoiceFiscalCodesTests(TestCase):
         self.assertFalse(emit_res.sucesso)
         self.assertTrue(any("possui mais de 3 dígitos" in err for err in emit_res.erros))
 
-    def test_paulistana_provider_fiscal_code_rules(self):
+    @patch("core.models.paulistana_emission_blocked", return_value=False)
+    def test_paulistana_provider_fiscal_code_rules(self, mock_blocked):
         from core.nfse.paulistana.provider import PaulistanaProvider
         paulistana_provider = PaulistanaProvider()
 
@@ -3979,8 +3985,8 @@ class InvoiceFiscalCodesTests(TestCase):
         from core.nfse.base import EmitResult
 
         self.invoice.codigo_tributacao_nacional = "010101"
-        self.invoice.codigo_servico_municipio = "02668"
-        self.invoice.codigo_nbs = "115022000"
+        self.invoice.codigo_servico_municipio = "001"
+        self.invoice.codigo_nbs = "115029000"
         self.invoice.save()
 
         # Provider result missing fiscal codes
@@ -3997,8 +4003,8 @@ class InvoiceFiscalCodesTests(TestCase):
         mock_provider.baixar_pdf.return_value = b"%PDF mock"
         nf = _create_nf_from_emit_result(self.invoice, result, mock_provider)
         self.assertEqual(nf.codigo_tributacao_nacional, "010101")
-        self.assertEqual(nf.codigo_servico_municipio, "02668")
-        self.assertEqual(nf.codigo_nbs, "115022000")
+        self.assertEqual(nf.codigo_servico_municipio, "001")
+        self.assertEqual(nf.codigo_nbs, "115029000")
 
 
 class PastConsolidationsImportTests(TestCase):
@@ -4170,7 +4176,7 @@ class NfseEmissionErrorHandlingTests(NFSeProviderAbstractionTests):
             currency="USD",
             exchange_rate_to_brl=Decimal("5.0000"),
             codigo_tributacao_nacional="010101",
-            codigo_nbs="115022000",
+            codigo_nbs="115029000",
             codigo_servico_municipio="001",
             status="DRAFT",
         )
@@ -4196,5 +4202,11 @@ from core.tests_esocial import (
     EsocialParserTests,
     EsocialClientAndSyncTests,
     EsocialBackupTests,
+)
+from core.tests_cbs_ibs import (
+    CbsIbsModelAndTemplateTests,
+    CbsIbsDpsGenerationAndXsdTests,
+    CbsIbsEmissionAndPersistenceTests,
+    CbsIbsFormsValidationTests,
 )
 

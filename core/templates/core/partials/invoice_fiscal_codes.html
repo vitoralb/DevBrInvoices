@@ -20,11 +20,23 @@
         </div>
         <div class="mb-2">
             <label class="form-label small mb-0 text-muted">Cód. Serviço Município</label>
-            <input type="text" name="codigo_servico_municipio" class="form-control form-control-sm font-monospace" value="{% if draft_serv_mun is not None %}{{ draft_serv_mun }}{% else %}{{ invoice.codigo_servico_municipio }}{% endif %}" placeholder="ex: 02668">
+            <input type="text" name="codigo_servico_municipio" class="form-control form-control-sm font-monospace" value="{% if draft_serv_mun is not None %}{{ draft_serv_mun }}{% else %}{{ invoice.codigo_servico_municipio }}{% endif %}" placeholder="ex: 001">
         </div>
         <div class="mb-2">
             <label class="form-label small mb-0 text-muted">Cód. NBS</label>
-            <input type="text" name="codigo_nbs" class="form-control form-control-sm font-monospace" value="{% if draft_nbs %}{{ draft_nbs }}{% else %}{{ invoice.codigo_nbs }}{% endif %}" placeholder="ex: 115022000" required>
+            <input type="text" name="codigo_nbs" class="form-control form-control-sm font-monospace" value="{% if draft_nbs %}{{ draft_nbs }}{% else %}{{ invoice.codigo_nbs }}{% endif %}" placeholder="ex: 115029000" required>
+        </div>
+        <div class="mb-2">
+            <label class="form-label small mb-0 text-muted">CST IBS/CBS</label>
+            <input type="text" name="cst_ibs_cbs" class="form-control form-control-sm font-monospace" value="{% if draft_cst_ibs is not None %}{{ draft_cst_ibs }}{% else %}{{ invoice.cst_ibs_cbs|default:'410' }}{% endif %}" placeholder="ex: 410">
+        </div>
+        <div class="mb-2">
+            <label class="form-label small mb-0 text-muted">Classificação IBS/CBS (cClassTrib)</label>
+            <input type="text" name="c_class_trib_ibs_cbs" class="form-control form-control-sm font-monospace" value="{% if draft_c_class is not None %}{{ draft_c_class }}{% else %}{{ invoice.c_class_trib_ibs_cbs|default:'410004' }}{% endif %}" placeholder="ex: 410004">
+        </div>
+        <div class="mb-2">
+            <label class="form-label small mb-0 text-muted">Indicador da Operação (cIndOp)</label>
+            <input type="text" name="c_ind_op_ibs_cbs" class="form-control form-control-sm font-monospace" value="{% if draft_c_ind is not None %}{{ draft_c_ind }}{% else %}{{ invoice.c_ind_op_ibs_cbs|default:'100301' }}{% endif %}" placeholder="ex: 100301">
         </div>
         <div class="d-flex gap-2 justify-content-end">
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('fiscal-codes-edit-form').reset(); document.getElementById('fiscal-codes-edit-form').classList.add('d-none'); document.getElementById('fiscal-codes-content').classList.remove('d-none');">Cancelar</button>
@@ -36,6 +48,9 @@
     <div id="fiscal-codes-content" class="{% if is_editing %}d-none {% endif %}p-2 rounded bg-body-tertiary border small">
         <div class="mb-1"><strong>Trib. Nacional:</strong> <code>{{ invoice.codigo_tributacao_nacional|default:"-" }}</code></div>
         <div class="mb-1"><strong>Serviço Município:</strong> <code>{{ invoice.codigo_servico_municipio|default:"-" }}</code></div>
-        <div><strong>NBS:</strong> <code>{{ invoice.codigo_nbs|default:"-" }}</code></div>
+        <div class="mb-1"><strong>NBS:</strong> <code>{{ invoice.codigo_nbs|default:"-" }}</code></div>
+        <div class="mb-1"><strong>CST IBS/CBS:</strong> <code>{{ invoice.cst_ibs_cbs|default:"-" }}</code></div>
+        <div class="mb-1"><strong>cClassTrib:</strong> <code>{{ invoice.c_class_trib_ibs_cbs|default:"-" }}</code></div>
+        <div><strong>cIndOp:</strong> <code>{{ invoice.c_ind_op_ibs_cbs|default:"-" }}</code></div>
     </div>
 </div>

@@ -69,7 +69,7 @@
                     </div>
 
                     <!-- Collapsible Boilerplate & Secondary Config Accordion -->
-                    {% with has_fiscal_errors=form.bank_details.errors|add:form.nfse_description.errors|add:form.codigo_tributacao_nacional.errors|add:form.codigo_servico_municipio.errors|add:form.codigo_nbs.errors %}
+                    {% with has_fiscal_errors=form.bank_details.errors|add:form.nfse_description.errors|add:form.codigo_tributacao_nacional.errors|add:form.codigo_servico_municipio.errors|add:form.codigo_nbs.errors|add:form.cst_ibs_cbs.errors|add:form.c_class_trib_ibs_cbs.errors|add:form.c_ind_op_ibs_cbs.errors %}
                     <div class="accordion mb-4" id="macroAccordion">
                         <div class="accordion-item">
                             <h2 class="accordion-header" id="headingFiscalBank">
@@ -110,6 +110,24 @@
                                             {% if form.codigo_nbs.help_text %}<small class="form-text text-muted">{{ form.codigo_nbs.help_text }}</small>{% endif %}
                                             {{ form.codigo_nbs.errors }}
                                         </div>
+                                        <div class="col-md-4">
+                                            {{ form.cst_ibs_cbs.label_tag }}
+                                            {{ form.cst_ibs_cbs }}
+                                            {% if form.cst_ibs_cbs.help_text %}<small class="form-text text-muted">{{ form.cst_ibs_cbs.help_text }}</small>{% endif %}
+                                            {{ form.cst_ibs_cbs.errors }}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{ form.c_class_trib_ibs_cbs.label_tag }}
+                                            {{ form.c_class_trib_ibs_cbs }}
+                                            {% if form.c_class_trib_ibs_cbs.help_text %}<small class="form-text text-muted">{{ form.c_class_trib_ibs_cbs.help_text }}</small>{% endif %}
+                                            {{ form.c_class_trib_ibs_cbs.errors }}
+                                        </div>
+                                        <div class="col-md-4">
+                                            {{ form.c_ind_op_ibs_cbs.label_tag }}
+                                            {{ form.c_ind_op_ibs_cbs }}
+                                            {% if form.c_ind_op_ibs_cbs.help_text %}<small class="form-text text-muted">{{ form.c_ind_op_ibs_cbs.help_text }}</small>{% endif %}
+                                            {{ form.c_ind_op_ibs_cbs.errors }}
+                                        </div>
                                     </div>
 
                                     <hr class="my-3">
@@ -128,7 +146,8 @@
                                             <div class="col-sm-6"><code>&#123;&#123; value_original &#125;&#125;</code> - Valor Total Original</div>
                                             <div class="col-sm-6"><code>&#123;&#123; value_brl &#125;&#125;</code> - Valor Total BRL</div>
                                             <div class="col-sm-6"><code>&#123;&#123; exchange_rate &#125;&#125;</code> - Taxa de Conversão</div>
-                                            <div class="col-sm-6"><code>&#123;&#123; effective_tax_rate &#125;&#125;</code> - Alíquota Efetiva Simples</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; nominal_tax_rate &#125;&#125;</code> - Alíquota aproximada (nominal da faixa, Lei 12.741)</div>
+                                            <div class="col-sm-6"><code>&#123;&#123; effective_tax_rate &#125;&#125;</code> - Alíquota efetiva do DAS</div>
                                         </div>
                                     </div>
                                 </div>
@@ -337,6 +356,15 @@ document.addEventListener('DOMContentLoaded', function() {
 
                     const nbsInput = document.querySelector('[name="codigo_nbs"]');
                     if (nbsInput && data.codigo_nbs !== undefined) nbsInput.value = data.codigo_nbs;
+
+                    const cstIbscbsInput = document.querySelector('[name="cst_ibs_cbs"]');
+                    if (cstIbscbsInput && data.cst_ibs_cbs !== undefined) cstIbscbsInput.value = data.cst_ibs_cbs;
+
+                    const cClassTribInput = document.querySelector('[name="c_class_trib_ibs_cbs"]');
+                    if (cClassTribInput && data.c_class_trib_ibs_cbs !== undefined) cClassTribInput.value = data.c_class_trib_ibs_cbs;
+
+                    const cIndOpInput = document.querySelector('[name="c_ind_op_ibs_cbs"]');
+                    if (cIndOpInput && data.c_ind_op_ibs_cbs !== undefined) cIndOpInput.value = data.c_ind_op_ibs_cbs;
                     
                     formsetContainer.innerHTML = '';
                     totalFormsInput.value = '0';

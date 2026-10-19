@@ -27,7 +27,10 @@ VALID_INVOICE_MACROS = {
     "{{ company_cnpj }}",
     "{{ exchange_rate }}",
     "{{ effective_tax_rate }}",
+    "{{ nominal_tax_rate }}",
 }
+
+VALID_NFSE_MACROS = VALID_INVOICE_MACROS
 
 VALID_EMAIL_MACROS = VALID_INVOICE_MACROS | {
     "{{ error }}",
@@ -62,6 +65,9 @@ class InvoiceForm(forms.ModelForm):
             "codigo_tributacao_nacional",
             "codigo_servico_municipio",
             "codigo_nbs",
+            "cst_ibs_cbs",
+            "c_class_trib_ibs_cbs",
+            "c_ind_op_ibs_cbs",
         ]
         labels = {
             "client": "Cliente",
@@ -73,6 +79,9 @@ class InvoiceForm(forms.ModelForm):
             "codigo_tributacao_nacional": "Cód. Tributação Nacional",
             "codigo_servico_municipio": "Cód. Serviço Município",
             "codigo_nbs": "Cód. NBS",
+            "cst_ibs_cbs": "CST IBS/CBS",
+            "c_class_trib_ibs_cbs": "Classificação IBS/CBS (cClassTrib)",
+            "c_ind_op_ibs_cbs": "Indicador da Operação (cIndOp)",
         }
         widgets = {
             "issue_date": forms.DateInput(
@@ -100,19 +109,31 @@ class InvoiceForm(forms.ModelForm):
                 }
             ),
             "codigo_tributacao_nacional": forms.TextInput(
-                attrs={"class": "form-control", "placeholder": "ex: 010101"}
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 010101"}
             ),
             "codigo_servico_municipio": forms.TextInput(
-                attrs={"class": "form-control", "placeholder": "ex: 02668"}
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 001"}
             ),
             "codigo_nbs": forms.TextInput(
-                attrs={"class": "form-control", "placeholder": "ex: 115022000"}
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 115029000"}
+            ),
+            "cst_ibs_cbs": forms.TextInput(
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 410"}
+            ),
+            "c_class_trib_ibs_cbs": forms.TextInput(
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 410004"}
+            ),
+            "c_ind_op_ibs_cbs": forms.TextInput(
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 100301"}
             ),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["codigo_servico_municipio"].required = False
+        self.fields["cst_ibs_cbs"].required = False
+        self.fields["c_class_trib_ibs_cbs"].required = False
+        self.fields["c_ind_op_ibs_cbs"].required = False
         if not self.instance.pk and not self.initial.get("issue_date"):
             self.fields["issue_date"].initial = datetime.date.today
 
@@ -140,6 +161,15 @@ class InvoiceForm(forms.ModelForm):
 
     def clean_codigo_servico_municipio(self):
         return (self.cleaned_data.get("codigo_servico_municipio") or "").strip()
+
+    def clean_cst_ibs_cbs(self):
+        return (self.cleaned_data.get("cst_ibs_cbs") or "").strip()
+
+    def clean_c_class_trib_ibs_cbs(self):
+        return (self.cleaned_data.get("c_class_trib_ibs_cbs") or "").strip()
+
+    def clean_c_ind_op_ibs_cbs(self):
+        return (self.cleaned_data.get("c_ind_op_ibs_cbs") or "").strip()
 
 
 class InvoiceItemForm(forms.ModelForm):
@@ -203,6 +233,9 @@ class InvoiceTemplateForm(forms.ModelForm):
             "codigo_tributacao_nacional",
             "codigo_servico_municipio",
             "codigo_nbs",
+            "cst_ibs_cbs",
+            "c_class_trib_ibs_cbs",
+            "c_ind_op_ibs_cbs",
         ]
         labels = {
             "name": "Nome",
@@ -212,6 +245,9 @@ class InvoiceTemplateForm(forms.ModelForm):
             "codigo_tributacao_nacional": "Cód. Tributação Nacional",
             "codigo_servico_municipio": "Cód. Serviço Município",
             "codigo_nbs": "Cód. NBS",
+            "cst_ibs_cbs": "CST IBS/CBS",
+            "c_class_trib_ibs_cbs": "Classificação IBS/CBS (cClassTrib)",
+            "c_ind_op_ibs_cbs": "Indicador da Operação (cIndOp)",
         }
         widgets = {
             "name": forms.TextInput(attrs={"class": "form-control"}),
@@ -231,19 +267,31 @@ class InvoiceTemplateForm(forms.ModelForm):
                 }
             ),
             "codigo_tributacao_nacional": forms.TextInput(
-                attrs={"class": "form-control", "placeholder": "ex: 010101"}
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 010101"}
             ),
             "codigo_servico_municipio": forms.TextInput(
-                attrs={"class": "form-control", "placeholder": "ex: 02668"}
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 001"}
             ),
             "codigo_nbs": forms.TextInput(
-                attrs={"class": "form-control", "placeholder": "ex: 115022000"}
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 115029000"}
+            ),
+            "cst_ibs_cbs": forms.TextInput(
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 410"}
+            ),
+            "c_class_trib_ibs_cbs": forms.TextInput(
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 410004"}
+            ),
+            "c_ind_op_ibs_cbs": forms.TextInput(
+                attrs={"class": "form-control font-monospace", "placeholder": "ex: 100301"}
             ),
         }
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["codigo_servico_municipio"].required = False
+        self.fields["cst_ibs_cbs"].required = False
+        self.fields["c_class_trib_ibs_cbs"].required = False
+        self.fields["c_ind_op_ibs_cbs"].required = False
 
     def clean_nfse_description(self):
         desc = self.cleaned_data.get("nfse_description", "")
@@ -265,6 +313,15 @@ class InvoiceTemplateForm(forms.ModelForm):
 
     def clean_codigo_servico_municipio(self):
         return (self.cleaned_data.get("codigo_servico_municipio") or "").strip()
+
+    def clean_cst_ibs_cbs(self):
+        return (self.cleaned_data.get("cst_ibs_cbs") or "").strip()
+
+    def clean_c_class_trib_ibs_cbs(self):
+        return (self.cleaned_data.get("c_class_trib_ibs_cbs") or "").strip()
+
+    def clean_c_ind_op_ibs_cbs(self):
+        return (self.cleaned_data.get("c_ind_op_ibs_cbs") or "").strip()
 
 
 class InvoiceTemplateItemForm(forms.ModelForm):
@@ -346,6 +403,7 @@ class CompanySettingsForm(forms.ModelForm):
             "auto_invoice_hour": "Hora do Processamento Automático",
             "debug_email": "E-mail de Depuração",
             "phone_number": "Telefone",
+            "enable_cbs_ibs": "Ativar Grupo IBS/CBS na DPS Nacional",
         }
         help_texts = {
             "auto_finalize_invoices": "Finaliza automaticamente invoices em rascunho na data de emissão.",
@@ -354,8 +412,12 @@ class CompanySettingsForm(forms.ModelForm):
             "auto_invoice_hour": "Hora do dia (0 a 23) para executar o processamento automático.",
             "debug_email": "Se preenchido, todos os e-mails são redirecionados para este endereço de teste.",
             "phone_number": "Telefone de contato da empresa.",
+            "enable_cbs_ibs": "Habilita o preenchimento do grupo IBS/CBS na DPS Nacional (Reforma Tributária - LC 214/2025). Mantenha desativado até a vigência oficial ou adesão voluntária.",
         }
         widgets = {
+            "enable_cbs_ibs": forms.CheckboxInput(
+                attrs={"class": "form-check-input"}
+            ),
             "phone_number": forms.TextInput(
                 attrs={
                     "class": "form-control",
@@ -457,6 +519,17 @@ class CompanySettingsForm(forms.ModelForm):
                 field.widget.attrs["class"] = (
                     field.widget.attrs.get("class", "") + " form-control"
                 )
+
+    def clean_nfse_provider(self):
+        provider = self.cleaned_data.get("nfse_provider")
+        if provider == "PAULISTANA":
+            from core.models import paulistana_emission_blocked
+
+            if paulistana_emission_blocked():
+                raise forms.ValidationError(
+                    "ME/EPP do Simples Nacional devem emitir pelo Emissor Nacional desde 01/11/2026."
+                )
+        return provider
 
     def clean(self):
         cleaned_data = super().clean()

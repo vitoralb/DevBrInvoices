@@ -1,5 +1,5 @@
 import uuid
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 from decimal import Decimal
 from django.db import models
 from django.conf import settings
@@ -11,6 +11,29 @@ from django.utils import timezone
 numeric_series_validator = RegexValidator(
     r"^\d{1,5}$", "A série deve conter apenas dígitos numéricos (1 a 5 dígitos)."
 )
+
+
+def series_range_validator(value):
+    if value is not None and str(value).strip() != "":
+        try:
+            val = int(value)
+            if not (1 <= val <= 49999):
+                raise ValidationError(
+                    "Série deve estar entre 1 e 49999 (faixa de emissão via API — erro E0010)."
+                )
+        except ValueError:
+            pass
+
+
+PAULISTANA_EMISSION_END_DATE = date(2026, 11, 1)
+
+
+def paulistana_emission_blocked(today=None):
+    if today is None:
+        today = timezone.localdate()
+    elif isinstance(today, datetime):
+        today = today.date()
+    return today >= PAULISTANA_EMISSION_END_DATE
 
 
 ALLOWED_PROVIDERS_BY_IBGE = {
@@ -30,7 +53,7 @@ DEFAULT_NFSE_DESCRIPTION_TEMPLATE = (
     "Valor em Reais: R$ {{ value_brl }}\n\n"
     "Invoice n° {{ invoice_number }} - emitida em {{ invoice_date }}.\n\n"
     "Valor líquido da Nota Fiscal = R$ {{ value_brl }}.\n\n"
-    " - Conforme Lei 12.741/2012, o percentual total de impostos incidentes neste serviço prestado é de aproximadamente {{ effective_tax_rate }}%"
+    " - Conforme Lei 12.741/2012, o percentual total de impostos incidentes neste serviço prestado é de aproximadamente {{ nominal_tax_rate }}%"
 )
 
 
@@ -71,7 +94,7 @@ class CompanySettings(models.Model):
     document_series = models.CharField(
         max_length=5,
         default="1",
-        validators=[numeric_series_validator],
+        validators=[numeric_series_validator, series_range_validator],
         help_text="Série numérica do RPS/DPS (1 a 5 dígitos)",
     )
 
@@ -122,6 +145,10 @@ class CompanySettings(models.Model):
     last_adn_nsu = models.BigIntegerField(
         default=0,
         help_text="Último NSU processado na distribuição ADN do Sefin Nacional",
+    )
+    enable_cbs_ibs = models.BooleanField(
+        default=False,
+        help_text="Habilita o preenchimento do grupo IBS/CBS na DPS Nacional (Reforma Tributária).",
     )
 
     class Meta:
@@ -261,7 +288,7 @@ class Invoice(models.Model):
         max_length=5,
         default="1",
         blank=True,
-        validators=[numeric_series_validator],
+        validators=[numeric_series_validator, series_range_validator],
         help_text="Série numérica do RPS/DPS (1 a 5 dígitos)",
     )
     protocolo_envio = models.CharField(
@@ -294,6 +321,24 @@ class Invoice(models.Model):
         max_length=9,
         default="",
         help_text="Código NBS correspondente ao serviço prestado",
+    )
+    cst_ibs_cbs = models.CharField(
+        max_length=3,
+        blank=True,
+        default="410",
+        help_text="Código de Situação Tributária (CST) do IBS/CBS",
+    )
+    c_class_trib_ibs_cbs = models.CharField(
+        max_length=6,
+        blank=True,
+        default="410004",
+        help_text="Código de Classificação Tributária (cClassTrib) do IBS/CBS",
+    )
+    c_ind_op_ibs_cbs = models.CharField(
+        max_length=6,
+        blank=True,
+        default="100301",
+        help_text="Código Indicador da Operação (cIndOp) do IBS/CBS",
     )
 
     created_at = models.DateTimeField(default=timezone.now)
@@ -360,6 +405,47 @@ class Invoice(models.Model):
         from core.templatetags.core_tags import render_markdown_text
 
         return render_markdown_text(self.bank_details)
+
+    @classmethod
+    def create_from_template(
+        cls,
+        template: "InvoiceTemplate",
+        client=None,
+        issue_date=None,
+        invoice_number=None,
+        **kwargs,
+    ) -> "Invoice":
+        """Creates a new Invoice and corresponding InvoiceItems populated from an InvoiceTemplate."""
+        if issue_date is None:
+            issue_date = timezone.localdate()
+        if invoice_number is None:
+            invoice_number = f"INV-{uuid.uuid4().hex[:6].upper()}"
+
+        invoice_data = {
+            "client": client,
+            "invoice_number": invoice_number,
+            "issue_date": issue_date,
+            "currency": template.currency,
+            "bank_details": template.bank_details,
+            "nfse_description": template.nfse_description,
+            "codigo_tributacao_nacional": template.codigo_tributacao_nacional,
+            "codigo_servico_municipio": template.codigo_servico_municipio,
+            "codigo_nbs": template.codigo_nbs,
+            "cst_ibs_cbs": template.cst_ibs_cbs,
+            "c_class_trib_ibs_cbs": template.c_class_trib_ibs_cbs,
+            "c_ind_op_ibs_cbs": template.c_ind_op_ibs_cbs,
+        }
+        invoice_data.update(kwargs)
+        invoice = cls.objects.create(**invoice_data)
+
+        for item in template.items.all():
+            InvoiceItem.objects.create(
+                invoice=invoice,
+                description=item.description,
+                quantity=item.quantity,
+                unit_price_foreign=item.unit_price_foreign,
+            )
+        return invoice
 
     def __str__(self):
         return f"Invoice {self.invoice_number} - {self.client.name}"
@@ -449,6 +535,11 @@ class NotaFiscal(models.Model):
     codigo_tributacao_nacional = models.CharField(max_length=50, blank=True, default="")
     codigo_servico_municipio = models.CharField(max_length=50, blank=True, default="")
     codigo_nbs = models.CharField(max_length=20, blank=True, default="")
+
+    # Reforma Tributária (CBS/IBS)
+    cst_ibs_cbs = models.CharField(max_length=3, blank=True, default="")
+    c_class_trib_ibs_cbs = models.CharField(max_length=6, blank=True, default="")
+    c_ind_op_ibs_cbs = models.CharField(max_length=6, blank=True, default="")
 
     # Financeiro e Impostos
     aliquota_iss = models.DecimalField(
@@ -851,6 +942,24 @@ class InvoiceTemplate(models.Model):
         default="",
         help_text="Código NBS correspondente ao serviço prestado",
     )
+    cst_ibs_cbs = models.CharField(
+        max_length=3,
+        blank=True,
+        default="410",
+        help_text="Código de Situação Tributária (CST) do IBS/CBS",
+    )
+    c_class_trib_ibs_cbs = models.CharField(
+        max_length=6,
+        blank=True,
+        default="410004",
+        help_text="Código de Classificação Tributária (cClassTrib) do IBS/CBS",
+    )
+    c_ind_op_ibs_cbs = models.CharField(
+        max_length=6,
+        blank=True,
+        default="100301",
+        help_text="Código Indicador da Operação (cIndOp) do IBS/CBS",
+    )
     created_at = models.DateTimeField(auto_now_add=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, null=True)
 
@@ -866,6 +975,16 @@ class InvoiceTemplate(models.Model):
         from core.templatetags.core_tags import render_markdown_text
 
         return render_markdown_text(self.bank_details)
+
+    def create_invoice(self, client=None, issue_date=None, invoice_number=None, **kwargs):
+        """Creates an Invoice instance from this template."""
+        return Invoice.create_from_template(
+            template=self,
+            client=client,
+            issue_date=issue_date,
+            invoice_number=invoice_number,
+            **kwargs,
+        )
 
     def __str__(self):
         return self.name

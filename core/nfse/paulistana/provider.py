@@ -33,6 +33,16 @@ class PaulistanaProvider(NFSeProvider):
         return NFeClient(company.pfx_cert_pem, company.pfx_key_pem, cnpj, im), im
 
     def emitir_nfse(self, invoice: Invoice) -> EmitResult:
+        from core.models import paulistana_emission_blocked
+
+        if paulistana_emission_blocked():
+            return EmitResult(
+                sucesso=False,
+                erros=[
+                    "A emissão de NFS-e pela Paulistana está encerrada desde 01/11/2026 para ME/EPP do Simples Nacional. Utilize o Emissor Nacional."
+                ],
+            )
+
         company = CompanySettings.load()
         client, im = self._get_client(company)
         client_obj = invoice.client

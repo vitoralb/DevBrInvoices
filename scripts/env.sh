@@ -196,8 +196,8 @@ if not InvoiceTemplate.objects.exists():
         name='Template Padrão Homologação',
         currency='USD',
         codigo_tributacao_nacional='010101',
-        codigo_servico_municipio='0101',
-        codigo_nbs='101010100',
+        codigo_servico_municipio='001',
+        codigo_nbs='115029000',
         nfse_description='Serviços de desenvolvimento de software prestados para o exterior.',
     )
     InvoiceTemplateItem.objects.create(

@@ -68,6 +68,53 @@ def assign_next_document_number(invoice):
         invoice.save(update_fields=["document_number", "document_series", "updated_at"])
 
 
+def get_approx_tax_rate_pct(invoice_or_nf) -> Decimal:
+    """Calcula a alíquota aproximada para o Simples Nacional (nominal da faixa,
+    descontando ISS/PIS/COFINS em exportação)."""
+    try:
+        issue_date = getattr(invoice_or_nf, "issue_date", None)
+        if not issue_date:
+            return Decimal("0.00")
+
+        rbt12, fator_r, _, _ = calculate_rbt12_and_fator_r(
+            issue_date.replace(day=1),
+            use_ideal_pro_labore=True,
+        )
+        annex = "ANNEX_III" if fator_r >= Decimal("28.00") else "ANNEX_V"
+
+        if hasattr(invoice_or_nf, "is_export"):
+            is_export = invoice_or_nf.is_export
+        elif hasattr(invoice_or_nf, "nota_fiscal") and invoice_or_nf.nota_fiscal:
+            is_export = invoice_or_nf.nota_fiscal.is_export
+        else:
+            client = getattr(invoice_or_nf, "client", None)
+            if client and getattr(client, "address_country_code", None):
+                is_export = client.address_country_code.upper() != "BR"
+            else:
+                is_export = True
+
+        from core.services.tax_calculations import calculate_approx_tax_rate_pct
+
+        return calculate_approx_tax_rate_pct(
+            rbt12=rbt12,
+            annex_type=annex,
+            reference_date=issue_date,
+            is_export=is_export,
+        )
+    except Exception as e:
+        identifier = getattr(
+            invoice_or_nf,
+            "invoice_number",
+            getattr(invoice_or_nf, "nf_number", None),
+        )
+        logger.warning(
+            "Failed to calculate approx tax rate for invoice/NF %s: %s",
+            identifier,
+            e,
+        )
+        return Decimal("0.00")
+
+
 @transaction.atomic
 def _prepare_nf_data(invoice):
     total_foreign = sum(
@@ -109,13 +156,23 @@ def _prepare_nf_data(invoice):
             if amount_brl > 0
             else Decimal("0.00")
         )
+
+        from core.services.tax_calculations import calculate_approx_tax_rate_pct
+
+        approx_rate_pct = calculate_approx_tax_rate_pct(
+            rbt12=rbt12,
+            annex_type=annex,
+            reference_date=invoice.issue_date,
+            is_export=is_export,
+        )
     except Exception as e:
         logger.warning(
-            "Failed to calculate effective tax rate for invoice %s: %s",
+            "Failed to calculate effective/approx tax rate for invoice %s: %s",
             invoice.invoice_number,
             e,
         )
         effective_rate_pct = Decimal("0.00")
+        approx_rate_pct = Decimal("0.00")
 
     from core.utils.macros import apply_invoice_macros
     from core.models import DEFAULT_NFSE_DESCRIPTION_TEMPLATE
@@ -129,6 +186,7 @@ def _prepare_nf_data(invoice):
         language="pt-br",
         extra_context={
             "{{ effective_tax_rate }}": effective_rate_pct,
+            "{{ nominal_tax_rate }}": approx_rate_pct,
         },
     )
     return amount_brl, description, effective_rate_pct
@@ -169,6 +227,11 @@ def _create_nf_from_emit_result(invoice, result, provider) -> NotaFiscal:
             result.codigo_servico_municipio
             or getattr(invoice, "codigo_servico_municipio", "")
         )
+        nf.cst_ibs_cbs = getattr(result, "cst_ibs_cbs", "") or ""
+        nf.c_class_trib_ibs_cbs = (
+            getattr(result, "c_class_trib_ibs_cbs", "") or ""
+        )
+        nf.c_ind_op_ibs_cbs = getattr(result, "c_ind_op_ibs_cbs", "") or ""
         nf.save()
     else:
         nf = NotaFiscal.objects.create(
@@ -192,6 +255,11 @@ def _create_nf_from_emit_result(invoice, result, provider) -> NotaFiscal:
                 result.codigo_servico_municipio
                 or getattr(invoice, "codigo_servico_municipio", "")
             ),
+            cst_ibs_cbs=getattr(result, "cst_ibs_cbs", "") or "",
+            c_class_trib_ibs_cbs=(
+                getattr(result, "c_class_trib_ibs_cbs", "") or ""
+            ),
+            c_ind_op_ibs_cbs=getattr(result, "c_ind_op_ibs_cbs", "") or "",
         )
 
     xml_content = result.xml_retorno or result.xml_enviado
@@ -399,7 +467,7 @@ def _save_nf_events(nf, events_list):
 
 
 def import_nfses(
-    provider_type: str = "PAULISTANA",
+    provider_type: str | None = None,
 ):
     import re
     from core.nfse.paulistana.provider import PaulistanaProvider
@@ -421,6 +489,28 @@ def import_nfses(
         provider_type = company.nfse_provider if company else "PAULISTANA"
 
     if provider_type == "NACIONAL":
+        from django.core.cache import cache
+        from datetime import datetime
+
+        cooldown_until = cache.get("adn_dfe_cooldown_until")
+        if cooldown_until:
+            if isinstance(cooldown_until, datetime) and cooldown_until <= timezone.now():
+                cache.delete("adn_dfe_cooldown_until")
+                cooldown_until = None
+        if cooldown_until:
+            if isinstance(cooldown_until, datetime):
+                time_str = (
+                    timezone.localtime(cooldown_until).strftime("%H:%M")
+                    if not timezone.is_naive(cooldown_until)
+                    else cooldown_until.strftime("%H:%M")
+                )
+            else:
+                time_str = str(cooldown_until)
+            return (
+                0,
+                f"Consulta ao ADN em espera obrigatória até {time_str} (limite de 1h da Receita quando não há documentos novos).",
+            )
+
         provider = NacionalProvider()
         if not company:
             return 0, "CompanySettings not found."
@@ -507,8 +597,18 @@ def import_nfses(
                             ],
                             aliquota_iss=parsed_nfse["aliquota_iss"],
                             valor_iss=parsed_nfse["valor_iss"],
+                            cst_ibs_cbs=parsed_nfse.get("cst_ibs_cbs", ""),
+                            c_class_trib_ibs_cbs=parsed_nfse.get("c_class_trib_ibs_cbs", ""),
+                            c_ind_op_ibs_cbs=parsed_nfse.get("c_ind_op_ibs_cbs", ""),
                         )
                         created = True
+                    else:
+                        if not nf.cst_ibs_cbs and parsed_nfse.get("cst_ibs_cbs"):
+                            nf.cst_ibs_cbs = parsed_nfse["cst_ibs_cbs"]
+                        if not nf.c_class_trib_ibs_cbs and parsed_nfse.get("c_class_trib_ibs_cbs"):
+                            nf.c_class_trib_ibs_cbs = parsed_nfse["c_class_trib_ibs_cbs"]
+                        if not nf.c_ind_op_ibs_cbs and parsed_nfse.get("c_ind_op_ibs_cbs"):
+                            nf.c_ind_op_ibs_cbs = parsed_nfse["c_ind_op_ibs_cbs"]
 
                     # Auto-link to unlinked invoice if DPS matches
                     dps_ser = parsed_nfse.get("dps_series")
@@ -626,6 +726,9 @@ def import_nfses(
                             ],
                             aliquota_iss=r_nfse["aliquota_iss"],
                             valor_iss=r_nfse["valor_iss"],
+                            cst_ibs_cbs=r_nfse.get("cst_ibs_cbs", ""),
+                            c_class_trib_ibs_cbs=r_nfse.get("c_class_trib_ibs_cbs", ""),
+                            c_ind_op_ibs_cbs=r_nfse.get("c_ind_op_ibs_cbs", ""),
                         )
                         if r_nfse.get("raw_xml"):
                             nf.xml_autorizacao.save(

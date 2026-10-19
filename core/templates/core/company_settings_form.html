@@ -186,6 +186,24 @@
                             {% if form.document_series.errors %}<div class="text-danger small mt-1">{{ form.document_series.errors|join:", " }}</div>{% endif %}
                         </div>
                     </div>
+                    <hr class="my-4">
+                    <div class="row g-3">
+                        <div class="col-12">
+                            <div class="form-check form-switch">
+                                {{ form.enable_cbs_ibs }}
+                                <label class="form-check-label fw-semibold" for="{{ form.enable_cbs_ibs.id_for_label }}">
+                                    {{ form.enable_cbs_ibs.label }}
+                                    <span class="badge bg-primary-subtle text-primary-emphasis ms-2">Reforma Tributária (CBS/IBS)</span>
+                                </label>
+                                {% if form.enable_cbs_ibs.help_text %}
+                                <small class="form-text text-muted d-block">{{ form.enable_cbs_ibs.help_text }}</small>
+                                {% endif %}
+                                {% if form.enable_cbs_ibs.errors %}
+                                <div class="text-danger small mt-1">{{ form.enable_cbs_ibs.errors|join:", " }}</div>
+                                {% endif %}
+                            </div>
+                        </div>
+                    </div>
                 </div>
             </div>
 

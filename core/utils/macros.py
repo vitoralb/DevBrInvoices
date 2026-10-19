@@ -90,6 +90,9 @@ def apply_invoice_macros(text, invoice, language="en", extra_context=None):
     replacements["{{ effective_tax_rate }}"] = (
         "0,00" if language == "pt-br" else "0.00"
     )
+    replacements["{{ nominal_tax_rate }}"] = (
+        "0,00" if language == "pt-br" else "0.00"
+    )
 
     if extra_context:
         from decimal import Decimal

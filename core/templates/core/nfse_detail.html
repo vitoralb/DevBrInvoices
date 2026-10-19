@@ -166,6 +166,20 @@
                         <span class="text-muted small d-block">Valor ISS Retido / Devido</span>
                         <span>R$ {{ nf.valor_iss|default:"0,00" }}</span>
                     </div>
+                    {% if nf.cst_ibs_cbs or nf.c_class_trib_ibs_cbs or nf.c_ind_op_ibs_cbs %}
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">CST IBS/CBS</span>
+                        <span>{{ nf.cst_ibs_cbs|default:"-" }}</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Classificação IBS/CBS (cClassTrib)</span>
+                        <span>{{ nf.c_class_trib_ibs_cbs|default:"-" }}</span>
+                    </div>
+                    <div class="col-sm-4">
+                        <span class="text-muted small d-block">Indicador Operação (cIndOp)</span>
+                        <span>{{ nf.c_ind_op_ibs_cbs|default:"-" }}</span>
+                    </div>
+                    {% endif %}
                 </div>
             </div>
         </div>

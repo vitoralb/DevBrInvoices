@@ -23,6 +23,9 @@ class EmitResult:
     aliquota_iss: Optional[Decimal] = None
     valor_iss: Optional[Decimal] = None
     codigo_servico_municipio: str = ""
+    cst_ibs_cbs: str = ""
+    c_class_trib_ibs_cbs: str = ""
+    c_ind_op_ibs_cbs: str = ""
 
 
 @dataclass

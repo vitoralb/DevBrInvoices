@@ -47,8 +47,18 @@ from .schemas.v1_01.tipos_complexos_v1_01 import (
     TctribMunicipal,
     TctribTotal,
     TcvservPrest,
+    TcrtcinfoIbscbs,
+    TcrtcinfoValoresIbscbs,
+    TcrtcinfoTributosIbscbs,
+    TcrtcinfoTributosSitClas,
 )
-from .schemas.v1_01.tipos_simples_v1_01 import TstipoIndTotTrib, TscodNaoNif
+from .schemas.v1_01.tipos_simples_v1_01 import (
+    TstipoIndTotTrib,
+    TscodNaoNif,
+    TsrtcfinNfse,
+    TsrtcindFinal,
+    TsrtcindDest,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -105,6 +115,9 @@ def _parse_decompressed_nfse_xml(decompressed_xml: str) -> dict:
         "emit_cnpj": "",
         "dps_number": "",
         "dps_series": "",
+        "cst_ibs_cbs": "",
+        "c_class_trib_ibs_cbs": "",
+        "c_ind_op_ibs_cbs": "",
     }
     if not decompressed_xml:
         return data
@@ -184,6 +197,21 @@ def _parse_decompressed_nfse_xml(decompressed_xml: str) -> dict:
     dps_ser_match = re.search(r"<serie>([^<]+)</serie>", decompressed_xml)
     if dps_ser_match:
         data["dps_series"] = dps_ser_match.group(1)
+
+    ibscbs_match = re.search(r"<IBSCBS>(.*?)</IBSCBS>", decompressed_xml, re.DOTALL)
+    if ibscbs_match:
+        ibscbs_xml = ibscbs_match.group(1)
+        c_ind_op = re.search(r"<cIndOp>([^<]+)</cIndOp>", ibscbs_xml)
+        if c_ind_op:
+            data["c_ind_op_ibs_cbs"] = c_ind_op.group(1).strip()
+
+        cst_ibs = re.search(r"<CST>([^<]+)</CST>", ibscbs_xml)
+        if cst_ibs:
+            data["cst_ibs_cbs"] = cst_ibs.group(1).strip()
+
+        c_class_trib = re.search(r"<cClassTrib>([^<]+)</cClassTrib>", ibscbs_xml)
+        if c_class_trib:
+            data["c_class_trib_ibs_cbs"] = c_class_trib.group(1).strip()
 
     return data
 
@@ -389,8 +417,11 @@ class NacionalProvider(NFSeProvider):
         else:
             c_trib_mun_val = None
 
-        if effective_rate_pct > Decimal("0.00"):
-            tot_trib = TctribTotal(p_tot_trib_sn=f"{effective_rate_pct:.2f}")
+        from core.services import get_approx_tax_rate_pct
+
+        approx_rate_pct = get_approx_tax_rate_pct(invoice)
+        if approx_rate_pct > Decimal("0.00"):
+            tot_trib = TctribTotal(p_tot_trib_sn=f"{approx_rate_pct:.2f}")
         else:
             tot_trib = TctribTotal(ind_tot_trib=TstipoIndTotTrib.VALUE_0)
 
@@ -431,6 +462,27 @@ class NacionalProvider(NFSeProvider):
                 phone_digits = phone_digits[2:]
             if 6 <= len(phone_digits) <= 20:
                 prest_phone = phone_digits
+
+        ibscbs = None
+        if getattr(company, "enable_cbs_ibs", False):
+            cst = (str(getattr(invoice, "cst_ibs_cbs", "") or "").strip() or "410")[:3]
+            c_class_trib = (str(getattr(invoice, "c_class_trib_ibs_cbs", "") or "").strip() or "410004")[:6]
+            c_ind_op = (str(getattr(invoice, "c_ind_op_ibs_cbs", "") or "").strip() or "100301")[:6]
+
+            ibscbs = TcrtcinfoIbscbs(
+                fin_nfse=TsrtcfinNfse.VALUE_0,  # 0 = Regular
+                ind_final=TsrtcindFinal.VALUE_0,  # 0 = Não
+                c_ind_op=c_ind_op,
+                ind_dest=TsrtcindDest.VALUE_0,  # 0 = Próprio tomador
+                valores=TcrtcinfoValoresIbscbs(
+                    trib=TcrtcinfoTributosIbscbs(
+                        g_ibscbs=TcrtcinfoTributosSitClas(
+                            cst=cst,
+                            c_class_trib=c_class_trib,
+                        )
+                    )
+                ),
+            )
 
         dps = Dps(
             versao="1.01",
@@ -487,6 +539,7 @@ class NacionalProvider(NFSeProvider):
                         tot_trib=tot_trib,
                     ),
                 ),
+                ibscbs=ibscbs,
             ),
         )
 
@@ -651,6 +704,9 @@ class NacionalProvider(NFSeProvider):
                     codigo_servico_municipio=parsed["codigo_servico_municipio"],
                     aliquota_iss=parsed["aliquota_iss"],
                     valor_iss=parsed["valor_iss"],
+                    cst_ibs_cbs=parsed.get("cst_ibs_cbs", ""),
+                    c_class_trib_ibs_cbs=parsed.get("c_class_trib_ibs_cbs", ""),
+                    c_ind_op_ibs_cbs=parsed.get("c_ind_op_ibs_cbs", ""),
                 )
         elif resp.status_code == 404:
             # 404 means the DPS was NOT issued yet (expected on first emission)
@@ -802,7 +858,17 @@ class NacionalProvider(NFSeProvider):
                         result.codigo_nbs = parsed["codigo_nbs"]
                         result.codigo_servico_municipio = parsed["codigo_servico_municipio"]
                         result.aliquota_iss = parsed["aliquota_iss"]
-                        result.valor_iss = parsed["valor_iss"]
+                        result.cst_ibs_cbs = parsed.get("cst_ibs_cbs", "")
+                        result.c_class_trib_ibs_cbs = parsed.get("c_class_trib_ibs_cbs", "")
+                        result.c_ind_op_ibs_cbs = parsed.get("c_ind_op_ibs_cbs", "")
+
+                    if company.enable_cbs_ibs:
+                        if not result.cst_ibs_cbs:
+                            result.cst_ibs_cbs = (str(getattr(invoice, "cst_ibs_cbs", "") or "").strip() or "410")[:3]
+                        if not result.c_class_trib_ibs_cbs:
+                            result.c_class_trib_ibs_cbs = (str(getattr(invoice, "c_class_trib_ibs_cbs", "") or "").strip() or "410004")[:6]
+                        if not result.c_ind_op_ibs_cbs:
+                            result.c_ind_op_ibs_cbs = (str(getattr(invoice, "c_ind_op_ibs_cbs", "") or "").strip() or "100301")[:6]
 
                     if not result.numero_nf:
                         # Fallback to document number or part of chave de acesso
@@ -1213,6 +1279,9 @@ class NacionalProvider(NFSeProvider):
                         "codigo_nbs": parsed["codigo_nbs"],
                         "aliquota_iss": parsed["aliquota_iss"],
                         "valor_iss": parsed["valor_iss"],
+                        "cst_ibs_cbs": parsed.get("cst_ibs_cbs", ""),
+                        "c_class_trib_ibs_cbs": parsed.get("c_class_trib_ibs_cbs", ""),
+                        "c_ind_op_ibs_cbs": parsed.get("c_ind_op_ibs_cbs", ""),
                         "provider": "NACIONAL",
                         "is_canceled": is_canceled,
                         "cancelation_date": cancelation_date,
@@ -1235,6 +1304,22 @@ class NacionalProvider(NFSeProvider):
         company = CompanySettings.load()
         if not company:
             return [], ultimo_nsu
+
+        from django.core.cache import cache
+        from django.utils import timezone
+        from datetime import timedelta
+
+        cooldown_key = "adn_dfe_cooldown_until"
+        cooldown_val = cache.get(cooldown_key)
+        if cooldown_val:
+            from datetime import datetime
+
+            if isinstance(cooldown_val, datetime) and cooldown_val <= timezone.now():
+                cache.delete(cooldown_key)
+                cooldown_val = None
+            else:
+                logger.info("ADN DFe query skipped: cooldown is active.")
+                return [], ultimo_nsu
 
         adn_url = self._get_adn_contribuintes_url(company.debug_mode)
         headers = {"Accept": "application/json"}
@@ -1261,6 +1346,11 @@ class NacionalProvider(NFSeProvider):
                     data = resp.json()
                     lote = data.get("LoteDFe") or []
                     if not lote:
+                        cache.set(
+                            cooldown_key,
+                            timezone.now() + timedelta(hours=1),
+                            timeout=3600,
+                        )
                         break
 
                     for item in lote:
@@ -1270,10 +1360,20 @@ class NacionalProvider(NFSeProvider):
                         all_items.append(item)
 
                     if len(lote) < 50:
+                        cache.set(
+                            cooldown_key,
+                            timezone.now() + timedelta(hours=1),
+                            timeout=3600,
+                        )
                         break
                 elif resp.status_code == 404:
                     logger.debug(
                         "ADN DFe reached end of backlog at NSU %s", current_nsu
+                    )
+                    cache.set(
+                        cooldown_key,
+                        timezone.now() + timedelta(hours=1),
+                        timeout=3600,
                     )
                     break
                 else:

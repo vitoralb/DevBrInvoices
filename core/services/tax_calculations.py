@@ -299,6 +299,30 @@ def calculate_simples_tax(
     return total_tax, cpp_tax
 
 
+def calculate_approx_tax_rate_pct(rbt12, annex_type, reference_date, is_export):
+    """Alíquota nominal da faixa, descontando ISS/PIS/COFINS
+    quando a operação é exportação. Retorna percentual com 2 casas."""
+    if rbt12 is None or reference_date is None or not annex_type:
+        return Decimal("0.00")
+
+    try:
+        bracket = get_applicable_bracket(annex_type, rbt12, reference_date)
+    except Exception:
+        return Decimal("0.00")
+
+    if not bracket:
+        return Decimal("0.00")
+
+    rate = bracket.nominal_rate
+    if is_export:
+        exempt = (
+            bracket.pis_allocation + bracket.cofins_allocation + bracket.iss_allocation
+        ) / Decimal("100")
+        rate = rate * (Decimal("1") - exempt)
+
+    return rate.quantize(Decimal("0.01"), rounding=ROUND_HALF_UP)
+
+
 def is_month_closed(month_year: date, today: date | None = None) -> bool:
     """Retorna True se o mês for considerado fechado:
     - Qualquer mês anterior ao mês passado (month_year < prev_month)

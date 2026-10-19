@@ -801,11 +801,21 @@ def htmx_update_fiscal_codes(request, pk):
     serv_mun = request.POST.get("codigo_servico_municipio", "").strip()
     nbs = request.POST.get("codigo_nbs", "").strip()
 
+    cst_ibs = request.POST.get("cst_ibs_cbs", "").strip()
+    c_class = request.POST.get("c_class_trib_ibs_cbs", "").strip()
+    c_ind = request.POST.get("c_ind_op_ibs_cbs", "").strip()
+
     error_message = None
     if not trib_nac:
         error_message = "O Código de Tributação Nacional é obrigatório."
     elif not nbs:
         error_message = "O Código NBS é obrigatório."
+    elif len(cst_ibs) > 3:
+        error_message = "O CST do IBS/CBS deve ter no máximo 3 caracteres."
+    elif len(c_class) > 6:
+        error_message = "A Classificação IBS/CBS (cClassTrib) deve ter no máximo 6 caracteres."
+    elif len(c_ind) > 6:
+        error_message = "O Indicador da Operação (cIndOp) deve ter no máximo 6 caracteres."
 
     if error_message:
         return render(
@@ -817,6 +827,9 @@ def htmx_update_fiscal_codes(request, pk):
                 "draft_trib_nac": trib_nac,
                 "draft_serv_mun": serv_mun,
                 "draft_nbs": nbs,
+                "draft_cst_ibs": cst_ibs,
+                "draft_c_class": c_class,
+                "draft_c_ind": c_ind,
                 "is_editing": True,
             },
             status=400,
@@ -825,14 +838,23 @@ def htmx_update_fiscal_codes(request, pk):
     invoice.codigo_tributacao_nacional = trib_nac
     invoice.codigo_servico_municipio = serv_mun
     invoice.codigo_nbs = nbs
-    invoice.save(
-        update_fields=[
-            "codigo_tributacao_nacional",
-            "codigo_servico_municipio",
-            "codigo_nbs",
-            "updated_at",
-        ]
-    )
+    update_fields = [
+        "codigo_tributacao_nacional",
+        "codigo_servico_municipio",
+        "codigo_nbs",
+        "updated_at",
+    ]
+    if "cst_ibs_cbs" in request.POST:
+        invoice.cst_ibs_cbs = cst_ibs
+        update_fields.append("cst_ibs_cbs")
+    if "c_class_trib_ibs_cbs" in request.POST:
+        invoice.c_class_trib_ibs_cbs = c_class
+        update_fields.append("c_class_trib_ibs_cbs")
+    if "c_ind_op_ibs_cbs" in request.POST:
+        invoice.c_ind_op_ibs_cbs = c_ind
+        update_fields.append("c_ind_op_ibs_cbs")
+
+    invoice.save(update_fields=update_fields)
     return render(
         request,
         "core/partials/invoice_fiscal_codes.html",
@@ -988,6 +1010,9 @@ def clone_invoice(request, pk):
         codigo_tributacao_nacional=original.codigo_tributacao_nacional,
         codigo_servico_municipio=original.codigo_servico_municipio,
         codigo_nbs=original.codigo_nbs,
+        cst_ibs_cbs=original.cst_ibs_cbs,
+        c_class_trib_ibs_cbs=original.c_class_trib_ibs_cbs,
+        c_ind_op_ibs_cbs=original.c_ind_op_ibs_cbs,
     )
     for item in original.items.all():
         InvoiceItem.objects.create(
@@ -1555,6 +1580,9 @@ def htmx_get_invoice_template(request, pk):
             "codigo_tributacao_nacional": template.codigo_tributacao_nacional,
             "codigo_servico_municipio": template.codigo_servico_municipio,
             "codigo_nbs": template.codigo_nbs,
+            "cst_ibs_cbs": template.cst_ibs_cbs,
+            "c_class_trib_ibs_cbs": template.c_class_trib_ibs_cbs,
+            "c_ind_op_ibs_cbs": template.c_ind_op_ibs_cbs,
             "items": items,
         }
     )

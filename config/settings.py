@@ -296,6 +296,10 @@ CELERY_BEAT_SCHEDULE = {
         "task": "core.tasks.esocial_tasks.sync_esocial_payroll_task",
         "schedule": crontab(minute=30, hour=8, day_of_month="8-31"),
     },
+    "sync_adn_periodic": {
+        "task": "core.tasks.nfse_tasks.sync_adn_periodic_task",
+        "schedule": crontab(minute=15, hour="*/2"),
+    },
 }
 
 # Structured Logging

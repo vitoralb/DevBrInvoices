@@ -242,7 +242,15 @@ def fetch_nfse_pdf_task(self, invoice_id=None, nf_id=None, force=False):
 
 @shared_task(bind=True)
 def import_nfses_task(self, provider_type=None, *args, **kwargs):
+    from django.core.cache import cache
     from core.services import import_nfses
+
+    lock_acquired = cache.add("adn_sync_lock", "true", timeout=600)
+    if not lock_acquired:
+        return {
+            "count": 0,
+            "message": "Importação ou sincronização já em andamento. Aguarde.",
+        }
 
     try:
         count, msg = import_nfses(provider_type)
@@ -250,6 +258,40 @@ def import_nfses_task(self, provider_type=None, *args, **kwargs):
     except Exception as e:
         logger.exception("Error in import_nfses_task: %s", e)
         return {"count": 0, "message": f"Erro durante a importação: {str(e)}"}
+    finally:
+        cache.delete("adn_sync_lock")
+
+
+@shared_task
+def sync_adn_periodic_task():
+    """Periodic task to synchronize ADN documents every 2 hours."""
+    from django.core.cache import cache
+    from core.models import CompanySettings
+    from core.services import import_nfses
+
+    company = CompanySettings.load()
+    if not company or company.nfse_provider != "NACIONAL":
+        logger.info("sync_adn_periodic_task skipped: provider is not NACIONAL.")
+        return "Skipped: provider not NACIONAL"
+
+    if not company.pfx_cert_pem or not company.pfx_key_pem:
+        logger.info("sync_adn_periodic_task skipped: certificate not configured.")
+        return "Skipped: certificate not configured"
+
+    lock_acquired = cache.add("adn_sync_lock", "true", timeout=600)
+    if not lock_acquired:
+        logger.info("sync_adn_periodic_task skipped: sync already in progress.")
+        return "Skipped: lock active"
+
+    try:
+        count, msg = import_nfses("NACIONAL")
+        logger.info("sync_adn_periodic_task finished: count=%s, message=%s", count, msg)
+        return {"count": count, "message": msg}
+    except Exception as e:
+        logger.exception("Error in sync_adn_periodic_task: %s", e)
+        return {"error": str(e)}
+    finally:
+        cache.delete("adn_sync_lock")
 
 
 @shared_task(

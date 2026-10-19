@@ -52,7 +52,8 @@
                                     <li><code>&#123;&#123; value_original &#125;&#125;</code> - Valor Total Original</li>
                                     <li><code>&#123;&#123; value_brl &#125;&#125;</code> - Valor Total BRL</li>
                                     <li><code>&#123;&#123; exchange_rate &#125;&#125;</code> - Taxa de Conversão</li>
-                                    <li><code>&#123;&#123; effective_tax_rate &#125;&#125;</code> - Percentual de Impostos (Simples Nacional)</li>
+                                    <li><code>&#123;&#123; nominal_tax_rate &#125;&#125;</code> - Alíquota aproximada (nominal da faixa, Lei 12.741)</li>
+                                    <li><code>&#123;&#123; effective_tax_rate &#125;&#125;</code> - Alíquota efetiva do DAS</li>
                                 </ul>
                             </div>
                         </div>
@@ -83,7 +84,7 @@
                         <div class="col-12 mb-3">
                             {{ form.nfse_description.label_tag }}
                             {{ form.nfse_description }}
-                            <small class="form-text text-muted">Texto / discriminação dos serviços para a NFS-e (texto simples, suporta macros como <code>&#123;&#123; prev_month_start &#125;&#125;</code>, <code>&#123;&#123; exchange_rate &#125;&#125;</code>, <code>&#123;&#123; value_brl &#125;&#125;</code>, <code>&#123;&#123; effective_tax_rate &#125;&#125;</code>).</small>
+                            <small class="form-text text-muted">Texto / discriminação dos serviços para a NFS-e (texto simples, suporta macros como <code>&#123;&#123; prev_month_start &#125;&#125;</code>, <code>&#123;&#123; exchange_rate &#125;&#125;</code>, <code>&#123;&#123; value_brl &#125;&#125;</code>, <code>&#123;&#123; nominal_tax_rate &#125;&#125;</code>, <code>&#123;&#123; effective_tax_rate &#125;&#125;</code>).</small>
                             {{ form.nfse_description.errors }}
                         </div>
                         <div class="col-md-4 mb-3">
@@ -100,6 +101,21 @@
                             {{ form.codigo_nbs.label_tag }}
                             {{ form.codigo_nbs }}
                             {{ form.codigo_nbs.errors }}
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            {{ form.cst_ibs_cbs.label_tag }}
+                            {{ form.cst_ibs_cbs }}
+                            {{ form.cst_ibs_cbs.errors }}
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            {{ form.c_class_trib_ibs_cbs.label_tag }}
+                            {{ form.c_class_trib_ibs_cbs }}
+                            {{ form.c_class_trib_ibs_cbs.errors }}
+                        </div>
+                        <div class="col-md-4 mb-3">
+                            {{ form.c_ind_op_ibs_cbs.label_tag }}
+                            {{ form.c_ind_op_ibs_cbs }}
+                            {{ form.c_ind_op_ibs_cbs.errors }}
                         </div>
                     </div>
                     <hr>

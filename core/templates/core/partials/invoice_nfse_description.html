@@ -16,7 +16,7 @@
         {% endif %}
         <div class="mb-2">
             <textarea name="nfse_description" class="form-control form-control-sm" rows="6" placeholder="Texto / discriminação dos serviços para a NFS-e..." required>{% if draft_text %}{{ draft_text }}{% else %}{{ invoice.nfse_description }}{% endif %}</textarea>
-            <small class="text-muted d-block mt-1">Texto simples (sem Markdown). Suporta macros como <code>&#123;&#123; invoice_date &#125;&#125;</code>, <code>&#123;&#123; prev_month_start &#125;&#125;</code>, <code>&#123;&#123; exchange_rate &#125;&#125;</code>, <code>&#123;&#123; value_brl &#125;&#125;</code>, <code>&#123;&#123; effective_tax_rate &#125;&#125;</code>, etc.</small>
+            <small class="text-muted d-block mt-1">Texto simples (sem Markdown). Suporta macros como <code>&#123;&#123; invoice_date &#125;&#125;</code>, <code>&#123;&#123; prev_month_start &#125;&#125;</code>, <code>&#123;&#123; exchange_rate &#125;&#125;</code>, <code>&#123;&#123; value_brl &#125;&#125;</code>, <code>&#123;&#123; nominal_tax_rate &#125;&#125;</code>, <code>&#123;&#123; effective_tax_rate &#125;&#125;</code>, etc.</small>
         </div>
         <div class="d-flex gap-2 justify-content-end">
             <button type="button" class="btn btn-sm btn-outline-secondary" onclick="document.getElementById('nfse-description-edit-form').reset(); document.getElementById('nfse-description-edit-form').classList.add('d-none'); document.getElementById('nfse-description-content').classList.remove('d-none');">Cancelar</button>
