@@ -362,19 +362,20 @@ class CbsIbsDpsGenerationAndXsdTests(TestCase):
         )
         self.assertIn("<IBSCBS>", signed_xml)
         self.assertIn("<finNFSe>0</finNFSe>", signed_xml)
-        self.assertIn("<indFinal>0</indFinal>", signed_xml)
-        self.assertIn("<cIndOp>100301</cIndOp>", signed_xml)
         self.assertIn("<indDest>0</indDest>", signed_xml)
         self.assertIn("<CST>410</CST>", signed_xml)
         self.assertIn("<cClassTrib>410004</cClassTrib>", signed_xml)
+        # For CST 410 (export/immunity), cIndOp is omitted to satisfy Sefin Rule E0859
+        self.assertNotIn("<cIndOp>", signed_xml)
         self.assertIn("</IBSCBS>", signed_xml)
 
     def test_dps_xml_with_custom_cbs_ibs_values(self):
         self.company.enable_cbs_ibs = True
         self.company.save()
 
-        self.invoice.cst_ibs_cbs = "410"
-        self.invoice.c_class_trib_ibs_cbs = "410004"
+        # For a taxable CST (e.g. 000 / 000001), cIndOp must be present
+        self.invoice.cst_ibs_cbs = "000"
+        self.invoice.c_class_trib_ibs_cbs = "000001"
         self.invoice.c_ind_op_ibs_cbs = "100301"
         self.invoice.save()
 
@@ -382,8 +383,8 @@ class CbsIbsDpsGenerationAndXsdTests(TestCase):
         dps, signed_xml, _ = provider._build_and_sign_dps(
             self.invoice, self.company, 2, "4242"
         )
-        self.assertIn("<CST>410</CST>", signed_xml)
-        self.assertIn("<cClassTrib>410004</cClassTrib>", signed_xml)
+        self.assertIn("<CST>000</CST>", signed_xml)
+        self.assertIn("<cClassTrib>000001</cClassTrib>", signed_xml)
         self.assertIn("<cIndOp>100301</cIndOp>", signed_xml)
 
     def test_dps_xml_falls_back_to_defaults_if_invoice_fields_empty(self):
@@ -402,7 +403,7 @@ class CbsIbsDpsGenerationAndXsdTests(TestCase):
         self.assertIn("<IBSCBS>", signed_xml)
         self.assertIn("<CST>410</CST>", signed_xml)
         self.assertIn("<cClassTrib>410004</cClassTrib>", signed_xml)
-        self.assertIn("<cIndOp>100301</cIndOp>", signed_xml)
+        self.assertNotIn("<cIndOp>", signed_xml)
 
     def test_dps_xml_falls_back_to_defaults_if_invoice_fields_whitespace(self):
         self.company.enable_cbs_ibs = True
@@ -420,7 +421,7 @@ class CbsIbsDpsGenerationAndXsdTests(TestCase):
         self.assertIn("<IBSCBS>", signed_xml)
         self.assertIn("<CST>410</CST>", signed_xml)
         self.assertIn("<cClassTrib>410004</cClassTrib>", signed_xml)
-        self.assertIn("<cIndOp>100301</cIndOp>", signed_xml)
+        self.assertNotIn("<cIndOp>", signed_xml)
         self.assertNotIn("<CST></CST>", signed_xml)
 
     def test_dps_xml_validates_against_official_xsd_schema(self):
@@ -438,19 +439,13 @@ class CbsIbsDpsGenerationAndXsdTests(TestCase):
             "nfse",
             "nacional",
             "xsd",
-            "nfse-esquemas_xsd-v1-01-20260209",
-            "Schemas",
-            "1.01",
+            "esquemas-nfse-rtc-v1-01-20260727",
             "DPS_v1.01.xsd",
         )
         self.assertTrue(os.path.exists(xsd_path), f"XSD schema file not found at {xsd_path}")
 
-        # The official TSSerieDPS regex in tiposSimples_v1.01.xsd has '^0{0,4}\\d{1,5}$'
-        # with literal '^' and '$' (a known XSD author error) with maxLength=5.
-        # Replacing '<serie>4242</serie>' with '<serie>^424$</serie>' satisfies this literal facet.
-        test_xml = signed_xml.replace("<serie>4242</serie>", "<serie>^424$</serie>")
         xmlschema = etree.XMLSchema(etree.parse(xsd_path))
-        doc = etree.fromstring(test_xml.encode("utf-8"))
+        doc = etree.fromstring(signed_xml.encode("utf-8"))
 
         is_valid = xmlschema.validate(doc)
         error_messages = [f"{err.message} (line {err.line})" for err in xmlschema.error_log]
