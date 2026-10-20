@@ -28,7 +28,7 @@ class PaulistanaProvider(NFSeProvider):
             raise Exception(
                 "Certificado digital não configurado. Por favor, faça o upload na página Sua Empresa."
             )
-        cnpj = company.cnpj.replace(".", "").replace("/", "").replace("-", "")
+        cnpj = company.cnpj_clean
         im = company.inscricao_municipal
         return NFeClient(company.pfx_cert_pem, company.pfx_key_pem, cnpj, im), im
 

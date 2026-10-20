@@ -4209,4 +4209,10 @@ from core.tests_cbs_ibs import (
     CbsIbsEmissionAndPersistenceTests,
     CbsIbsFormsValidationTests,
 )
+from core.tests_cnpj import (
+    AlphanumericCnpjValidationTests,
+    AlphanumericCnpjFormattingTests,
+    AlphanumericCnpjFormAndModelTests,
+    AlphanumericCnpjIntegrationTests,
+)
 

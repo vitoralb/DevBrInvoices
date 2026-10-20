@@ -46,10 +46,10 @@ class EsocialClient:
 
     @staticmethod
     def _extract_cnpj_base(cnpj: str) -> str:
-        """Extrai os 8 primeiros dígitos do CNPJ (CNPJ raiz), conforme exigido pelos
+        """Extrai os 8 primeiros caracteres do CNPJ (CNPJ raiz), conforme exigido pelos
         schemas de identificação do empregador no eSocial."""
-        digits = re.sub(r"\D", "", cnpj or "")
-        return digits[:8]
+        chars = re.sub(r"[^0-9a-zA-Z]", "", cnpj or "").upper()
+        return chars[:8]
 
     def _post_soap(self, url: str, action: str, envelope_xml: str) -> str:
         """Envia uma requisição SOAP 1.1 com mTLS e registra a chamada em ApiLog."""

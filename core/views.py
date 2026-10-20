@@ -1647,7 +1647,8 @@ def api_cep_view(request, cep):
 @login_required
 def api_cnpj_view(request, cnpj):
     try:
-        response = requests.get(f"https://minhareceita.org/{cnpj}", timeout=5)
+        clean_cnpj = re.sub(r"[^0-9a-zA-Z]", "", cnpj).upper()
+        response = requests.get(f"https://minhareceita.org/{clean_cnpj}", timeout=5)
         if response.status_code == 200:
             return JsonResponse(response.json())
         elif response.status_code in [400, 404]:

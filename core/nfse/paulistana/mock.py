@@ -94,7 +94,7 @@ def build_mock_paulistana_nfse_xml(
     )
 
     # Chave Nacional (50 digits)
-    cnpj_prestador = re.sub(r"[^0-9]", "", company.cnpj or "00000000000000")[:14].zfill(14)
+    cnpj_prestador = re.sub(r"[^0-9a-zA-Z]", "", company.cnpj or "00000000000000")[:14].zfill(14).upper()
     chave_nac = f"35503082{cnpj_prestador}0000100000000000{str(num_val).zfill(5)}1234567"
 
     now_dt = datetime.datetime.now()
@@ -279,7 +279,7 @@ def _format_currency(val) -> str:
 
 
 def _format_cnpj(cnpj_raw: str) -> str:
-    c = re.sub(r"[^0-9]", "", str(cnpj_raw or ""))
+    c = re.sub(r"[^0-9a-zA-Z]", "", str(cnpj_raw or "")).upper()
     if len(c) == 14:
         return f"{c[:2]}.{c[2:5]}.{c[5:8]}/{c[8:12]}-{c[12:]}"
     elif len(c) == 11:

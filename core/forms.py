@@ -573,25 +573,13 @@ class CompanySettingsForm(forms.ModelForm):
         cnpj = self.cleaned_data.get("cnpj")
         if not cnpj:
             return cnpj
-        cnpj = re.sub(r"[^0-9]", "", cnpj)
-        if len(cnpj) != 14:
-            raise forms.ValidationError("CNPJ deve conter 14 dígitos numéricos.")
-
-        # Validate modulo-11 checksum
-        def calc_digit(cnpj_digits, weights):
-            total = sum(d * w for d, w in zip(cnpj_digits, weights))
-            remainder = total % 11
-            return 0 if remainder < 2 else 11 - remainder
-
-        digits = [int(c) for c in cnpj]
-        w1 = [5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-        w2 = [6, 5, 4, 3, 2, 9, 8, 7, 6, 5, 4, 3, 2]
-        if (
-            calc_digit(digits[:12], w1) != digits[12]
-            or calc_digit(digits[:13], w2) != digits[13]
-        ):
+        from core.utils.formatters import validate_cnpj
+        cleaned = re.sub(r"[^0-9a-zA-Z]", "", cnpj).upper()
+        if len(cleaned) != 14:
+            raise forms.ValidationError("CNPJ deve conter 14 caracteres alfanuméricos.")
+        if not validate_cnpj(cleaned):
             raise forms.ValidationError("CNPJ inválido.")
-        return cnpj
+        return cleaned
 
 
 class ClientForm(forms.ModelForm):

@@ -1,3 +1,4 @@
+import re
 import uuid
 from datetime import date, datetime, timedelta
 from decimal import Decimal
@@ -194,6 +195,11 @@ class CompanySettings(models.Model):
         from django.core.cache import cache
 
         cache.delete("company_settings_exists")
+
+    @property
+    def cnpj_clean(self) -> str:
+        """Returns the 14-character alphanumeric CNPJ without punctuation, uppercase."""
+        return re.sub(r"[^0-9a-zA-Z]", "", self.cnpj or "").upper()
 
     def __str__(self):
         return self.company_name
