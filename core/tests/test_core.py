@@ -936,8 +936,13 @@ class NFSeProviderAbstractionTests(TestCase):
             "35503081200000000000191000000000005426097092595485",
         )
 
+    @override_settings(FORCE_DEBUG_MODE=False)
+    @patch("core.nfse.paulistana.provider.PaulistanaProvider.consultar_nfse", return_value=None)
+    @patch("core.nfse.paulistana.client.NFeClient.consultar_lote", side_effect=Exception("mocked"))
     @patch("core.nfse.paulistana.client.NFeClient.enviar_lote_rps")
-    def test_paulistana_emitir_nfse_extracts_list_and_national_key(self, mock_enviar):
+    def test_paulistana_emitir_nfse_extracts_list_and_national_key(
+        self, mock_enviar, mock_lote, mock_consultar
+    ):
         from core.nfse.paulistana.provider import PaulistanaProvider
         from core.nfse.paulistana.schemas_v1.retorno_envio_lote_rps_v01 import (
             RetornoEnvioLoteRps as RetornoEnvioLoteRpsV1,
@@ -4105,7 +4110,42 @@ class PastConsolidationsImportTests(TestCase):
         self.assertEqual(cons_may.actual_pro_labore_paid, Decimal("0.00"))
 
 
-class NfseEmissionErrorHandlingTests(NFSeProviderAbstractionTests):
+class NfseEmissionErrorHandlingTests(TestCase):
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        key = rsa.generate_private_key(public_exponent=65537, key_size=2048)
+        cls.test_key_pem = key.private_bytes(
+            encoding=serialization.Encoding.PEM,
+            format=serialization.PrivateFormat.PKCS8,
+            encryption_algorithm=serialization.NoEncryption(),
+        ).decode("utf-8")
+        subject = issuer = x509.Name([x509.NameAttribute(NameOID.COMMON_NAME, "synthetic.local")])
+        cert = (
+            x509.CertificateBuilder()
+            .subject_name(subject)
+            .issuer_name(issuer)
+            .public_key(key.public_key())
+            .serial_number(x509.random_serial_number())
+            .not_valid_before(datetime.now(timezone.utc) - timedelta(days=1))
+            .not_valid_after(datetime.now(timezone.utc) + timedelta(days=365))
+            .sign(key, hashes.SHA256())
+        )
+        cls.test_cert_pem = cert.public_bytes(serialization.Encoding.PEM).decode("utf-8")
+
+    def setUp(self):
+        self.company = CompanySettings.objects.create(
+            company_name="Test Company",
+            cnpj="12.345.678/0001-90",
+            inscricao_municipal="12345678",
+            opening_date=date(2024, 1, 1),
+            email="test@test.com",
+            address_city_ibge="3550308",
+            address_neighborhood="Centro",
+            pfx_cert_pem=self.test_cert_pem,
+            pfx_key_pem=self.test_key_pem,
+        )
+
     def test_nacional_parse_error_response_pascal_case_keys(self):
         from unittest.mock import MagicMock
         from core.nfse.nacional.provider import NacionalProvider
@@ -4195,4 +4235,13 @@ class NfseEmissionErrorHandlingTests(NFSeProviderAbstractionTests):
         self.assertNotIn("<xEstProvReg/>", signed_xml)
         self.assertIn("<cEndPost>N/A</cEndPost>", signed_xml)
         self.assertIn("<xEstProvReg>N/A</xEstProvReg>", signed_xml)
+
+    def test_unmocked_external_network_call_is_blocked_by_test_runner(self):
+        import requests
+        from core.test_runner import BlockedNetworkCallError
+
+        with self.assertRaises(BlockedNetworkCallError) as ctx:
+            requests.get("https://sefin.nfse.gov.br/test")
+        self.assertIn("External network call blocked during tests", str(ctx.exception))
+        self.assertIn("https://sefin.nfse.gov.br/test", str(ctx.exception))
 
