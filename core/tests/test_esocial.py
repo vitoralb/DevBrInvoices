@@ -304,9 +304,16 @@ class EsocialClientAndSyncTests(TestCase):
         self.assertEqual(resp_dict["cd_resposta"], 201)
         mock_logged_post.assert_called_once()
 
+    @patch.object(
+        EsocialClient,
+        "solicitar_download_eventos_por_nr_recibo",
+        return_value={"cd_resposta": 201, "desc_resposta": "Sucesso", "arquivos": []},
+    )
     @patch.object(EsocialClient, "solicitar_download_eventos_por_id")
     @patch.object(EsocialClient, "consultar_identificadores_eventos_empregador")
-    def test_sync_esocial_payroll_success(self, mock_consultar, mock_download):
+    def test_sync_esocial_payroll_success(
+        self, mock_consultar, mock_download, mock_nr_recibo
+    ):
         c_jul = MonthlyConsolidation.objects.create(
             month_year=date(2026, 7, 1),
             total_revenue_internal=Decimal("10000.00"),
