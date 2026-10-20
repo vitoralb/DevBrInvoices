@@ -1,4 +1,4 @@
-name: notas-dev
+name: ${DEV_PROJECT_NAME:-notas-dev-8081}
 
 services:
   db:
@@ -9,7 +9,7 @@ services:
       POSTGRES_USER: ${POSTGRES_USER:-notas}
       POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:-notas_dev_password_secret}
     volumes:
-      - ./dev_data/postgres_data:/var/lib/postgresql/data
+      - ${DEV_DATA_DIR:-./dev_data_8081}/postgres_data:/var/lib/postgresql/data
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER:-notas} -d ${POSTGRES_DB:-notas}"]
       interval: 5s
@@ -21,13 +21,13 @@ services:
     restart: unless-stopped
 
   web:
+    image: ${DEV_IMAGE:-notas-dev:8081}
     build: .
     command: python manage.py runserver 0.0.0.0:8080
     volumes:
-      - .:/app
-      - ./dev_data/media:/app/media
+      - ${DEV_DATA_DIR:-./dev_data_8081}/media:/app/media
     ports:
-      - "8081:8080"
+      - "${DEV_PORT:-8081}:8080"
     env_file:
       - .env
     environment:
@@ -43,11 +43,11 @@ services:
     restart: unless-stopped
 
   celery-worker:
+    image: ${DEV_IMAGE:-notas-dev:8081}
     build: .
     command: celery -A config worker -l INFO
     volumes:
-      - .:/app
-      - ./dev_data/media:/app/media
+      - ${DEV_DATA_DIR:-./dev_data_8081}/media:/app/media
     env_file:
       - .env
     environment:
@@ -62,11 +62,11 @@ services:
     restart: unless-stopped
 
   celery-beat:
+    image: ${DEV_IMAGE:-notas-dev:8081}
     build: .
     command: celery -A config beat -l INFO -s /tmp/celerybeat-schedule
     volumes:
-      - .:/app
-      - ./dev_data/media:/app/media
+      - ${DEV_DATA_DIR:-./dev_data_8081}/media:/app/media
     env_file:
       - .env
     environment:
@@ -79,4 +79,3 @@ services:
       redis:
         condition: service_started
     restart: unless-stopped
-
