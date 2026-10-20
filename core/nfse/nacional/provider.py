@@ -356,7 +356,7 @@ class NacionalProvider(NFSeProvider):
         amount_brl, description, effective_rate_pct = _prepare_nf_data(invoice)
         service_desc = description.replace("\r", "").strip()[:2000]
 
-        cnpj_prestador = re.sub(r"[^0-9a-zA-Z]", "", company.cnpj)
+        cnpj_prestador = company.cnpj_clean
         cod_mun = company.address_city_ibge
 
         numero_dps_str = str(numero_dps)
@@ -743,7 +743,7 @@ class NacionalProvider(NFSeProvider):
         if not company:
             return None
 
-        cnpj_prestador = re.sub(r"[^0-9a-zA-Z]", "", company.cnpj)
+        cnpj_prestador = company.cnpj_clean
         cod_mun = company.address_city_ibge
         serie_formatada = str(
             doc_series or company.document_series or "1"
@@ -987,7 +987,7 @@ class NacionalProvider(NFSeProvider):
                 ],
             )
 
-        cnpj_prestador = re.sub(r"[^0-9a-zA-Z]", "", company.cnpj)
+        cnpj_prestador = company.cnpj_clean
 
         # Build PedRegEvento for cancelation (E101101)
         from core.nfse.nacional.schemas.v1_01.ped_reg_evento_v1_01 import PedRegEvento

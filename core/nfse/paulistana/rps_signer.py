@@ -48,7 +48,7 @@ def assinar_rps_v1(rps: TpRpsV1, key_pem: bytes) -> str:
     if rps.cpfcnpjtomador:
         cpf_cnpj = rps.cpfcnpjtomador.cpf or rps.cpfcnpjtomador.cnpj
         if cpf_cnpj:
-            clean_digits = re.sub(r"\D", "", str(cpf_cnpj))
+            clean_digits = re.sub(r"[^0-9a-zA-Z]", "", str(cpf_cnpj)).upper()
             ind_tomador = "1" if len(clean_digits) == 11 else "2"
             s_cpf_cnpj_tomador = clean_digits.zfill(14)
 

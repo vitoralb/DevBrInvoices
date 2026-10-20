@@ -526,7 +526,7 @@ def import_nfses(
         # Sort in ascending NSU order to process emissions before cancellations
         raw_items = sorted(raw_items, key=lambda x: x.get("NSU") or 0)
 
-        my_cnpj = re.sub(r"\D", "", company.cnpj)
+        my_cnpj = company.cnpj_clean
         imported_nfs_count = 0
         updated_events_count = 0
         imported_dates = []
@@ -553,7 +553,7 @@ def import_nfses(
                 if cnpj_match:
                     cnpj_prestador = cnpj_match.group(1)
 
-            if cnpj_prestador != my_cnpj:
+            if (cnpj_prestador or "").upper() != my_cnpj:
                 # Tomador document (service purchased by company from third-party) - skip importing as our NFSe
                 continue
 
