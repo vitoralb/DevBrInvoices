@@ -3137,39 +3137,18 @@ class TcrtcinfoImovel:
 @dataclass(kw_only=True)
 class TcrtcinfoTributosIbscbs:
     """
-    :ivar cst: Código de Situação Tributária do IBS e da CBS
-    :ivar c_class_trib: Código de Classificação Tributária do IBS e da CBS
     :ivar g_ibscbs: Grupo de informações relacionadas ao IBS e à CBS
     """
 
     class Meta:
         name = "TCRTCInfoTributosIBSCBS"
 
-    cst: str = field(
-        metadata={
-            "name": "CST",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"[0-9]{3}",
-        }
-    )
-    c_class_trib: str = field(
-        metadata={
-            "name": "cClassTrib",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"[0-9]{6}",
-        }
-    )
-    g_ibscbs: None | TcrtcinfoTributosSitClas = field(
-        default=None,
+    g_ibscbs: TcrtcinfoTributosSitClas = field(
         metadata={
             "name": "gIBSCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
+        }
     )
 
 
@@ -3949,6 +3928,13 @@ class TcrtcinfoIbscbs:
     class Meta:
         name = "TCRTCInfoIBSCBS"
 
+    fin_nfse: TsrtcfinNfse = field(
+        metadata={
+            "name": "finNFSe",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        }
+    )
     ind_final: None | TsrtcindFinal = field(
         default=None,
         metadata={
@@ -3957,15 +3943,14 @@ class TcrtcinfoIbscbs:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
         },
     )
-    c_ind_op: None | str = field(
-        default=None,
+    c_ind_op: str = field(
         metadata={
             "name": "cIndOp",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "white_space": "preserve",
             "pattern": r"[0-9]{6}",
-        },
+        }
     )
     tp_oper: None | TsrtctpOper = field(
         default=None,
@@ -3992,12 +3977,11 @@ class TcrtcinfoIbscbs:
         },
     )
     ind_dest: TsrtcindDest = field(
-        default=TsrtcindDest.VALUE_0,
         metadata={
             "name": "indDest",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
+        }
     )
     dest: None | TcrtcinfoDest = field(
         default=None,
@@ -4191,34 +4175,6 @@ class TcinfDps:
             "name": "cMotivoEmisTI",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    fin_nfse: TsrtcfinNfse = field(
-        default=TsrtcfinNfse.VALUE_0,
-        metadata={
-            "name": "finNFSe",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    tp_nfse_debito: None | str = field(
-        default=None,
-        metadata={
-            "name": "tpNFSeDebito",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "max_length": 2,
-            "white_space": "preserve",
-        },
-    )
-    tp_nfse_credito: None | str = field(
-        default=None,
-        metadata={
-            "name": "tpNFSeCredito",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "max_length": 2,
-            "white_space": "preserve",
         },
     )
     ch_nfse_rej: None | str = field(

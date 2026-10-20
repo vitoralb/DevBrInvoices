@@ -467,24 +467,19 @@ class NacionalProvider(NFSeProvider):
         if getattr(company, "enable_cbs_ibs", False):
             cst = (str(getattr(invoice, "cst_ibs_cbs", "") or "").strip() or "410")[:3]
             c_class_trib = (str(getattr(invoice, "c_class_trib_ibs_cbs", "") or "").strip() or "410004")[:6]
-            c_ind_op = str(getattr(invoice, "c_ind_op_ibs_cbs", "") or "").strip()[:6]
-
-            # Rule E0859: cIndOp is NOT allowed when there is no IBS/CBS taxation (ind_gIBSCBS = 0).
-            # For CST 410 / cClassTrib 410004 (Export/Immunity), ind_gIBSCBS = 0, so cIndOp must be None.
-            c_ind_op_val = (
-                c_ind_op
-                if (c_ind_op and cst != "410" and not c_class_trib.startswith("410"))
-                else None
-            )
+            c_ind_op = (str(getattr(invoice, "c_ind_op_ibs_cbs", "") or "").strip() or "100301")[:6]
 
             ibscbs = TcrtcinfoIbscbs(
-                ind_final=None,
-                c_ind_op=c_ind_op_val,
+                fin_nfse=TsrtcfinNfse.VALUE_0,  # 0 = Regular
+                ind_final=TsrtcindFinal.VALUE_0,  # 0 = Não
+                c_ind_op=c_ind_op,
                 ind_dest=TsrtcindDest.VALUE_0,  # 0 = Próprio tomador
                 valores=TcrtcinfoValoresIbscbs(
                     trib=TcrtcinfoTributosIbscbs(
-                        cst=cst,
-                        c_class_trib=c_class_trib,
+                        g_ibscbs=TcrtcinfoTributosSitClas(
+                            cst=cst,
+                            c_class_trib=c_class_trib,
+                        )
                     )
                 ),
             )
@@ -500,7 +495,6 @@ class NacionalProvider(NFSeProvider):
                 n_dps=numero_dps_str,
                 d_compet=d_compet,
                 tp_emit="1",  # 1 = Prestador emitindo
-                fin_nfse=TsrtcfinNfse.VALUE_0,  # 0 = Regular
                 c_loc_emi=cod_mun,
                 prest=TcinfoPrestador(
                     cnpj=cnpj_prestador,
