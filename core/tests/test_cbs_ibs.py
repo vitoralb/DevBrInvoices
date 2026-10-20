@@ -9,6 +9,7 @@ from cryptography.hazmat.primitives import serialization, hashes
 from cryptography import x509
 from cryptography.x509.oid import NameOID
 
+from django.conf import settings
 from django.test import TestCase, Client as HttpClient
 from django.urls import reverse
 from django.contrib.auth.models import User
@@ -433,7 +434,7 @@ class CbsIbsDpsGenerationAndXsdTests(TestCase):
         )
 
         xsd_path = os.path.join(
-            os.path.dirname(os.path.dirname(__file__)),
+            str(settings.BASE_DIR),
             "core",
             "nfse",
             "nacional",

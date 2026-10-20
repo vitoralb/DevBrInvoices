@@ -24,7 +24,7 @@ The following files on `dev` contain Sefin Nacional RTC 1.6.0 schema compliance 
 
 1. `core/nfse/nacional/schemas/v1_01/tipos_complexos_v1_01.py` (RTC 1.6.0 DPS complex types)
 2. `core/nfse/nacional/provider.py` (RTC 1.6.0 provider payload structures)
-3. `core/tests_cbs_ibs.py` (RTC 1.6.0 CBS/IBS unit tests)
+3. `core/tests/test_cbs_ibs.py` (RTC 1.6.0 CBS/IBS unit tests)
 4. `core/nfse/nacional/xsd/esquemas-nfse-rtc-v1-01-20260727/` (Offline reference XSD schemas for RTC)
 
 ---

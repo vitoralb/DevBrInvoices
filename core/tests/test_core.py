@@ -4196,23 +4196,3 @@ class NfseEmissionErrorHandlingTests(NFSeProviderAbstractionTests):
         self.assertIn("<cEndPost>N/A</cEndPost>", signed_xml)
         self.assertIn("<xEstProvReg>N/A</xEstProvReg>", signed_xml)
 
-
-from core.tests_esocial import (
-    EsocialSignerTests,
-    EsocialParserTests,
-    EsocialClientAndSyncTests,
-    EsocialBackupTests,
-)
-from core.tests_cbs_ibs import (
-    CbsIbsModelAndTemplateTests,
-    CbsIbsDpsGenerationAndXsdTests,
-    CbsIbsEmissionAndPersistenceTests,
-    CbsIbsFormsValidationTests,
-)
-from core.tests_cnpj import (
-    AlphanumericCnpjValidationTests,
-    AlphanumericCnpjFormattingTests,
-    AlphanumericCnpjFormAndModelTests,
-    AlphanumericCnpjIntegrationTests,
-)
-
