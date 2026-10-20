@@ -6,8 +6,8 @@ cd "$SCRIPT_DIR"
 
 PROD_COMPOSE="docker-compose.yaml"
 DEV_COMPOSE="docker-compose.dev.yaml"
+DEV_BIND_COMPOSE="docker-compose.dev.bind.yaml"
 PROD_PROJECT="notas"
-DEV_PROJECT="notas-dev"
 
 RED='\033[0;31m'
 GREEN='\033[0;32m'
@@ -31,86 +31,169 @@ log_error() {
     echo -e "${RED}[ERROR]${NC} $1" >&2
 }
 
-check_dev_already_running() {
-    local running_containers
-    running_containers=$(docker ps --filter "name=notas-dev-" --filter "status=running" --format "{{.Names}}")
-    if [ -n "$running_containers" ]; then
-        log_error "A development environment is already running:"
-        echo "$running_containers" | while read -r line; do
-            echo -e "  - ${YELLOW}$line${NC}"
-        done
-        echo ""
-        log_warn "Only ONE development environment is allowed to run at any time."
-        log_info "To stop Dev containers: make dev-destroy (or ./scripts/env.sh destroy-dev)"
-        log_info "To reset Dev environment: make dev-reset (or ./scripts/env.sh reset-dev)"
-        log_info "To restart Dev containers: make dev-restart (or ./scripts/env.sh restart-dev)"
-        return 1
+get_running_dev_ports() {
+    docker ps --filter "name=notas-dev-" --filter "name=-web-1" --filter "status=running" --format "{{.Names}}" 2>/dev/null \
+        | sed -E 's/.*notas-dev-([0-9]+)-web-1.*/\1/' \
+        | grep -E '^[0-9]+$' \
+        | sort -u
+}
+
+get_all_dev_ports() {
+    docker ps -a --filter "name=notas-dev-" --filter "name=-web-1" --format "{{.Names}}" 2>/dev/null \
+        | sed -E 's/.*notas-dev-([0-9]+)-web-1.*/\1/' \
+        | grep -E '^[0-9]+$' \
+        | sort -u
+}
+
+resolve_dev_port() {
+    local requested_port="$1"
+    if [ -n "$requested_port" ]; then
+        echo "$requested_port"
+        return 0
     fi
 
-    return 0
+    local running_ports
+    mapfile -t running_ports < <(get_running_dev_ports)
+
+    # Filter out empty entries if any
+    local non_empty_ports=()
+    for p in "${running_ports[@]}"; do
+        if [ -n "$p" ]; then
+            non_empty_ports+=("$p")
+        fi
+    done
+
+    local count=${#non_empty_ports[@]}
+    if [ "$count" -eq 1 ]; then
+        log_info "Auto-detected single running dev environment on port ${non_empty_ports[0]}." >&2
+        echo "${non_empty_ports[0]}"
+        return 0
+    elif [ "$count" -gt 1 ]; then
+        log_error "Multiple development environments are currently running:" >&2
+        for p in "${non_empty_ports[@]}"; do
+            echo -e "  - Port ${YELLOW}${p}${NC} (project: notas-dev-${p})" >&2
+        done
+        echo "" >&2
+        log_warn "Please specify which environment to target using PORT=<port> (e.g. PORT=8081)" >&2
+        return 1
+    else
+        log_error "No running development environment was detected." >&2
+        log_info "Please spawn an environment first: make dev-spawn (or specify PORT=<port>)" >&2
+        return 2
+    fi
 }
 
 cmd_spawn_dev() {
-    log_info "Starting development environment initialization..."
+    local target_port="${PORT:-8081}"
+    local ref="${REF:-}"
+    local bind="${BIND:-}"
 
-    if ! check_dev_already_running; then
-        exit 1
+    if [ -n "$ref" ]; then
+        if [ -z "$bind" ]; then
+            bind=0
+        fi
+    else
+        if [ -z "$bind" ]; then
+            bind=1
+        fi
     fi
 
+    local project="notas-dev-${target_port}"
+    local data_dir="./dev_data_${target_port}"
+    local image="notas-dev:${target_port}"
+
+    log_info "Starting development environment initialization for port ${target_port}..."
+
+    # Check if this specific dev environment is already running
+    if docker ps --filter "name=${project}-web-1" --filter "status=running" --format "{{.Names}}" | grep -q "${project}-web-1"; then
+        log_warn "Development environment on port ${target_port} is already running."
+        echo -e "  ${GREEN}URL:${NC} http://localhost:${target_port}"
+        echo -e "  ${GREEN}Web Container:${NC} ${project}-web-1"
+        return 0
+    fi
+
+    # Reference mode: build image from git archive of the ref
+    if [ -n "$ref" ]; then
+        log_info "Reference mode requested for ref '${ref}' on port ${target_port} (BIND=${bind})..."
+        if ! git rev-parse --verify "${ref}^{commit}" >/dev/null 2>&1; then
+            log_error "Git ref '${ref}' not found."
+            exit 1
+        fi
+
+        if ! docker image inspect notas-web:latest >/dev/null 2>&1; then
+            log_info "Base image notas-web:latest not found. Building base production image first..."
+            docker compose -f "$PROD_COMPOSE" build
+        fi
+
+        log_info "Packaging git archive of ref '${ref}' and building image ${image}..."
+        local tmpdir
+        tmpdir=$(mktemp -d)
+        git archive "${ref}" | tar -x -C "$tmpdir"
+        cat << 'EOF' > "$tmpdir/Dockerfile"
+FROM notas-web:latest
+WORKDIR /app
+COPY . /app/
+RUN SECRET_KEY=build-temp-key python manage.py collectstatic --noinput
+EOF
+        docker build -t "$image" "$tmpdir"
+        rm -rf "$tmpdir"
+        log_success "Image ${image} built from git ref '${ref}'."
+    else
+        # Active work mode: tag notas-web:latest if notas-dev:<port> does not exist
+        if ! docker image inspect "$image" >/dev/null 2>&1; then
+            if docker image inspect notas-web:latest >/dev/null 2>&1; then
+                docker tag notas-web:latest "$image"
+            else
+                log_info "Building base image for development..."
+                docker compose -f "$PROD_COMPOSE" build
+                docker tag notas-web:latest "$image"
+            fi
+        fi
+    fi
+
+    local compose_args=("-p" "$project" "-f" "$DEV_COMPOSE")
+    if [ "$bind" = "1" ]; then
+        compose_args+=("-f" "$DEV_BIND_COMPOSE")
+    fi
+
+    run_dev_compose() {
+        DEV_PROJECT_NAME="$project" DEV_PORT="$target_port" DEV_DATA_DIR="$data_dir" DEV_IMAGE="$image" \
+            docker compose "${compose_args[@]}" "$@"
+    }
+
     local is_resuming=false
-    if [ -d "dev_data/postgres_data" ] && [ "$(ls -A dev_data/postgres_data 2>/dev/null)" ]; then
+    if [ -d "${data_dir}/postgres_data" ] && [ "$(ls -A "${data_dir}/postgres_data" 2>/dev/null)" ]; then
         is_resuming=true
     fi
 
     if [ "$is_resuming" = true ]; then
-        log_info "Existing dev_data found. Resuming development environment..."
-        docker compose -f "$DEV_COMPOSE" up -d
+        log_info "Existing data found at ${data_dir}. Resuming development environment..."
+        run_dev_compose up -d
 
-        log_info "Waiting for dev web container (notas-dev-web-1)..."
-        sleep 3
+        log_info "Waiting for dev web container (${project}-web-1)..."
+        local attempts=0
+        until docker ps --filter "name=${project}-web-1" --filter "status=running" --format "{{.Names}}" | grep -q "${project}-web-1" || [ $attempts -ge 30 ]; do
+            attempts=$((attempts + 1))
+            sleep 1
+        done
 
         log_info "Applying any pending migrations in development..."
-        docker exec notas-dev-web-1 python manage.py migrate --noinput
-
-        log_info "Running incremental NSU import from Sefin Homologação..."
-        docker exec notas-dev-web-1 python manage.py shell -c "
-from core.services.nfse_services import import_nfses
-try:
-    count, msg = import_nfses('NACIONAL')
-    print(f'Incremental sync: {count} items. {msg}')
-except Exception as ex:
-    print(f'Incremental sync notice: {ex}')
-"
+        docker exec "${project}-web-1" python manage.py migrate --noinput
     else
-        log_info "No existing dev_data found. Setting up clean-slate development environment..."
+        log_info "No existing data found at ${data_dir}. Setting up clean-slate development environment..."
 
-        # 1. Verify production database is running (needed to clone CompanySettings and User accounts)
-        log_info "Checking if production database ('notas-db-1') is available..."
-        if ! docker ps --filter "name=notas-db-1" --filter "status=running" --format "{{.Names}}" | grep -q "notas-db-1"; then
-            log_error "Production database 'notas-db-1' is not running."
-            log_info "Please ensure the production stack is up before cloning base configuration: docker compose up -d"
-            exit 1
-        fi
+        # Prepare isolated dev data directories
+        mkdir -p "${data_dir}/postgres_data" "${data_dir}/media"
 
-        # 2. Prepare isolated dev data directories
-        log_info "Creating dev_data directories..."
-        mkdir -p dev_data/postgres_data dev_data/media
-
-        # 3. Clone media directory if available
-        if [ -d "media" ]; then
-            log_info "Copying media files to ./dev_data/media/..."
-            cp -a media/. dev_data/media/ 2>/dev/null || true
-        fi
-
-        # 4. Start dev DB and redis
+        # Start dev DB and redis
         log_info "Starting dev DB and Redis services..."
-        docker compose -f "$DEV_COMPOSE" up -d db redis
+        run_dev_compose up -d db redis
 
-        # 5. Wait for dev DB to become healthy
+        # Wait for dev DB to become healthy
         log_info "Waiting for dev database to become ready..."
         local attempts=0
         local max_attempts=30
-        until docker exec notas-dev-db-1 pg_isready -U notas -d notas >/dev/null 2>&1 || [ $attempts -ge $max_attempts ]; do
+        until docker exec "${project}-db-1" pg_isready -U notas -d notas >/dev/null 2>&1 || [ $attempts -ge $max_attempts ]; do
             attempts=$((attempts + 1))
             sleep 1
         done
@@ -120,159 +203,189 @@ except Exception as ex:
             exit 1
         fi
 
-        # 6. Start the rest of the dev stack
-        log_info "Starting development web and celery containers on port 8081..."
-        docker compose -f "$DEV_COMPOSE" up -d
+        # Start the rest of the dev stack
+        log_info "Starting development web and celery containers on port ${target_port}..."
+        run_dev_compose up -d
 
-        # 7. Wait for dev web container to be ready
-        log_info "Waiting for dev web container (notas-dev-web-1)..."
-        sleep 3
+        # Wait for dev web container to be ready
+        log_info "Waiting for dev web container (${project}-web-1)..."
+        attempts=0
+        until docker ps --filter "name=${project}-web-1" --filter "status=running" --format "{{.Names}}" | grep -q "${project}-web-1" || [ $attempts -ge 30 ]; do
+            attempts=$((attempts + 1))
+            sleep 1
+        done
 
-        # 8. Apply migrations in dev to build schema
+        # Apply migrations to build schema
         log_info "Applying migrations to initialize dev schema..."
-        docker exec notas-dev-web-1 python manage.py migrate --noinput
+        docker exec "${project}-web-1" python manage.py migrate --noinput
 
-        # 9. Copy only CompanySettings and User accounts from production
-        log_info "Copying User accounts and auth tokens from production..."
-        docker exec notas-db-1 pg_dump -U notas -d notas -t auth_user -t authtoken_token --data-only --column-inserts 2>/dev/null | docker exec -i notas-dev-db-1 psql -U notas -d notas >/dev/null 2>&1 || true
-
-        log_info "Copying and sanitizing CompanySettings from production..."
-        docker exec notas-web-1 python -c "
-import django, os, json
-os.environ.setdefault('DJANGO_SETTINGS_MODULE', 'config.settings')
-django.setup()
-from core.models import CompanySettings
-from django.forms.models import model_to_dict
-c = CompanySettings.objects.first()
-if c:
-    d = model_to_dict(c)
-    clean = {k: v for k, v in d.items() if k not in ['id', 'default_codigo_tributacao_nacional', 'default_codigo_nbs']}
-    print(json.dumps(clean, default=str))
-" 2>/dev/null | docker exec -i notas-dev-web-1 python manage.py shell -c "
-import sys, json
-from core.models import CompanySettings
-raw = sys.stdin.read().strip()
-if raw:
-    data = json.loads(raw)
-    c = CompanySettings.objects.first() or CompanySettings()
-    for k, v in data.items():
-        if hasattr(c, k):
-            setattr(c, k, v)
-    c.debug_mode = True
-    c.auto_finalize_invoices = False
-    c.document_series = '4242'
-    c.next_document_number = 1
-    c.last_adn_nsu = 0
-    c.save()
-    print('CompanySettings configured: series 4242, debug_mode=True, counters reset.')
-else:
-    print('Warning: No CompanySettings extracted from production.')
-"
-
-        # 10. Seed synthetic client and template if needed
-        log_info "Seeding synthetic client and template..."
-        docker exec notas-dev-web-1 python manage.py shell -c "
-from core.models import Client, InvoiceTemplate
-
-if not Client.objects.exists():
-    client = Client.objects.create(
-        name='Acme International LLC',
-        email='billing@example.com',
-        address_line1='100 Market St',
-        address_neighborhood='Downtown',
-        address_city='San Francisco',
-        address_state_province='CA',
-        address_postal_code='94105',
-        country='United States',
-        address_country_code='US',
-    )
-    print('Created synthetic test client: Acme International LLC.')
-else:
-    client = Client.objects.first()
-
-if not InvoiceTemplate.objects.exists():
-    from core.models import InvoiceTemplateItem
-    tmpl = InvoiceTemplate.objects.create(
-        name='Template Padrão Homologação',
-        currency='USD',
-        codigo_tributacao_nacional='010101',
-        codigo_servico_municipio='001',
-        codigo_nbs='115029000',
-        nfse_description='Serviços de desenvolvimento de software prestados para o exterior.',
-    )
-    InvoiceTemplateItem.objects.create(
-        template=tmpl,
-        description='Consultoria e desenvolvimento de software',
-        quantity=1,
-        unit_price_foreign=1000,
-    )
-    print('Created synthetic test template.')
-"
-
-        # 11. Run automatic NSU import from Sefin Homologação
-        log_info "Running initial NSU import from Sefin Homologação to prefill NFS-e data..."
-        docker exec notas-dev-web-1 python manage.py shell -c "
-from core.services.nfse_services import import_nfses
-try:
-    count, msg = import_nfses('NACIONAL')
-    print(f'Homologação prefill: {count} items processed. {msg}')
-except Exception as ex:
-    print(f'Homologação prefill notice: {ex}')
+        # Create default superuser admin / admin
+        log_info "Creating default superuser (admin / admin)..."
+        docker exec "${project}-web-1" python manage.py shell -c "
+from django.contrib.auth import get_user_model
+User = get_user_model()
+if not User.objects.filter(username='admin').exists():
+    User.objects.create_superuser('admin', 'admin@example.com', 'admin')
+    print('Superuser admin created.')
 "
     fi
 
     log_success "Development environment ready!"
     echo ""
-    echo -e "  ${GREEN}URL:${NC}                http://localhost:8081"
-    echo -e "  ${GREEN}Container Web:${NC}      notas-dev-web-1"
-    echo -e "  ${GREEN}Dev Database:${NC}       ./dev_data/postgres_data (isolated from prod)"
-    echo -e "  ${GREEN}Dev Media:${NC}          ./dev_data/media (isolated from prod)"
-    echo -e "  ${GREEN}Series / State:${NC}     document_series=4242, Homologação NFS-es prefilled"
-    echo -e "  ${GREEN}Code Reload:${NC}        Live bind-mount of current workspace"
-    echo -e "  ${GREEN}Safety Rails:${NC}       debug_mode=True (locked), auto_finalize_invoices=False"
+    echo -e "  ${GREEN}URL:${NC}                http://localhost:${target_port}"
+    echo -e "  ${GREEN}Container Web:${NC}      ${project}-web-1"
+    echo -e "  ${GREEN}Dev Database:${NC}       ${data_dir}/postgres_data (isolated from prod)"
+    echo -e "  ${GREEN}Dev Media:${NC}          ${data_dir}/media (isolated from prod)"
+    echo -e "  ${GREEN}Mode:${NC}               $([ "$bind" = "1" ] && echo "Active work (live reload, BIND=1)" || echo "Reference mode (immutable, BIND=0, ref=${ref})")"
+    echo -e "  ${GREEN}Safety Rails:${NC}       debug_mode=True (locked), document_series=4242 (locked)"
     echo ""
-    log_info "To run tests in dev: make dev-test (or ./scripts/env.sh test)"
-    log_info "To stop dev (preserves data): make dev-destroy (or ./scripts/env.sh destroy-dev)"
-    log_info "To wipe and reset dev from scratch: make dev-reset (or ./scripts/env.sh reset-dev)"
+    log_info "To run tests in dev: make dev-test PORT=${target_port} (or make dev-test)"
+    log_info "To clone prod DB/media: make dev-clone-prod PORT=${target_port}"
+    log_info "To stop dev (preserves data): make dev-destroy PORT=${target_port}"
+    log_info "To wipe and reset dev: make dev-reset PORT=${target_port}"
 }
 
 cmd_destroy_dev() {
-    log_info "Stopping development environment containers..."
-    docker compose -f "$DEV_COMPOSE" down --remove-orphans || true
-    log_success "Development containers stopped. Dev database (./dev_data/) preserved."
-    log_info "To resume, run 'make dev-spawn'. To completely reset dev database, run 'make dev-reset'."
+    local target_port="$PORT"
+    if [ -z "$target_port" ]; then
+        if ! target_port=$(resolve_dev_port ""); then
+            # If not running, check if there is exactly 1 stopped dev environment
+            local all_ports
+            mapfile -t all_ports < <(get_all_dev_ports)
+            local non_empty=()
+            for p in "${all_ports[@]}"; do
+                if [ -n "$p" ]; then non_empty+=("$p"); fi
+            done
+            if [ ${#non_empty[@]} -eq 1 ]; then
+                target_port="${non_empty[0]}"
+                log_info "Auto-detected stopped dev environment on port ${target_port}."
+            else
+                exit 1
+            fi
+        fi
+    fi
+
+    local project="notas-dev-${target_port}"
+    local data_dir="./dev_data_${target_port}"
+
+    log_info "Stopping development environment containers for port ${target_port}..."
+    DEV_PROJECT_NAME="$project" DEV_PORT="$target_port" DEV_DATA_DIR="$data_dir" \
+        docker compose -p "$project" -f "$DEV_COMPOSE" down --remove-orphans || true
+    log_success "Development containers for port ${target_port} stopped. Dev data (${data_dir}/) preserved."
+    log_info "To resume, run 'make dev-spawn PORT=${target_port}'. To completely reset dev database, run 'make dev-reset PORT=${target_port}'."
 }
 
 cmd_reset_dev() {
-    log_info "Wiping development environment and data..."
-    docker compose -f "$DEV_COMPOSE" down -v --remove-orphans || true
-    rm -rf dev_data
-    log_success "Development data wiped."
-    log_info "Re-spawning clean development environment..."
-    cmd_spawn_dev
+    local target_port="$PORT"
+    if [ -z "$target_port" ]; then
+        target_port=$(resolve_dev_port "" 2>/dev/null || echo "8081")
+    fi
+
+    local project="notas-dev-${target_port}"
+    local data_dir="./dev_data_${target_port}"
+
+    log_info "Wiping development environment and data for port ${target_port}..."
+    DEV_PROJECT_NAME="$project" DEV_PORT="$target_port" DEV_DATA_DIR="$data_dir" \
+        docker compose -p "$project" -f "$DEV_COMPOSE" down -v --remove-orphans || true
+    rm -rf "$data_dir"
+    log_success "Development data for port ${target_port} wiped."
+    log_info "Re-spawning clean development environment on port ${target_port}..."
+    PORT="$target_port" cmd_spawn_dev
 }
 
 cmd_restart_dev() {
-    log_info "Restarting development web and celery workers..."
-    if ! docker ps --filter "name=notas-dev-web-1" --format "{{.Names}}" | grep -q "notas-dev-web-1"; then
-        log_error "Dev environment is not running. Use 'make dev-spawn' or './scripts/env.sh spawn-dev' first."
+    local target_port
+    if ! target_port=$(resolve_dev_port "$PORT"); then
         exit 1
     fi
-    docker restart notas-dev-web-1 notas-dev-celery-worker-1 notas-dev-celery-beat-1
-    log_success "Dev services restarted."
+
+    local project="notas-dev-${target_port}"
+    local web_container="${project}-web-1"
+    local worker_container="${project}-celery-worker-1"
+    local beat_container="${project}-celery-beat-1"
+
+    if ! docker ps --filter "name=${web_container}" --format "{{.Names}}" | grep -q "${web_container}"; then
+        log_error "Dev web container '${web_container}' is not running."
+        exit 1
+    fi
+
+    log_info "Restarting development web and celery workers for port ${target_port}..."
+    docker restart "${web_container}" "${worker_container}" "${beat_container}"
+    log_success "Dev services for port ${target_port} restarted."
+}
+
+cmd_clone_prod_to_dev() {
+    local target_port
+    if ! target_port=$(resolve_dev_port "$PORT"); then
+        exit 1
+    fi
+
+    local project="notas-dev-${target_port}"
+    local dev_db_container="${project}-db-1"
+    local dev_web_container="${project}-web-1"
+    local data_dir="./dev_data_${target_port}"
+
+    log_info "Cloning production database and media to dev environment on port ${target_port}..."
+
+    # 1. Verify production database is running
+    log_info "Checking if production database ('notas-db-1') is available..."
+    if ! docker ps --filter "name=notas-db-1" --filter "status=running" --format "{{.Names}}" | grep -q "notas-db-1"; then
+        log_error "Production database 'notas-db-1' is not running."
+        exit 1
+    fi
+
+    # 2. Verify target dev db container is running
+    log_info "Checking if target dev database ('${dev_db_container}') is running..."
+    if ! docker ps --filter "name=${dev_db_container}" --filter "status=running" --format "{{.Names}}" | grep -q "${dev_db_container}"; then
+        log_error "Dev database '${dev_db_container}' is not running. Please spawn it first: make dev-spawn PORT=${target_port}"
+        exit 1
+    fi
+
+    # 3. Dump PostgreSQL from notas-db-1 and pipe directly into dev DB
+    log_info "Dumping production database and restoring into ${dev_db_container}..."
+    docker exec notas-db-1 pg_dump -U notas -d notas --clean | docker exec -i "${dev_db_container}" psql -U notas -d notas >/dev/null
+
+    # 4. Copy media files to ./dev_data_<port>/media/
+    if [ -d "media" ]; then
+        log_info "Copying media files to ${data_dir}/media/..."
+        mkdir -p "${data_dir}/media"
+        cp -a media/. "${data_dir}/media/" 2>/dev/null || true
+    fi
+
+    # 5. Dev safety sanitization in dev container
+    log_info "Applying dev safety sanitization in ${dev_web_container}..."
+    docker exec "${dev_web_container}" python manage.py shell -c "
+from core.models import CompanySettings
+CompanySettings.objects.update(
+    debug_mode=True,
+    document_series='4242',
+    auto_finalize_invoices=False
+)
+print('Dev safety sanitization applied: debug_mode=True, series=4242, auto_finalize_invoices=False')
+"
+
+    log_success "Production clone to dev (port ${target_port}) completed successfully!"
 }
 
 cmd_test() {
-    if ! docker ps --filter "name=notas-dev-web-1" --format "{{.Names}}" | grep -q "notas-dev-web-1"; then
-        log_error "Tests must ALWAYS be executed inside the development environment (notas-dev-web-1)."
-        log_error "The development environment is currently NOT running."
-        echo ""
-        log_info "Please run 'make dev-spawn' (or ./scripts/env.sh spawn-dev) before running tests."
+    local target_port
+    if ! target_port=$(resolve_dev_port "$PORT"); then
         exit 1
     fi
 
-    log_info "Running test suite inside development container (notas-dev-web-1)..."
-    docker exec notas-dev-web-1 python manage.py test --noinput "$@"
+    local project="notas-dev-${target_port}"
+    local web_container="${project}-web-1"
+
+    if ! docker ps --filter "name=${web_container}" --format "{{.Names}}" | grep -q "${web_container}"; then
+        log_error "Tests must ALWAYS be executed inside a running development environment."
+        log_error "Container '${web_container}' is currently not running."
+        echo ""
+        log_info "Please run 'make dev-spawn PORT=${target_port}' before running tests."
+        exit 1
+    fi
+
+    log_info "Running test suite inside development container (${web_container})..."
+    docker exec "${web_container}" python manage.py test --noinput "$@"
 }
 
 cmd_upgrade_prod() {
@@ -314,15 +427,48 @@ cmd_status() {
     echo -e "${BLUE}=== Production Environment (project: ${PROD_PROJECT}) ===${NC}"
     docker compose -f "$PROD_COMPOSE" ps
     echo ""
-    echo -e "${BLUE}=== Development Environment (project: ${DEV_PROJECT}) ===${NC}"
-    if docker ps -a --filter "name=notas-dev-" --format "{{.Names}}" | grep -q "notas-dev"; then
-        docker compose -f "$DEV_COMPOSE" ps
+    echo -e "${BLUE}=== Active Development Environments ===${NC}"
+    local running_ports
+    mapfile -t running_ports < <(get_running_dev_ports)
+    local non_empty=()
+    for p in "${running_ports[@]}"; do
+        if [ -n "$p" ]; then non_empty+=("$p"); fi
+    done
+
+    if [ ${#non_empty[@]} -eq 0 ]; then
+        echo "No development containers are currently running."
     else
-        echo "No development containers are currently created or running."
+        for p in "${non_empty[@]}"; do
+            echo -e "${GREEN}--- Project: notas-dev-${p} (Port: ${p}) ---${NC}"
+            DEV_PROJECT_NAME="notas-dev-${p}" DEV_PORT="$p" DEV_DATA_DIR="./dev_data_${p}" \
+                docker compose -p "notas-dev-${p}" -f "$DEV_COMPOSE" ps
+            echo ""
+        done
     fi
 }
 
-case "$1" in
+ACTION="$1"
+shift || true
+
+REMAINING_ARGS=()
+for arg in "$@"; do
+    case "$arg" in
+        PORT=*)
+            PORT="${arg#PORT=}"
+            ;;
+        REF=*)
+            REF="${arg#REF=}"
+            ;;
+        BIND=*)
+            BIND="${arg#BIND=}"
+            ;;
+        *)
+            REMAINING_ARGS+=("$arg")
+            ;;
+    esac
+done
+
+case "$ACTION" in
     spawn-dev)
         cmd_spawn_dev
         ;;
@@ -335,9 +481,11 @@ case "$1" in
     restart-dev)
         cmd_restart_dev
         ;;
+    clone-prod)
+        cmd_clone_prod_to_dev
+        ;;
     test)
-        shift
-        cmd_test "$@"
+        cmd_test "${REMAINING_ARGS[@]}"
         ;;
     upgrade-prod)
         cmd_upgrade_prod
@@ -346,8 +494,7 @@ case "$1" in
         cmd_status
         ;;
     *)
-        echo "Usage: $0 {spawn-dev|destroy-dev|reset-dev|restart-dev|test|upgrade-prod|status}"
+        echo "Usage: $0 {spawn-dev|destroy-dev|reset-dev|restart-dev|clone-prod|test|upgrade-prod|status} [PORT=<port>] [REF=<ref>] [BIND=0|1] [test_args...]"
         exit 1
         ;;
 esac
-

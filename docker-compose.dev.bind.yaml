@@ -1,0 +1,10 @@
+services:
+  web:
+    volumes:
+      - .:/app
+  celery-worker:
+    volumes:
+      - .:/app
+  celery-beat:
+    volumes:
+      - .:/app

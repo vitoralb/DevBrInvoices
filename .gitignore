@@ -54,7 +54,7 @@ staticfiles/
 
 # Database
 postgres_data/
-dev_data/
+dev_data*/
 
 # eSocial Backups & ZIPs
 core/esocial/backup/
