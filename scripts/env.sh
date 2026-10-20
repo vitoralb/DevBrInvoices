@@ -47,6 +47,7 @@ get_all_dev_ports() {
 
 resolve_dev_port() {
     local requested_port="$1"
+    local silent_if_none="${2:-false}"
     if [ -n "$requested_port" ]; then
         echo "$requested_port"
         return 0
@@ -77,8 +78,10 @@ resolve_dev_port() {
         log_warn "Please specify which environment to target using PORT=<port> (e.g. PORT=8081)" >&2
         return 1
     else
-        log_error "No running development environment was detected." >&2
-        log_info "Please spawn an environment first: make dev-spawn (or specify PORT=<port>)" >&2
+        if [ "$silent_if_none" != "true" ]; then
+            log_error "No running development environment was detected." >&2
+            log_info "Please spawn an environment first: make dev-spawn (or specify PORT=<port>)" >&2
+        fi
         return 2
     fi
 }
@@ -132,6 +135,7 @@ cmd_spawn_dev() {
         cat << 'EOF' > "$tmpdir/Dockerfile"
 FROM notas-web:latest
 WORKDIR /app
+RUN rm -rf /app/*
 COPY . /app/
 RUN SECRET_KEY=build-temp-key python manage.py collectstatic --noinput
 EOF
@@ -248,19 +252,32 @@ if not User.objects.filter(username='admin').exists():
 cmd_destroy_dev() {
     local target_port="$PORT"
     if [ -z "$target_port" ]; then
-        if ! target_port=$(resolve_dev_port ""); then
-            # If not running, check if there is exactly 1 stopped dev environment
+        local err_code=0
+        target_port=$(resolve_dev_port "" "true") || err_code=$?
+        if [ $err_code -eq 1 ]; then
+            exit 1
+        elif [ $err_code -eq 2 ]; then
+            local stopped_ports=()
             local all_ports
             mapfile -t all_ports < <(get_all_dev_ports)
-            local non_empty=()
             for p in "${all_ports[@]}"; do
-                if [ -n "$p" ]; then non_empty+=("$p"); fi
+                if [ -n "$p" ]; then stopped_ports+=("$p"); fi
             done
-            if [ ${#non_empty[@]} -eq 1 ]; then
-                target_port="${non_empty[0]}"
+
+            if [ ${#stopped_ports[@]} -eq 1 ]; then
+                target_port="${stopped_ports[0]}"
                 log_info "Auto-detected stopped dev environment on port ${target_port}."
-            else
+            elif [ ${#stopped_ports[@]} -gt 1 ]; then
+                log_error "Multiple stopped development environments exist:" >&2
+                for p in "${stopped_ports[@]}"; do
+                    echo -e "  - Port ${YELLOW}${p}${NC} (project: notas-dev-${p})" >&2
+                done
+                echo "" >&2
+                log_warn "Please specify which environment to destroy using PORT=<port> (e.g. PORT=8081)" >&2
                 exit 1
+            else
+                log_info "No active or stopped development environments found."
+                return 0
             fi
         fi
     fi
@@ -278,7 +295,33 @@ cmd_destroy_dev() {
 cmd_reset_dev() {
     local target_port="$PORT"
     if [ -z "$target_port" ]; then
-        target_port=$(resolve_dev_port "" 2>/dev/null || echo "8081")
+        local err_code=0
+        target_port=$(resolve_dev_port "" "true") || err_code=$?
+        if [ $err_code -eq 1 ]; then
+            exit 1
+        elif [ $err_code -eq 2 ]; then
+            local data_dirs=()
+            local found_dirs
+            mapfile -t found_dirs < <(find . -maxdepth 1 -type d -name "dev_data_*" 2>/dev/null | sed -E 's/.*dev_data_([0-9]+)/\1/' | sort -u)
+            for d in "${found_dirs[@]}"; do
+                if [ -n "$d" ]; then data_dirs+=("$d"); fi
+            done
+
+            if [ ${#data_dirs[@]} -eq 1 ]; then
+                target_port="${data_dirs[0]}"
+                log_info "Auto-detected dev data directory on port ${target_port}."
+            elif [ ${#data_dirs[@]} -gt 1 ]; then
+                log_error "Multiple dev data directories exist:" >&2
+                for d in "${data_dirs[@]}"; do
+                    echo -e "  - Port ${YELLOW}${d}${NC} (directory: ./dev_data_${d})" >&2
+                done
+                echo "" >&2
+                log_warn "Please specify which environment to reset using PORT=<port> (e.g. PORT=8081)" >&2
+                exit 1
+            else
+                target_port="8081"
+            fi
+        fi
     fi
 
     local project="notas-dev-${target_port}"
@@ -352,17 +395,27 @@ cmd_clone_prod_to_dev() {
         cp -a media/. "${data_dir}/media/" 2>/dev/null || true
     fi
 
-    # 5. Dev safety sanitization in dev container
+    # 5. Apply any pending migrations to ensure dev schema matches dev code
+    log_info "Applying pending migrations in ${dev_web_container}..."
+    docker exec "${dev_web_container}" python manage.py migrate --noinput
+
+    # 6. Dev safety sanitization in dev container and cache invalidation
     log_info "Applying dev safety sanitization in ${dev_web_container}..."
     docker exec "${dev_web_container}" python manage.py shell -c "
 from core.models import CompanySettings
+from django.core.cache import cache
 CompanySettings.objects.update(
     debug_mode=True,
     document_series='4242',
     auto_finalize_invoices=False
 )
+cache.clear()
 print('Dev safety sanitization applied: debug_mode=True, series=4242, auto_finalize_invoices=False')
 "
+
+    # 7. Restart dev web and Celery workers to reload connections and clear in-memory caches
+    log_info "Restarting dev services to refresh connections and caches..."
+    docker restart "${dev_web_container}" "${project}-celery-worker-1" "${project}-celery-beat-1"
 
     log_success "Production clone to dev (port ${target_port}) completed successfully!"
 }
