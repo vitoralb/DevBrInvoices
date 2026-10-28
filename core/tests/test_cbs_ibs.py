@@ -440,7 +440,7 @@ class CbsIbsDpsGenerationAndXsdTests(TestCase):
             "nfse",
             "nacional",
             "xsd",
-            "esquemas-nfse-rtc-v1-01-20260727",
+            "esquemas_prod_restrita_20261020",
             "DPS_v1.01.xsd",
         )
         self.assertTrue(os.path.exists(xsd_path), f"XSD schema file not found at {xsd_path}")

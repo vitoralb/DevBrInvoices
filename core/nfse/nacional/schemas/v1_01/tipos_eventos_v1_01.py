@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 from enum import Enum
 
@@ -30,7 +28,9 @@ class Te101103XDesc(Enum):
 
 
 class Te105102XDesc(Enum):
-    CANCELAMENTO_DE_NFS_E_POR_SUBSTITUI_O = "Cancelamento de NFS-e por Substituição"
+    CANCELAMENTO_DE_NFS_E_POR_SUBSTITUI_O = (
+        "Cancelamento de NFS-e por Substituição"
+    )
 
 
 class Te105104XDesc(Enum):
@@ -108,6 +108,9 @@ class Te305103XDesc(Enum):
 @dataclass(kw_only=True)
 class Te101101:
     """
+
+    "
+
     :ivar x_desc: Descrição do Evento: Descrição do evento:
         "Cancelamento de NFS-e".
     :ivar c_motivo: Código de justificativa de cancelamento: 1 - Erro na
@@ -124,6 +127,7 @@ class Te101101:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -132,6 +136,7 @@ class Te101101:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: str = field(
@@ -139,6 +144,7 @@ class Te101101:
             "name": "xMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 15,
             "max_length": 255,
             "white_space": "preserve",
@@ -150,6 +156,9 @@ class Te101101:
 @dataclass(kw_only=True)
 class Te101103:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Solicitação de Análise Fiscal
         para Cancelamento de NFS-e"
     :ivar c_motivo: Código do motivo da solicitação de análise fiscal
@@ -167,6 +176,7 @@ class Te101103:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -175,6 +185,7 @@ class Te101103:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: str = field(
@@ -182,6 +193,7 @@ class Te101103:
             "name": "xMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 15,
             "max_length": 255,
             "white_space": "preserve",
@@ -193,6 +205,9 @@ class Te101103:
 @dataclass(kw_only=True)
 class Te105102:
     """
+
+    "
+
     :ivar x_desc: Descrição do Evento: Descrição do evento:
         "Cancelamento de NFS-e por Substituição".
     :ivar c_motivo: Código de justificativa de cancelamento
@@ -216,6 +231,7 @@ class Te105102:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -224,6 +240,7 @@ class Te105102:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: None | str = field(
@@ -243,9 +260,10 @@ class Te105102:
             "name": "chSubstituta",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 50,
             "white_space": "preserve",
-            "pattern": r"[0-9]{50}",
+            "pattern": r"[0-9]{6}([0-9A-Z]{14})[0-9]{30}",
         }
     )
 
@@ -253,6 +271,9 @@ class Te105102:
 @dataclass(kw_only=True)
 class Te105104:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Cancelamento de NFS-e Deferido
         por Análise Fiscal"
     :ivar cpfag_trib: CPF do agente da administração tributária
@@ -275,6 +296,7 @@ class Te105104:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -283,6 +305,7 @@ class Te105104:
             "name": "CPFAgTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 11,
             "white_space": "preserve",
             "pattern": r"[0-9]{11}",
@@ -305,6 +328,7 @@ class Te105104:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: str = field(
@@ -312,6 +336,7 @@ class Te105104:
             "name": "xMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 15,
             "max_length": 255,
             "white_space": "preserve",
@@ -323,6 +348,9 @@ class Te105104:
 @dataclass(kw_only=True)
 class Te105105:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Cancelamento de NFS-e Indeferido
         por Análise Fiscal".
     :ivar cpfag_trib: CPF do agente da administração tributária
@@ -346,6 +374,7 @@ class Te105105:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -354,6 +383,7 @@ class Te105105:
             "name": "CPFAgTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 11,
             "white_space": "preserve",
             "pattern": r"[0-9]{11}",
@@ -376,6 +406,7 @@ class Te105105:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: str = field(
@@ -383,6 +414,7 @@ class Te105105:
             "name": "xMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 15,
             "max_length": 255,
             "white_space": "preserve",
@@ -394,6 +426,9 @@ class Te105105:
 @dataclass(kw_only=True)
 class Te202201:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Manifestação de NFS-e -
         Confirmação do Prestador".
     """
@@ -406,6 +441,7 @@ class Te202201:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -414,6 +450,9 @@ class Te202201:
 @dataclass(kw_only=True)
 class Te202205:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Manifestação de NFS-e - Rejeição
         do Prestador".
     :ivar c_motivo: Motivo da Rejeição da NFS-e: 1 - NFS-e em
@@ -434,6 +473,7 @@ class Te202205:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -442,6 +482,7 @@ class Te202205:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: None | str = field(
@@ -461,6 +502,9 @@ class Te202205:
 @dataclass(kw_only=True)
 class Te203202:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Manifestação de NFS-e -
         Confirmação do Tomador".
     """
@@ -473,6 +517,7 @@ class Te203202:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -481,6 +526,9 @@ class Te203202:
 @dataclass(kw_only=True)
 class Te203206:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Manifestação de NFS-e - Rejeição
         do Tomador".
     :ivar c_motivo: Motivo da Rejeição da NFS-e: 1 - NFS-e em
@@ -501,6 +549,7 @@ class Te203206:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -509,6 +558,7 @@ class Te203206:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: None | str = field(
@@ -528,6 +578,9 @@ class Te203206:
 @dataclass(kw_only=True)
 class Te204203:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Manifestação de NFS-e -
         Confirmação do Intermediário".
     """
@@ -540,6 +593,7 @@ class Te204203:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -548,6 +602,9 @@ class Te204203:
 @dataclass(kw_only=True)
 class Te204207:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Manifestação de NFS-e - Rejeição
         do Intermediário".
     :ivar c_motivo: Motivo da Rejeição da NFS-e: 1 - NFS-e em
@@ -568,6 +625,7 @@ class Te204207:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -576,6 +634,7 @@ class Te204207:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: None | str = field(
@@ -595,6 +654,9 @@ class Te204207:
 @dataclass(kw_only=True)
 class Te205204:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Manifestação de NFS-e -
         Confirmação Tácita".
     """
@@ -607,6 +669,7 @@ class Te205204:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -615,6 +678,9 @@ class Te205204:
 @dataclass(kw_only=True)
 class Te205208:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Manifestação de NFS-e - Anulação
         da Rejeição".
     :ivar cpfag_trib: CPF do agente da administração tributária
@@ -634,6 +700,7 @@ class Te205208:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -642,6 +709,7 @@ class Te205208:
             "name": "CPFAgTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 11,
             "white_space": "preserve",
             "pattern": r"[0-9]{11}",
@@ -652,8 +720,9 @@ class Te205208:
             "name": "idEvManifRej",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
-            "pattern": r"[0-9]{59}",
+            "pattern": r"[0-9]{8}(1[0-9]{14}|2[0-9A-Z]{14})[0-9]{33}",
         }
     )
     x_motivo: str = field(
@@ -661,6 +730,7 @@ class Te205208:
             "name": "xMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 15,
             "max_length": 255,
             "white_space": "preserve",
@@ -672,6 +742,9 @@ class Te205208:
 @dataclass(kw_only=True)
 class Te305101:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Cancelamento de NFS-e por
         Ofício"
     :ivar cpfag_trib: CPF do agente da administração tributária
@@ -690,6 +763,7 @@ class Te305101:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -698,6 +772,7 @@ class Te305101:
             "name": "CPFAgTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 11,
             "white_space": "preserve",
             "pattern": r"[0-9]{11}",
@@ -708,6 +783,7 @@ class Te305101:
             "name": "nProcAdm",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 30,
             "white_space": "preserve",
@@ -719,6 +795,7 @@ class Te305101:
             "name": "xProcAdm",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 15,
             "max_length": 255,
             "white_space": "preserve",
@@ -730,6 +807,9 @@ class Te305101:
 @dataclass(kw_only=True)
 class Te305102:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Bloqueio de NFS-e por Ofício".
     :ivar cpfag_trib: CPF do agente da administração tributária
         municipal que efetuou o bloqueio de NFS-e por ofício
@@ -752,6 +832,7 @@ class Te305102:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -760,6 +841,7 @@ class Te305102:
             "name": "CPFAgTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 11,
             "white_space": "preserve",
             "pattern": r"[0-9]{11}",
@@ -770,6 +852,7 @@ class Te305102:
             "name": "codEvento",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: str = field(
@@ -777,6 +860,7 @@ class Te305102:
             "name": "xMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 15,
             "max_length": 255,
             "white_space": "preserve",
@@ -788,6 +872,9 @@ class Te305102:
 @dataclass(kw_only=True)
 class Te305103:
     """
+
+    "
+
     :ivar x_desc: Descrição do evento: "Desbloqueio de NFS-e por
         Ofício".
     :ivar cpfag_trib: CPF do agente da administração tributária
@@ -804,6 +891,7 @@ class Te305103:
             "name": "xDesc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
         }
     )
@@ -812,6 +900,7 @@ class Te305103:
             "name": "CPFAgTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 11,
             "white_space": "preserve",
             "pattern": r"[0-9]{11}",
@@ -822,8 +911,9 @@ class Te305103:
             "name": "idBloqOfic",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
-            "pattern": r"[0-9]{59}",
+            "pattern": r"[0-9]{8}(1[0-9]{14}|2[0-9A-Z]{14})[0-9]{33}",
         }
     )
 
@@ -831,6 +921,9 @@ class Te305103:
 @dataclass(kw_only=True)
 class TcinfPedReg:
     """
+
+    "
+
     :ivar tp_amb: Tipo de ambiente: 1 - Produção; 2 - Homologação;
     :ivar ver_aplic: Versão do aplicativo que gerou o pedido de registro
         de evento
@@ -875,6 +968,7 @@ class TcinfPedReg:
             "name": "tpAmb",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     ver_aplic: str = field(
@@ -882,6 +976,7 @@ class TcinfPedReg:
             "name": "verAplic",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 20,
             "white_space": "preserve",
@@ -893,8 +988,9 @@ class TcinfPedReg:
             "name": "dhEvento",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
-            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([\-,\+](0[0-9]|10|11):00|([\+](12):00))",
+            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[13-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([-+](0[0-9]|10|11):00|([\+](12):00))",
         }
     )
     cnpjautor: None | str = field(
@@ -905,7 +1001,7 @@ class TcinfPedReg:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "max_length": 14,
             "white_space": "preserve",
-            "pattern": r"[0-9]{14}",
+            "pattern": r"[0-9A-Z]{14}",
         },
     )
     cpfautor: None | str = field(
@@ -924,9 +1020,10 @@ class TcinfPedReg:
             "name": "chNFSe",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 50,
             "white_space": "preserve",
-            "pattern": r"[0-9]{50}",
+            "pattern": r"[0-9]{6}([0-9A-Z]{14})[0-9]{30}",
         }
     )
     e101101: None | Te101101 = field(
@@ -1045,9 +1142,10 @@ class TcinfPedReg:
         metadata={
             "name": "Id",
             "type": "Attribute",
+            "required": True,
             "max_length": 59,
             "white_space": "preserve",
-            "pattern": r"PRE[0-9]{56}",
+            "pattern": r"PRE[0-9]{8}(1[0-9]{14}|2[0-9A-Z]{14})[0-9]{33}",
         }
     )
 
@@ -1062,6 +1160,7 @@ class TcpedRegEvt:
             "name": "infPedReg",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     signature: None | Signature = field(
@@ -1075,6 +1174,7 @@ class TcpedRegEvt:
     versao: str = field(
         metadata={
             "type": "Attribute",
+            "required": True,
             "max_length": 4,
             "white_space": "preserve",
             "pattern": r"1\.00|1\.01",
@@ -1085,6 +1185,9 @@ class TcpedRegEvt:
 @dataclass(kw_only=True)
 class TcinfEvento:
     """
+
+    "
+
     :ivar ver_aplic: Versão do aplicativo que gerou o evento
     :ivar amb_ger: Ambiente gerador do evento: 1 - Sistema próprio do
         município; 2 - Sefin Nacional NFS-e; 3 - ADN NFS-e;
@@ -1110,6 +1213,7 @@ class TcinfEvento:
             "name": "verAplic",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 20,
             "white_space": "preserve",
@@ -1121,6 +1225,7 @@ class TcinfEvento:
             "name": "ambGer",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     n_seq_evento: str = field(
@@ -1128,6 +1233,7 @@ class TcinfEvento:
             "name": "nSeqEvento",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 3,
             "white_space": "preserve",
             "pattern": r"[0-9]{1}[0-9]{0,2}",
@@ -1138,8 +1244,9 @@ class TcinfEvento:
             "name": "dhProc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
-            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([\-,\+](0[0-9]|10|11):00|([\+](12):00))",
+            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[13-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([-+](0[0-9]|10|11):00|([\+](12):00))",
         }
     )
     n_dfse: str = field(
@@ -1147,6 +1254,7 @@ class TcinfEvento:
             "name": "nDFSe",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{1,13}",
         }
@@ -1156,15 +1264,17 @@ class TcinfEvento:
             "name": "pedRegEvento",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     id: str = field(
         metadata={
             "name": "Id",
             "type": "Attribute",
+            "required": True,
             "max_length": 62,
             "white_space": "preserve",
-            "pattern": r"EVT[0-9]{59}",
+            "pattern": r"EVT[0-9]{8}(1[0-9]{14}|2[0-9A-Z]{14})[0-9]{36}",
         }
     )
 
@@ -1179,6 +1289,7 @@ class Tcevento:
             "name": "infEvento",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     signature: Signature = field(
@@ -1186,11 +1297,13 @@ class Tcevento:
             "name": "Signature",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     versao: str = field(
         metadata={
             "type": "Attribute",
+            "required": True,
             "max_length": 4,
             "white_space": "preserve",
             "pattern": r"1\.00|1\.01",

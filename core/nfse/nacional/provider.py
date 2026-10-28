@@ -49,6 +49,7 @@ from .schemas.v1_01.tipos_complexos_v1_01 import (
     TcvservPrest,
     TcrtcinfoIbscbs,
     TcrtcinfoValoresIbscbs,
+    TcrtcinfoTribIbscbs,
     TcrtcinfoTributosIbscbs,
     TcrtcinfoTributosSitClas,
 )
@@ -488,7 +489,7 @@ class NacionalProvider(NFSeProvider):
                 c_ind_op=c_ind_op_val,
                 ind_dest=TsrtcindDest.VALUE_0,  # 0 = Próprio tomador
                 valores=TcrtcinfoValoresIbscbs(
-                    trib=TcrtcinfoTributosIbscbs(
+                    trib=TcrtcinfoTribIbscbs(
                         cst=cst,
                         c_class_trib=c_class_trib,
                     )

@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 
 from core.nfse.nacional.schemas.v1_01.tipos_simples_v1_01 import (
@@ -14,6 +12,9 @@ __NAMESPACE__ = "http://www.sped.fazenda.gov.br/nfse"
 @dataclass(kw_only=True)
 class TcenderContribuinteCnc:
     """
+
+    "
+
     :ivar cep: Código de endereçamento postal do estabelecimento do
         contribuinte
     :ivar nro: Número do estabelecimento no logradouro informado
@@ -29,6 +30,7 @@ class TcenderContribuinteCnc:
             "name": "CEP",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{8}",
         }
@@ -37,6 +39,7 @@ class TcenderContribuinteCnc:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -61,6 +64,7 @@ class TcenderContribuinteCnc:
 class TcinfoContribuinteCnc:
     """
     Informações para cadastramento de novos contribuintes CNC.
+    "
 
     :ivar cnpj: Número do CNPJ
     :ivar cpf: Número do CPF
@@ -98,7 +102,7 @@ class TcinfoContribuinteCnc:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "max_length": 14,
             "white_space": "preserve",
-            "pattern": r"[0-9]{14}",
+            "pattern": r"[0-9A-Z]{14}",
         },
     )
     cpf: None | str = field(
@@ -128,6 +132,7 @@ class TcinfoContribuinteCnc:
             "name": "dInscricaoMunicipal",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
         }
@@ -137,6 +142,7 @@ class TcinfoContribuinteCnc:
             "name": "enderContribuinteCNC",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     fone: None | str = field(
@@ -164,6 +170,7 @@ class TcinfoContribuinteCnc:
             "name": "regEspTribContribuinteCNC",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     situacao_cadastro_contribuinte: None | str = field(
@@ -194,6 +201,7 @@ class TcinfoContribuinteCnc:
             "name": "situacaoEmissaoNFSE",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
@@ -201,6 +209,9 @@ class TcinfoContribuinteCnc:
 @dataclass(kw_only=True)
 class TcinfCnc:
     """
+
+    "
+
     :ivar tp_amb: Identificação do Ambiente: 1 - Produção; 2 -
         Homologação
     :ivar dh_geracao_arquivo: Data e hora da geração do arquivo CNC.
@@ -219,6 +230,7 @@ class TcinfCnc:
             "name": "tpAmb",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     dh_geracao_arquivo: str = field(
@@ -226,8 +238,9 @@ class TcinfCnc:
             "name": "dhGeracaoArquivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
-            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([\-,\+](0[0-9]|10|11):00|([\+](12):00))",
+            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[13-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([-+](0[0-9]|10|11):00|([\+](12):00))",
         }
     )
     ver_aplic: str = field(
@@ -235,23 +248,28 @@ class TcinfCnc:
             "name": "verAplic",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 20,
             "white_space": "preserve",
             "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
         }
     )
-    contribuintes_cnc: TcinfCnc.ContribuintesCnc = field(
+    contribuintes_cnc: "TcinfCnc.ContribuintesCnc" = field(
         metadata={
             "name": "contribuintesCnc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
     @dataclass(kw_only=True)
     class ContribuintesCnc:
         """
+
+        "
+
         :ivar contribuinte_cnc: Grupo de informações cadastramento de
             novos contribuintes CNC
         """
@@ -277,11 +295,13 @@ class Tcnc:
             "name": "infCNC",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     versao: str = field(
         metadata={
             "type": "Attribute",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"1\.00",
         }

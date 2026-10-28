@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
 
 __NAMESPACE__ = "http://www.w3.org/2000/09/xmldsig#"
@@ -11,6 +9,7 @@ class CanonicalizationMethodType:
         metadata={
             "name": "Algorithm",
             "type": "Attribute",
+            "required": True,
         }
     )
     content: list[object] = field(
@@ -60,6 +59,7 @@ class DsakeyValueType:
             "name": "Y",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
             "format": "base64",
         }
     )
@@ -98,6 +98,7 @@ class DigestMethodType:
         metadata={
             "name": "Algorithm",
             "type": "Attribute",
+            "required": True,
         }
     )
     content: list[object] = field(
@@ -116,10 +117,10 @@ class DigestValue:
         namespace = "http://www.w3.org/2000/09/xmldsig#"
 
     value: bytes = field(
-        default=b"",
         metadata={
+            "required": True,
             "format": "base64",
-        },
+        }
     )
 
 
@@ -128,7 +129,12 @@ class KeyName:
     class Meta:
         namespace = "http://www.w3.org/2000/09/xmldsig#"
 
-    value: str = field(default="")
+    value: str = field(
+        default="",
+        metadata={
+            "required": True,
+        },
+    )
 
 
 @dataclass(kw_only=True)
@@ -136,7 +142,12 @@ class MgmtData:
     class Meta:
         namespace = "http://www.w3.org/2000/09/xmldsig#"
 
-    value: str = field(default="")
+    value: str = field(
+        default="",
+        metadata={
+            "required": True,
+        },
+    )
 
 
 @dataclass(kw_only=True)
@@ -177,14 +188,14 @@ class PgpdataType:
     class Meta:
         name = "PGPDataType"
 
-    pgpkey_id: None | bytes = field(
-        default=None,
+    pgpkey_id: bytes = field(
         metadata={
             "name": "PGPKeyID",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
             "format": "base64",
-        },
+        }
     )
     pgpkey_packet: list[bytes] = field(
         default_factory=list,
@@ -215,6 +226,7 @@ class RsakeyValueType:
             "name": "Modulus",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
             "format": "base64",
         }
     )
@@ -223,6 +235,7 @@ class RsakeyValueType:
             "name": "Exponent",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
             "format": "base64",
         }
     )
@@ -260,6 +273,7 @@ class SignatureMethodType:
         metadata={
             "name": "Algorithm",
             "type": "Attribute",
+            "required": True,
         }
     )
     content: list[object] = field(
@@ -285,6 +299,7 @@ class SignaturePropertyType:
         metadata={
             "name": "Target",
             "type": "Attribute",
+            "required": True,
         }
     )
     id: None | str = field(
@@ -307,10 +322,10 @@ class SignaturePropertyType:
 @dataclass(kw_only=True)
 class SignatureValueType:
     value: bytes = field(
-        default=b"",
         metadata={
+            "required": True,
             "format": "base64",
-        },
+        }
     )
     id: None | str = field(
         default=None,
@@ -327,6 +342,7 @@ class TransformType:
         metadata={
             "name": "Algorithm",
             "type": "Attribute",
+            "required": True,
         }
     )
     content: list[object] = field(
@@ -353,6 +369,7 @@ class X509IssuerSerialType:
             "name": "X509IssuerName",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     x509_serial_number: int = field(
@@ -360,6 +377,7 @@ class X509IssuerSerialType:
             "name": "X509SerialNumber",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
 
@@ -590,6 +608,7 @@ class ReferenceType:
             "name": "DigestMethod",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     digest_value: DigestValue = field(
@@ -597,6 +616,7 @@ class ReferenceType:
             "name": "DigestValue",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     id: None | str = field(
@@ -743,6 +763,7 @@ class SignedInfoType:
             "name": "CanonicalizationMethod",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     signature_method: SignatureMethod = field(
@@ -750,6 +771,7 @@ class SignedInfoType:
             "name": "SignatureMethod",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     reference: list[Reference] = field(
@@ -795,6 +817,7 @@ class SignatureType:
             "name": "SignedInfo",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     signature_value: SignatureValue = field(
@@ -802,6 +825,7 @@ class SignatureType:
             "name": "SignatureValue",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     key_info: None | KeyInfo = field(

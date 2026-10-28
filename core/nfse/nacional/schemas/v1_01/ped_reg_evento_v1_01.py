@@ -1,5 +1,3 @@
-from __future__ import annotations
-
 from dataclasses import dataclass
 
 from core.nfse.nacional.schemas.v1_01.tipos_eventos_v1_01 import TcpedRegEvt

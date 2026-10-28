@@ -1,17 +1,13 @@
-from __future__ import annotations
-
 from dataclasses import dataclass, field
-
-from xsdata.models.datatype import XmlDate
 
 from core.nfse.nacional.schemas.v1_01.tipos_simples_v1_01 import (
     Tbmissqn,
+    TsajusteBclocImoveis,
     TsambGeradorNfse,
     TscodJustSubst,
     TscodNaoNif,
     TsemitenteDps,
     TsenvMdic,
-    TsideDedRed,
     TsmecAfcomExPrest,
     TsmecAfcomExToma,
     TsmodoPrestacao,
@@ -26,9 +22,9 @@ from core.nfse.nacional.schemas.v1_01.tipos_simples_v1_01 import (
     TsrtcindDest,
     TsrtcindFinal,
     TsrtctipoChaveDfe,
+    TsrtctpAjusteBc,
     TsrtctpEnteGov,
     TsrtctpOper,
-    TsrtctpReeRepRes,
     Tstat,
     TstipoAmbiente,
     TstipoCst,
@@ -49,6 +45,9 @@ __NAMESPACE__ = "http://www.sped.fazenda.gov.br/nfse"
 @dataclass(kw_only=True)
 class TcbeneficioMunicipal:
     """
+
+    "
+
     :ivar n_bm: Identificador do benefício parametrizado pelo município.
         Trata-se de um identificador único que foi gerado pelo Sistema
         Nacional no momento em que o município de incidência do ISSQN
@@ -77,6 +76,7 @@ class TcbeneficioMunicipal:
             "name": "nBM",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "pattern": r"[0-9]{14}",
         }
     )
@@ -105,16 +105,19 @@ class TcbeneficioMunicipal:
 @dataclass(kw_only=True)
 class Tccserv:
     """
+
+    "
+
     :ivar c_trib_nac: Código de tributação nacional do ISSQN, nos termos
         da LC 116/2003, conforme aba MUN.INCID_INFO.SERV. do ANEXO I
         Regra de formação - 6 dígitos numéricos sendo: 2 para Item (LC
         116/2003), 2 para Subitem (LC 116/2003) e 2 para Desdobro
         Nacional
     :ivar c_trib_mun: Código de tributação municipal do ISSQN
-    :ivar x_desc_serv: Descrição completa do serviço prestado
     :ivar c_nbs: Código NBS correspondente ao serviço prestado, seguindo
         a versão 2.0, conforme Anexo B
     :ivar c_int_contrib: Código interno do contribuinte
+    :ivar x_desc_serv: Descrição completa do serviço prestado
     """
 
     class Meta:
@@ -125,6 +128,7 @@ class Tccserv:
             "name": "cTribNac",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{6}",
         }
@@ -138,17 +142,6 @@ class Tccserv:
             "white_space": "preserve",
             "pattern": r"[0-9]{3}",
         },
-    )
-    x_desc_serv: str = field(
-        metadata={
-            "name": "xDescServ",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "min_length": 1,
-            "max_length": 2000,
-            "white_space": "preserve",
-            "pattern": r"[\s\S!-ÿ]{1}[\s\S -ÿ]{0,}[\s\S!-ÿ]{1}|[\s\S!-ÿ]{1}",
-        }
     )
     c_nbs: None | str = field(
         default=None,
@@ -172,11 +165,26 @@ class Tccserv:
             "pattern": r"[a-zA-Z0-9]{1,20}",
         },
     )
+    x_desc_serv: str = field(
+        metadata={
+            "name": "xDescServ",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "min_length": 1,
+            "max_length": 2000,
+            "white_space": "preserve",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
+        }
+    )
 
 
 @dataclass(kw_only=True)
 class TcdocNfnfs:
     """
+
+    "
+
     :ivar n_nfs: Número da Nota Fiscal NF ou NFS
     :ivar mod_nfs: Modelo da Nota Fiscal NF ou NFS
     :ivar serie_nfs: Série Nota Fiscal NF ou NFS
@@ -190,6 +198,7 @@ class TcdocNfnfs:
             "name": "nNFS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 7,
             "white_space": "preserve",
             "pattern": r"[0-9]{7}",
@@ -200,6 +209,7 @@ class TcdocNfnfs:
             "name": "modNFS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 15,
             "white_space": "preserve",
             "pattern": r"[0-9]{15}",
@@ -210,6 +220,7 @@ class TcdocNfnfs:
             "name": "serieNFS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 15,
             "white_space": "preserve",
@@ -221,6 +232,9 @@ class TcdocNfnfs:
 @dataclass(kw_only=True)
 class TcdocOutNfse:
     """
+
+    "
+
     :ivar c_mun_nfse_mun: Código Município emissor da nota eletrônica
         municipal (Tabela do IBGE)
     :ivar n_nfse_mun: Número da nota eletrônica municipal
@@ -236,6 +250,7 @@ class TcdocOutNfse:
             "name": "cMunNFSeMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{7}",
         }
@@ -245,6 +260,7 @@ class TcdocOutNfse:
             "name": "nNFSeMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 15,
             "white_space": "preserve",
             "pattern": r"[0-9]{15}",
@@ -255,6 +271,7 @@ class TcdocOutNfse:
             "name": "cVerifNFSeMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 9,
             "white_space": "preserve",
@@ -266,6 +283,9 @@ class TcdocOutNfse:
 @dataclass(kw_only=True)
 class TcenderExt:
     """
+
+    "
+
     :ivar c_pais: Código do país (Tabela de Países ISO)
     :ivar c_end_post: Código alfanumérico do Endereçamento Postal no
         exterior do prestador do serviço.
@@ -282,6 +302,7 @@ class TcenderExt:
             "name": "cPais",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[A-Z]{2}",
         }
@@ -291,6 +312,7 @@ class TcenderExt:
             "name": "cEndPost",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 11,
             "white_space": "preserve",
@@ -301,6 +323,7 @@ class TcenderExt:
             "name": "xCidade",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -311,6 +334,7 @@ class TcenderExt:
             "name": "xEstProvReg",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -321,6 +345,9 @@ class TcenderExt:
 @dataclass(kw_only=True)
 class TcenderExtSimples:
     """
+
+    "
+
     :ivar c_end_post: Código alfanumérico do Endereçamento Postal no
         exterior do prestador do serviço.
     :ivar x_cidade: Nome da cidade no exterior do prestador do serviço.
@@ -336,6 +363,7 @@ class TcenderExtSimples:
             "name": "cEndPost",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 11,
             "white_space": "preserve",
@@ -346,6 +374,7 @@ class TcenderExtSimples:
             "name": "xCidade",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -356,6 +385,7 @@ class TcenderExtSimples:
             "name": "xEstProvReg",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -364,8 +394,87 @@ class TcenderExtSimples:
 
 
 @dataclass(kw_only=True)
+class TcenderImovel:
+    """
+
+    "
+
+    :ivar cep: Código numérico do Endereçamento Postal nacional (CEP) do
+        endereço do imóvel.
+    :ivar x_lgr: Tipo e nome do logradouro do endereço do imóvel.
+    :ivar nro: Número no logradouro do endereço do imóvel.
+    :ivar x_cpl: Complemento do endereço do imóvel.
+    :ivar x_bairro: Bairro do endereço do imóvel.
+    """
+
+    class Meta:
+        name = "TCEnderImovel"
+
+    cep: str = field(
+        metadata={
+            "name": "CEP",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"[0-9]{8}",
+        }
+    )
+    x_lgr: str = field(
+        metadata={
+            "name": "xLgr",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "min_length": 1,
+            "max_length": 255,
+            "white_space": "preserve",
+            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+        }
+    )
+    nro: str = field(
+        metadata={
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "min_length": 1,
+            "max_length": 60,
+            "white_space": "preserve",
+            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+        }
+    )
+    x_cpl: None | str = field(
+        default=None,
+        metadata={
+            "name": "xCpl",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "min_length": 1,
+            "max_length": 156,
+            "white_space": "preserve",
+            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+        },
+    )
+    x_bairro: None | str = field(
+        default=None,
+        metadata={
+            "name": "xBairro",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "min_length": 1,
+            "max_length": 60,
+            "white_space": "preserve",
+            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+        },
+    )
+
+
+@dataclass(kw_only=True)
 class TcenderNac:
     """
+
+    "
+
     :ivar c_mun: Código do município, conforme Tabela do IBGE
     :ivar cep: Número do CEP
     """
@@ -378,6 +487,7 @@ class TcenderNac:
             "name": "cMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{7}",
         }
@@ -387,6 +497,7 @@ class TcenderNac:
             "name": "CEP",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{8}",
         }
@@ -396,6 +507,9 @@ class TcenderNac:
 @dataclass(kw_only=True)
 class TcinfoItemPed:
     """
+
+    "
+
     :ivar x_item_ped: Número do item do  pedido/ordem de compra/ordem de
         serviço/projeto - Identificação do número do item do pedido ou
         ordem de compra destacado e xPed
@@ -423,6 +537,9 @@ class TcinfoItemPed:
 @dataclass(kw_only=True)
 class TcinfoRefNfse:
     """
+
+    "
+
     :ivar ref_nfse: Chave da NFS-e referenciada
     """
 
@@ -439,7 +556,7 @@ class TcinfoRefNfse:
             "max_occurs": 99,
             "max_length": 50,
             "white_space": "preserve",
-            "pattern": r"[0-9]{50}",
+            "pattern": r"[0-9]{6}([0-9A-Z]{14})[0-9]{30}",
         },
     )
 
@@ -447,6 +564,9 @@ class TcinfoRefNfse:
 @dataclass(kw_only=True)
 class TclocPrest:
     """
+
+    "
+
     :ivar c_loc_prestacao: Código do município onde o serviço foi
         prestado (tabela do IBGE)
     :ivar c_pais_prestacao: Código do país onde o serviço foi prestado
@@ -479,8 +599,62 @@ class TclocPrest:
 
 
 @dataclass(kw_only=True)
+class TcrtcinfoBensMoveis:
+    """
+
+    "
+
+    :ivar c_ncmbem_movel: Código da Nomenclatura Comum do Mercosul (NCM)
+        do bem móvel objeto da locação.
+    :ivar x_ncmbem_movel: Descrição do Bem Móvel objeto da locação.
+    :ivar qtd_ncmbem_movel: Quantidade do Bem Móvel objeto da locação.
+    """
+
+    class Meta:
+        name = "TCRTCInfoBensMoveis"
+
+    c_ncmbem_movel: str = field(
+        metadata={
+            "name": "cNCMBemMovel",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "max_length": 8,
+            "white_space": "preserve",
+            "pattern": r"[0-9]{8}",
+        }
+    )
+    x_ncmbem_movel: str = field(
+        metadata={
+            "name": "xNCMBemMovel",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "min_length": 1,
+            "max_length": 150,
+            "white_space": "preserve",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
+        }
+    )
+    qtd_ncmbem_movel: str = field(
+        metadata={
+            "name": "qtdNCMBemMovel",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "max_length": 3,
+            "white_space": "preserve",
+            "pattern": r"[0-9]{1}[0-9]{0,2}",
+        }
+    )
+
+
+@dataclass(kw_only=True)
 class TcrtcinfoTributosDif:
     """
+
+    "
+
     :ivar p_dif_uf: Percentual de diferimento para o IBS estadual
     :ivar p_dif_mun: Percentual de diferimento para o IBS municipal
     :ivar p_dif_cbs: Percentual de diferimento para a CBS
@@ -494,6 +668,7 @@ class TcrtcinfoTributosDif:
             "name": "pDifUF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
         }
@@ -503,6 +678,7 @@ class TcrtcinfoTributosDif:
             "name": "pDifMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
         }
@@ -512,6 +688,7 @@ class TcrtcinfoTributosDif:
             "name": "pDifCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
         }
@@ -521,6 +698,9 @@ class TcrtcinfoTributosDif:
 @dataclass(kw_only=True)
 class TcrtcinfoTributosTribRegular:
     """
+
+    "
+
     :ivar cstreg: Código de Situação Tributária do IBS e da CBS de
         tributação regular
     :ivar c_class_trib_reg: Código da Classificação Tributária do IBS e
@@ -535,6 +715,7 @@ class TcrtcinfoTributosTribRegular:
             "name": "CSTReg",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{3}",
         }
@@ -544,6 +725,7 @@ class TcrtcinfoTributosTribRegular:
             "name": "cClassTribReg",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{6}",
         }
@@ -553,6 +735,9 @@ class TcrtcinfoTributosTribRegular:
 @dataclass(kw_only=True)
 class TcrtclistaDocFiscalOutro:
     """
+
+    "
+
     :ivar c_mun_doc_fiscal: Código do município emissor do documento
         fiscal que não se encontra no repositório nacional
     :ivar n_doc_fiscal: Número do documento fiscal que não se encontra
@@ -568,6 +753,7 @@ class TcrtclistaDocFiscalOutro:
             "name": "cMunDocFiscal",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 7,
             "white_space": "preserve",
             "pattern": r"[0-9]{7}",
@@ -578,10 +764,11 @@ class TcrtclistaDocFiscalOutro:
             "name": "nDocFiscal",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
     x_doc_fiscal: str = field(
@@ -589,10 +776,11 @@ class TcrtclistaDocFiscalOutro:
             "name": "xDocFiscal",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
 
@@ -600,6 +788,9 @@ class TcrtclistaDocFiscalOutro:
 @dataclass(kw_only=True)
 class TcrtclistaDocOutro:
     """
+
+    "
+
     :ivar n_doc: Número do documento não fiscal
     :ivar x_doc: Descrição do documento não fiscal
     """
@@ -612,10 +803,11 @@ class TcrtclistaDocOutro:
             "name": "nDoc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
     x_doc: str = field(
@@ -623,17 +815,102 @@ class TcrtclistaDocOutro:
             "name": "xDoc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
+    )
+
+
+@dataclass(kw_only=True)
+class TcrtclocacaoImovel:
+    """
+
+    "
+
+    :ivar p_copropriedade: Percentual de Copropriedade (Caso só haja um
+        locador, cedente ou arrendador, informar o Percentual de
+        Copropriedade de 100%)
+    :ivar v_tot_oper: Valor total da operação com bem imóvel (Informar o
+        valor total da operação de locação, cessão onerosa ou
+        arrendamento de bens imóveis, associado ao aluguel, renda ou
+        equivalente, conforme art. 255 da LC 214/2025). Não deverá ser
+        inserido neste campo o valor proporcional do coproprietário.
+    :ivar v_desc_incond_tot: Valor total do Desconto Incondicionado
+        (Informar o valor total do desconto incondicionado na operação
+        de locação, cessão onerosa ou arrendamento de bens imóveis)
+    :ivar v_desc_cond_tot: Valor total do Desconto Condicionado
+        (Informar o valor total do desconto incondicionado na operação
+        de locação, cessão onerosa ou arrendamento de bens imóveis)
+    :ivar d_venc_orig: Data de vencimento original Ano, Mês e Dia (AAAA-
+        MM-DD) (Informar data de vencimento original do aluguel, renda
+        ou equivalente na operação de locação, cessão onerosa ou
+        arrendamento de bens imóveis)
+    """
+
+    class Meta:
+        name = "TCRTCLocacaoImovel"
+
+    p_copropriedade: str = field(
+        metadata={
+            "name": "pCopropriedade",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
+        }
+    )
+    v_tot_oper: str = field(
+        metadata={
+            "name": "vTotOper",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
+        }
+    )
+    v_desc_incond_tot: None | str = field(
+        default=None,
+        metadata={
+            "name": "vDescIncondTot",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
+        },
+    )
+    v_desc_cond_tot: None | str = field(
+        default=None,
+        metadata={
+            "name": "vDescCondTot",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
+        },
+    )
+    d_venc_orig: None | str = field(
+        default=None,
+        metadata={
+            "name": "dVencOrig",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "white_space": "preserve",
+            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
+        },
     )
 
 
 @dataclass(kw_only=True)
 class TcrtctotalCbscredPres:
     """
+
+    "
+
     :ivar p_cred_pres_cbs: Alíquota do crédito presumido para a CBS
     :ivar v_cred_pres_cbs: Valor do Crédito Presumido da CBS
         vCredPresCBS = vBC x pCredPresCBS
@@ -647,6 +924,7 @@ class TcrtctotalCbscredPres:
             "name": "pCredPresCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -656,6 +934,7 @@ class TcrtctotalCbscredPres:
             "name": "vCredPresCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -665,6 +944,9 @@ class TcrtctotalCbscredPres:
 @dataclass(kw_only=True)
 class TcrtctotalIbscredPres:
     """
+
+    "
+
     :ivar p_cred_pres_ibs: Alíquota do crédito presumido para o IBS
     :ivar v_cred_pres_ibs: Valor do Crédito Presumido para o IBS
         vCredPresIBS = vBC x pCredPresIBS
@@ -678,6 +960,7 @@ class TcrtctotalIbscredPres:
             "name": "pCredPresIBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -687,6 +970,7 @@ class TcrtctotalIbscredPres:
             "name": "vCredPresIBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -696,6 +980,9 @@ class TcrtctotalIbscredPres:
 @dataclass(kw_only=True)
 class TcrtctotalIbsmun:
     """
+
+    "
+
     :ivar v_dif_mun: Total do Diferimento do IBS municipal vDifMun =
         vIBSMun x pDifMun
     :ivar v_ibsmun: Total valor do IBS municipal vIBSMun = vBC x
@@ -720,6 +1007,7 @@ class TcrtctotalIbsmun:
             "name": "vIBSMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -729,6 +1017,9 @@ class TcrtctotalIbsmun:
 @dataclass(kw_only=True)
 class TcrtctotalIbsuf:
     """
+
+    "
+
     :ivar v_dif_uf: Total do Diferimento do IBS estadual vDifUF = vIBSUF
         x pDifUF
     :ivar v_ibsuf: Total valor do IBS estadual vIBSUF = vBC x (pIBSUF ou
@@ -753,6 +1044,7 @@ class TcrtctotalIbsuf:
             "name": "vIBSUF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -762,6 +1054,9 @@ class TcrtctotalIbsuf:
 @dataclass(kw_only=True)
 class TcrtctotalTribCompraGov:
     """
+
+    "
+
     :ivar p_ibsuf: Alíquota do IBS de competência do Estado
     :ivar v_ibsuf: Valor do Tributo do IBS da UF calculado
     :ivar p_ibsmun: Alíquota do IBS de competência do Município
@@ -778,6 +1073,7 @@ class TcrtctotalTribCompraGov:
             "name": "pIBSUF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -787,6 +1083,7 @@ class TcrtctotalTribCompraGov:
             "name": "vIBSUF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -796,6 +1093,7 @@ class TcrtctotalTribCompraGov:
             "name": "pIBSMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -805,6 +1103,7 @@ class TcrtctotalTribCompraGov:
             "name": "vIBSMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -814,6 +1113,7 @@ class TcrtctotalTribCompraGov:
             "name": "pCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -823,6 +1123,7 @@ class TcrtctotalTribCompraGov:
             "name": "vCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -832,6 +1133,9 @@ class TcrtctotalTribCompraGov:
 @dataclass(kw_only=True)
 class TcrtctotalTribRegular:
     """
+
+    "
+
     :ivar p_aliq_efe_reg_ibsuf: Alíquota efetiva de tributação regular
         do IBS estadual
     :ivar v_trib_reg_ibsuf: Valor da tributação regular do IBS estadual
@@ -854,6 +1158,7 @@ class TcrtctotalTribRegular:
             "name": "pAliqEfeRegIBSUF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -863,6 +1168,7 @@ class TcrtctotalTribRegular:
             "name": "vTribRegIBSUF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -872,6 +1178,7 @@ class TcrtctotalTribRegular:
             "name": "pAliqEfeRegIBSMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -881,6 +1188,7 @@ class TcrtctotalTribRegular:
             "name": "vTribRegIBSMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -890,6 +1198,7 @@ class TcrtctotalTribRegular:
             "name": "pAliqEfeRegCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -899,6 +1208,7 @@ class TcrtctotalTribRegular:
             "name": "vTribRegCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -908,6 +1218,9 @@ class TcrtctotalTribRegular:
 @dataclass(kw_only=True)
 class TcrtcvaloresIbscbsfed:
     """
+
+    "
+
     :ivar p_cbs: Alíquota da União para CBS parametrizada no sistema
     :ivar p_red_aliq_cbs: Percentual da redução de alíquota da CBS
     :ivar p_aliq_efet_cbs: pAliqEfetCBS = pCBS x (1 - pRedAliqCBS) x (1
@@ -923,6 +1236,7 @@ class TcrtcvaloresIbscbsfed:
             "name": "pCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -942,6 +1256,7 @@ class TcrtcvaloresIbscbsfed:
             "name": "pAliqEfetCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -951,6 +1266,9 @@ class TcrtcvaloresIbscbsfed:
 @dataclass(kw_only=True)
 class TcrtcvaloresIbscbsmun:
     """
+
+    "
+
     :ivar p_ibsmun: Alíquota do Município para IBS da localidade de
         incidência parametrizada no sistema
     :ivar p_red_aliq_mun: Percentual de redução de alíquota municipal
@@ -967,6 +1285,7 @@ class TcrtcvaloresIbscbsmun:
             "name": "pIBSMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -986,6 +1305,7 @@ class TcrtcvaloresIbscbsmun:
             "name": "pAliqEfetMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -995,6 +1315,9 @@ class TcrtcvaloresIbscbsmun:
 @dataclass(kw_only=True)
 class TcrtcvaloresIbscbsuf:
     """
+
+    "
+
     :ivar p_ibsuf: Alíquota da UF para IBS da localidade de incidência
         parametrizada no sistema
     :ivar p_red_aliq_uf: Percentual de redução de alíquota estadual
@@ -1011,6 +1334,7 @@ class TcrtcvaloresIbscbsuf:
             "name": "pIBSUF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -1030,6 +1354,7 @@ class TcrtcvaloresIbscbsuf:
             "name": "pAliqEfetUF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         }
@@ -1039,6 +1364,9 @@ class TcrtcvaloresIbscbsuf:
 @dataclass(kw_only=True)
 class TctribTotalMonet:
     """
+
+    "
+
     :ivar v_tot_trib_fed: Valor monetário total aproximado dos tributos
         federais (R$).
     :ivar v_tot_trib_est: Valor monetário total aproximado dos tributos
@@ -1055,6 +1383,7 @@ class TctribTotalMonet:
             "name": "vTotTribFed",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -1064,6 +1393,7 @@ class TctribTotalMonet:
             "name": "vTotTribEst",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -1073,6 +1403,7 @@ class TctribTotalMonet:
             "name": "vTotTribMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -1082,6 +1413,9 @@ class TctribTotalMonet:
 @dataclass(kw_only=True)
 class TctribTotalPercent:
     """
+
+    "
+
     :ivar p_tot_trib_fed: Valor percentual total aproximado dos tributos
         federais (%).
     :ivar p_tot_trib_est: Valor percentual total aproximado dos tributos
@@ -1098,6 +1432,7 @@ class TctribTotalPercent:
             "name": "pTotTribFed",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
         }
@@ -1107,6 +1442,7 @@ class TctribTotalPercent:
             "name": "pTotTribEst",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
         }
@@ -1116,6 +1452,7 @@ class TctribTotalPercent:
             "name": "pTotTribMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
         }
@@ -1125,8 +1462,15 @@ class TctribTotalPercent:
 @dataclass(kw_only=True)
 class TcvdescCondIncond:
     """
-    :ivar v_desc_incond: Valor monetário do desconto incondicionado (R$)
-    :ivar v_desc_cond: Valor monetário do desconto condicionado (R$)
+
+    "
+
+    :ivar v_desc_incond: Valor monetário do desconto incondicionado
+        (R$). (Para os códigos de tributação nacional do subitem 99.03,
+        vDescIncond = pCopropriedade x vDescIncondTot)
+    :ivar v_desc_cond: Valor monetário do desconto condicionado (R$).
+        (Para os códigos de tributação nacional do subitem 99.03,
+        vDescCond = pCopropriedade x vDescCondTot)
     """
 
     class Meta:
@@ -1157,9 +1501,14 @@ class TcvdescCondIncond:
 @dataclass(kw_only=True)
 class TcvservPrest:
     """
+
+    "
+
     :ivar v_receb: Valor monetário recebido pelo intermediário do
         serviço (R$)
-    :ivar v_serv: Valor dos serviços em R$
+    :ivar v_serv: Valor monetário do serviço (R$). (Para os códigos de
+        tributação nacional do subitem 99.03, vServ = pCopropriedade x
+        vTotOper)
     """
 
     class Meta:
@@ -1180,6 +1529,7 @@ class TcvservPrest:
             "name": "vServ",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -1189,6 +1539,9 @@ class TcvservPrest:
 @dataclass(kw_only=True)
 class TccomExterior:
     """
+
+    "
+
     :ivar md_prestacao: Modo de Prestação: 0 - Desconhecido (tipo não
         informado na nota de origem); 1 - Transfronteiriço; 2 - Consumo
         no Brasil; 3 - Movimento Temporário de Pessoas Físicas; 4 -
@@ -1249,6 +1602,7 @@ class TccomExterior:
             "name": "mdPrestacao",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     vinc_prest: TsvincPrest = field(
@@ -1256,6 +1610,7 @@ class TccomExterior:
             "name": "vincPrest",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     tp_moeda: str = field(
@@ -1263,6 +1618,7 @@ class TccomExterior:
             "name": "tpMoeda",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 3,
             "white_space": "preserve",
             "pattern": r"[0-9]{3}",
@@ -1273,6 +1629,7 @@ class TccomExterior:
             "name": "vServMoeda",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -1282,6 +1639,7 @@ class TccomExterior:
             "name": "mecAFComexP",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     mec_afcomex_t: TsmecAfcomExToma = field(
@@ -1289,6 +1647,7 @@ class TccomExterior:
             "name": "mecAFComexT",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     mov_temp_bens: TsmovTempBens = field(
@@ -1296,6 +1655,7 @@ class TccomExterior:
             "name": "movTempBens",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     n_di: None | str = field(
@@ -1326,6 +1686,7 @@ class TccomExterior:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
@@ -1333,6 +1694,9 @@ class TccomExterior:
 @dataclass(kw_only=True)
 class TcenderObraEvento:
     """
+
+    "
+
     :ivar cep: Número do CEP
     :ivar end_ext: Grupo de informações específicas de endereço no
         exterior
@@ -1368,6 +1732,7 @@ class TcenderObraEvento:
             "name": "xLgr",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
@@ -1378,6 +1743,7 @@ class TcenderObraEvento:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -1401,6 +1767,7 @@ class TcenderObraEvento:
             "name": "xBairro",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -1412,6 +1779,9 @@ class TcenderObraEvento:
 @dataclass(kw_only=True)
 class Tcendereco:
     """
+
+    "
+
     :ivar end_nac: Grupo de informações específicas de endereço nacional
     :ivar end_ext: Grupo de informações específicas de endereço no
         exterior
@@ -1445,6 +1815,7 @@ class Tcendereco:
             "name": "xLgr",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
@@ -1455,6 +1826,7 @@ class Tcendereco:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -1478,6 +1850,7 @@ class Tcendereco:
             "name": "xBairro",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -1489,6 +1862,9 @@ class Tcendereco:
 @dataclass(kw_only=True)
 class TcenderecoEmitente:
     """
+
+    "
+
     :ivar x_lgr: Tipo e nome do logradouro da localização do imóvel
     :ivar nro: Número do imóvel
     :ivar x_cpl: Complemento do endereço
@@ -1507,6 +1883,7 @@ class TcenderecoEmitente:
             "name": "xLgr",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
@@ -1517,6 +1894,7 @@ class TcenderecoEmitente:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -1540,6 +1918,7 @@ class TcenderecoEmitente:
             "name": "xBairro",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -1551,6 +1930,7 @@ class TcenderecoEmitente:
             "name": "cMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{7}",
         }
@@ -1560,6 +1940,7 @@ class TcenderecoEmitente:
             "name": "UF",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     cep: str = field(
@@ -1567,6 +1948,7 @@ class TcenderecoEmitente:
             "name": "CEP",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{8}",
         }
@@ -1576,6 +1958,9 @@ class TcenderecoEmitente:
 @dataclass(kw_only=True)
 class TcenderecoSimples:
     """
+
+    "
+
     :ivar cep: Número do CEP
     :ivar end_ext: Grupo de informações específicas de endereço no
         exterior
@@ -1611,6 +1996,7 @@ class TcenderecoSimples:
             "name": "xLgr",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
@@ -1621,6 +2007,7 @@ class TcenderecoSimples:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -1644,6 +2031,7 @@ class TcenderecoSimples:
             "name": "xBairro",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 60,
             "white_space": "preserve",
@@ -1655,6 +2043,9 @@ class TcenderecoSimples:
 @dataclass(kw_only=True)
 class TcexigSuspensa:
     """
+
+    "
+
     :ivar tp_susp: Opção para Exigibilidade Suspensa: 1 - Exigibilidade
         Suspensa por Decisão Judicial; 2 - Exigibilidade Suspensa por
         Processo Administrativo;
@@ -1670,6 +2061,7 @@ class TcexigSuspensa:
             "name": "tpSusp",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     n_processo: str = field(
@@ -1677,6 +2069,7 @@ class TcexigSuspensa:
             "name": "nProcesso",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "pattern": r"[0-9]{30}",
         }
     )
@@ -1685,6 +2078,9 @@ class TcexigSuspensa:
 @dataclass(kw_only=True)
 class TcinfoCompl:
     """
+
+    "
+
     :ivar id_doc_tec: Identificador de Documento de Responsabilidade
         Técnica: ART, RRT, DRT, Outros.
     :ivar doc_ref: Chave da nota, número identificador da nota, número
@@ -1725,7 +2121,7 @@ class TcinfoCompl:
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         },
     )
     x_ped: None | str = field(
@@ -1757,7 +2153,7 @@ class TcinfoCompl:
             "min_length": 1,
             "max_length": 2000,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         },
     )
 
@@ -1765,9 +2161,9 @@ class TcinfoCompl:
 @dataclass(kw_only=True)
 class TcrtcinfoTributosSitClas:
     """
-    :ivar cst: Código de Situação Tributária do IBS e da CBS
-    :ivar c_class_trib: Código de Classificação Tributária do IBS e da
-        CBS
+
+    "
+
     :ivar c_cred_pres: Código e Classificação do Crédito Presumido: IBS
         e CBS
     :ivar g_trib_regular: Grupo de informações da Tributação Regular
@@ -1778,24 +2174,6 @@ class TcrtcinfoTributosSitClas:
     class Meta:
         name = "TCRTCInfoTributosSitClas"
 
-    cst: str = field(
-        metadata={
-            "name": "CST",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"[0-9]{3}",
-        }
-    )
-    c_class_trib: str = field(
-        metadata={
-            "name": "cClassTrib",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"[0-9]{6}",
-        }
-    )
     c_cred_pres: None | str = field(
         default=None,
         metadata={
@@ -1827,6 +2205,9 @@ class TcrtcinfoTributosSitClas:
 @dataclass(kw_only=True)
 class TcrtclistaDocDfe:
     """
+
+    "
+
     :ivar tipo_chave_dfe: Documento fiscal a que se refere a chaveDfe
         que seja um dos documentos do Repositório Nacional
     :ivar x_tipo_chave_dfe: Descrição da DF-e a que se refere a chaveDfe
@@ -1844,6 +2225,7 @@ class TcrtclistaDocDfe:
             "name": "tipoChaveDFe",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_tipo_chave_dfe: None | str = field(
@@ -1855,7 +2237,7 @@ class TcrtclistaDocDfe:
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         },
     )
     chave_dfe: str = field(
@@ -1863,6 +2245,7 @@ class TcrtclistaDocDfe:
             "name": "chaveDFe",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 50,
             "white_space": "preserve",
@@ -1873,6 +2256,9 @@ class TcrtclistaDocDfe:
 @dataclass(kw_only=True)
 class TcrtclistaDocFornec:
     """
+
+    "
+
     :ivar cnpj: Número da inscrição no Cadastro Nacional de Pessoa
         Jurídica (CNPJ) do Fornecedor do serviço
     :ivar cpf: Número da inscrição no Cadastro de Pessoa Física (CPF) do
@@ -1896,7 +2282,7 @@ class TcrtclistaDocFornec:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "max_length": 14,
             "white_space": "preserve",
-            "pattern": r"[0-9]{14}",
+            "pattern": r"[0-9A-Z]{14}",
         },
     )
     cpf: None | str = field(
@@ -1934,10 +2320,11 @@ class TcrtclistaDocFornec:
             "name": "xNome",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 150,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
 
@@ -1945,6 +2332,9 @@ class TcrtclistaDocFornec:
 @dataclass(kw_only=True)
 class TcrtctotalCbs:
     """
+
+    "
+
     :ivar g_cbscred_pres: Grupo de valores referentes ao crédito
         presumido para CBS
     :ivar v_dif_cbs: Total do Diferimento CBS vDifCBS = vCBS x pDifCBS
@@ -1978,6 +2368,7 @@ class TcrtctotalCbs:
             "name": "vCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -1987,6 +2378,9 @@ class TcrtctotalCbs:
 @dataclass(kw_only=True)
 class TcrtctotalIbs:
     """
+
+    "
+
     :ivar v_ibstot: Valor total do IBS. vIBSTot = vIBSUF + vIBSMun
     :ivar g_ibscred_pres: Grupo de valores referentes ao crédito
         presumido para IBS
@@ -2002,6 +2396,7 @@ class TcrtctotalIbs:
             "name": "vIBSTot",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -2019,6 +2414,7 @@ class TcrtctotalIbs:
             "name": "gIBSUFTot",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     g_ibsmun_tot: TcrtctotalIbsmun = field(
@@ -2026,6 +2422,68 @@ class TcrtctotalIbs:
             "name": "gIBSMunTot",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+        }
+    )
+
+
+@dataclass(kw_only=True)
+class TcrtcvaloresBcimoveis:
+    """
+
+    "
+
+    :ivar tp_ajuste_bcloc_imoveis: Tipo de parcela não integrante da
+        base de cálculo do IBS e da CBS; 01 = Tributos inclusos no
+        aluguel ou equivalente (Ex.: IPTU, Contribuição de melhoria) -
+        apenas para NBS 1.1002.10.00 ou 1.1002.20.00; 02 = Emolumento
+        incluso no aluguel ou equivalente - apenas para NBS 1.1002.10.00
+        ou 1.1002.20.00; 03 = Condomínio incluso no aluguel ou
+        equivalente - apenas para NBS 1.1002.10.00 ou 1.1002.20.00; 04 =
+        Redutor Social - apenas para a NBS 1.1002.10.00; 99 = Outras
+        parcelas inclusas no aluguel ou equivalente;
+    :ivar x_tp_ajuste_bcloc_imoveis: Descrição do tipo de parcela não
+        integrante da base de cálculo do IBS e da CBS quando a opção for
+        "99  = Outras parcelas inclusas no aluguel ou equivalente".
+    :ivar v_ajuste_bcloc_imoveis: Valor monetário utilizado para não
+        inclusão na base de cálculo do IBS e da CBS da NFS-e que está
+        sendo emitida (R$). (Informar o valor total da parcela não
+        integrante da base de cálculo - IPTU, Condomínio, Redutor
+        social, etc. -, não devendo ser inserido o valor proporcional do
+        coproprietário)
+    """
+
+    class Meta:
+        name = "TCRTCValoresBCImoveis"
+
+    tp_ajuste_bcloc_imoveis: TsajusteBclocImoveis = field(
+        metadata={
+            "name": "tpAjusteBCLocImoveis",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+        }
+    )
+    x_tp_ajuste_bcloc_imoveis: None | str = field(
+        default=None,
+        metadata={
+            "name": "xTpAjusteBCLocImoveis",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "min_length": 1,
+            "max_length": 150,
+            "white_space": "preserve",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
+        },
+    )
+    v_ajuste_bcloc_imoveis: str = field(
+        metadata={
+            "name": "vAjusteBCLocImoveis",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
     )
 
@@ -2033,16 +2491,25 @@ class TcrtctotalIbs:
 @dataclass(kw_only=True)
 class TcrtcvaloresIbscbs:
     """
+
+    "
+
     :ivar v_bc: Valor da base de cálculo (BC) do IBS/CBS antes das
         reduções para cálculo do tributo bruto vBC = vServ - descIncond
-        – vCalcReeRepRes – vISSQN – vPIS - vCOFINS (até 2026) ou vBC =
-        vServ - descIncond – vCalcReeRepRes – vISSQN (até 2032)
-    :ivar v_calc_ree_rep_res: Valor monetário (R$) total relativo ao
-        fornecimento próprio de bens materiais ou relacionados a
-        operações de terceiros, objeto de reembolso, repasse ou
-        ressarcimento pelo recebedor, já tributados e aqui referenciados
-        e que não integram da base de cálculo (BC) do ISSQN, do IBS e da
-        CBS.
+        – (vCalcAjusteBCIBSCBS ou vCalcAjusteBCLocImoveis) – vISSQN –
+        vPIS - vCOFINS (até 2026) ou vBC = vServ - descIncond –
+        (vCalcAjusteBCIBSCBS ou vCalcAjusteBCLocImoveis) – vISSQN (a
+        partir de 2027 até 2032)
+    :ivar v_calc_ajuste_bcloc_imoveis: Valor monetário (R$) total
+        relativo aos valores de ajuste (dedução/redução) da Base de
+        Cálculo do IBS e da CBS referentes às operações de locação,
+        cessão onerosa ou arrendamento de bens imóveis. Apenas para os
+        subitens 99.03.
+    :ivar v_calc_ajuste_bcibscbs: Valor monetário (R$) total relativo a
+        glosa de serviços de saúde ou a operações de terceiros, objeto
+        de reembolso, repasse ou ressarcimento pelo recebedor,
+        devidamente referenciados, e que não integram da base de cálculo
+        (BC) do IBS e da CBS.
     :ivar uf: Grupo de Informações relativas aos valores do IBS Estadual
     :ivar mun: Grupo de Informações relativas aos valores do IBS
         Municipal
@@ -2052,19 +2519,30 @@ class TcrtcvaloresIbscbs:
     class Meta:
         name = "TCRTCValoresIBSCBS"
 
-    v_bc: str = field(
+    v_bc: None | str = field(
+        default=None,
         metadata={
             "name": "vBC",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
-        }
+        },
     )
-    v_calc_ree_rep_res: None | str = field(
+    v_calc_ajuste_bcloc_imoveis: None | str = field(
         default=None,
         metadata={
-            "name": "vCalcReeRepRes",
+            "name": "vCalcAjusteBCLocImoveis",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
+        },
+    )
+    v_calc_ajuste_bcibscbs: None | str = field(
+        default=None,
+        metadata={
+            "name": "vCalcAjusteBCIBSCBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "white_space": "preserve",
@@ -2075,18 +2553,21 @@ class TcrtcvaloresIbscbs:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     mun: TcrtcvaloresIbscbsmun = field(
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     fed: TcrtcvaloresIbscbsfed = field(
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
@@ -2094,6 +2575,9 @@ class TcrtcvaloresIbscbs:
 @dataclass(kw_only=True)
 class TcregTrib:
     """
+
+    "
+
     :ivar op_simp_nac: Situação perante o Simples Nacional: 1 - Não
         Optante; 2 - Optante - Microempreendedor Individual (MEI); 3 -
         Optante - Microempresa ou Empresa de Pequeno Porte (ME/EPP);
@@ -2123,6 +2607,7 @@ class TcregTrib:
             "name": "opSimpNac",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     reg_ap_trib_sn: None | TsregimeApuracaoSimpNac = field(
@@ -2138,6 +2623,7 @@ class TcregTrib:
             "name": "regEspTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
@@ -2145,6 +2631,9 @@ class TcregTrib:
 @dataclass(kw_only=True)
 class Tcsubstituicao:
     """
+
+    "
+
     :ivar ch_substda: Chave de acesso da NFS-e a ser substituída
     :ivar c_motivo: Código de justificativa para substituição de NFS-e:
         01 - Desenquadramento de NFS-e do Simples Nacional; 02 -
@@ -2164,9 +2653,10 @@ class Tcsubstituicao:
             "name": "chSubstda",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 50,
             "white_space": "preserve",
-            "pattern": r"[0-9]{50}",
+            "pattern": r"[0-9]{6}([0-9A-Z]{14})[0-9]{30}",
         }
     )
     c_motivo: TscodJustSubst = field(
@@ -2174,6 +2664,7 @@ class Tcsubstituicao:
             "name": "cMotivo",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_motivo: None | str = field(
@@ -2193,6 +2684,9 @@ class Tcsubstituicao:
 @dataclass(kw_only=True)
 class TctribOutrosPisCofins:
     """
+
+    "
+
     :ivar cst: Código de Situação Tributária do PIS/COFINS (CST): 00 -
         Nenhum; 01 - Operação Tributável com Alíquota Básica; 02 -
         Operação Tributável com Alíquota Diferenciada; 03 - Operação
@@ -2258,6 +2752,7 @@ class TctribOutrosPisCofins:
             "name": "CST",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     v_bcpis_cofins: None | str = field(
@@ -2323,6 +2818,9 @@ class TctribOutrosPisCofins:
 @dataclass(kw_only=True)
 class TctribTotal:
     """
+
+    "
+
     :ivar v_tot_trib: Valor monetário total aproximado dos tributos, em
         conformidade com o artigo 1o da Lei no 12.741/2012
     :ivar p_tot_trib: Valor percentual total aproximado dos tributos, em
@@ -2377,8 +2875,11 @@ class TctribTotal:
 @dataclass(kw_only=True)
 class TcvaloresNfse:
     """
-    :ivar v_calc_dr: Valor monetário (R$) de dedução/redução da base de
-        cálculo (BC) do ISSQN.
+
+    "
+
+    :ivar v_calc_ajuste_bcissqn: Valor monetário (R$) do ajuste
+        (dedução/redução) da base de cálculo (BC) do ISSQN.
     :ivar tp_bm: Tipo Benefício Municipal (BM): 1) Isenção; 2) Redução
         da BC em 'ppBM' %; 3) Redução da BC em R$ 'vInfoBM'; 4) Alíquota
         Diferenciada de 'aliqDifBM' %;
@@ -2386,9 +2887,9 @@ class TcvaloresNfse:
         base de cálculo (BC) do ISSQN devido a um benefício municipal
         (BM).
     :ivar v_bc: Valor da Base de Cálculo do ISSQN (R$) = Valor do
-        Serviço - Desconto Incondicionado - Deduções/Reduções -
-        Benefício Municipal vBC = vServ - descIncond - (vDR ou vCalcDR +
-        vCalcReeRepRes) - (vRedBCBM ou VCalcBM)
+        Serviço - Desconto Incondicionado - Ajustes (Deduções/Reduções)
+        - Benefício Municipal vBC = vServ - descIncond - (vAjusteBCISSQN
+        + vCalcAjusteBCISSQN) - (vRedBCBM ou VCalcBM)
     :ivar p_aliq_aplic: Alíquota aplicada sobre a base de cálculo para
         apuração do ISSQN.
     :ivar v_issqn: Valor do ISSQN (R$) = Valor da Base de Cálculo x
@@ -2404,10 +2905,10 @@ class TcvaloresNfse:
     class Meta:
         name = "TCValoresNFSe"
 
-    v_calc_dr: None | str = field(
+    v_calc_ajuste_bcissqn: None | str = field(
         default=None,
         metadata={
-            "name": "vCalcDR",
+            "name": "vCalcAjusteBCISSQN",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "white_space": "preserve",
@@ -2477,6 +2978,7 @@ class TcvaloresNfse:
             "name": "vLiq",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
         }
@@ -2486,6 +2988,9 @@ class TcvaloresNfse:
 @dataclass(kw_only=True)
 class TcatvEvento:
     """
+
+    "
+
     :ivar x_nome: Descrição do evento Artístico, Cultural, Esportivo,
         etc
     :ivar dt_ini: Data de início da atividade de evento. Ano, Mês e Dia
@@ -2507,10 +3012,11 @@ class TcatvEvento:
             "name": "xNome",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 255,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
     dt_ini: str = field(
@@ -2518,6 +3024,7 @@ class TcatvEvento:
             "name": "dtIni",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
         }
@@ -2527,6 +3034,7 @@ class TcatvEvento:
             "name": "dtFim",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
         }
@@ -2554,6 +3062,9 @@ class TcatvEvento:
 @dataclass(kw_only=True)
 class Tcemitente:
     """
+
+    "
+
     :ivar cnpj: Número do CNPJ do emitente da NFS-e.
     :ivar cpf: Número do CPF do emitente da NFS-e.
     :ivar im: Número da inscrição municipal
@@ -2579,7 +3090,7 @@ class Tcemitente:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "max_length": 14,
             "white_space": "preserve",
-            "pattern": r"[0-9]{14}",
+            "pattern": r"[0-9A-Z]{14}",
         },
     )
     cpf: None | str = field(
@@ -2609,6 +3120,7 @@ class Tcemitente:
             "name": "xNome",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 300,
             "white_space": "preserve",
@@ -2630,6 +3142,7 @@ class Tcemitente:
             "name": "enderNac",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     fone: None | str = field(
@@ -2657,6 +3170,9 @@ class Tcemitente:
 @dataclass(kw_only=True)
 class TcinfoObra:
     """
+
+    "
+
     :ivar insc_imob_fisc: Inscrição imobiliária fiscal (código fornecido
         pela Prefeitura Municipal para a identificação da obra ou para
         fins de recolhimento do IPTU)
@@ -2713,10 +3229,11 @@ class TcinfoObra:
 
 @dataclass(kw_only=True)
 class TcinfoPessoa:
-    """
-    Informações das pessoas envolvidas na NFS-e.
+    """Informações das pessoas envolvidas na NFS-e.
 
-    Pode ser o tomador, o intermediário ou o fornecedor (dedução/redução).
+    Pode ser o tomador, o intermediário ou o fornecedor
+    (dedução/redução)
+    "
 
     :ivar cnpj: Número do CNPJ
     :ivar cpf: Número do CPF
@@ -2748,7 +3265,7 @@ class TcinfoPessoa:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "max_length": 14,
             "white_space": "preserve",
-            "pattern": r"[0-9]{14}",
+            "pattern": r"[0-9A-Z]{14}",
         },
     )
     cpf: None | str = field(
@@ -2803,7 +3320,8 @@ class TcinfoPessoa:
             "white_space": "preserve",
         },
     )
-    x_nome: str = field(
+    x_nome: None | str = field(
+        default=None,
         metadata={
             "name": "xNome",
             "type": "Element",
@@ -2811,7 +3329,7 @@ class TcinfoPessoa:
             "min_length": 1,
             "max_length": 300,
             "white_space": "preserve",
-        }
+        },
     )
     end: None | Tcendereco = field(
         default=None,
@@ -2844,11 +3362,11 @@ class TcinfoPessoa:
 
 @dataclass(kw_only=True)
 class TcinfoPrestador:
-    """
-    Informações do prestador da NFS-e.
+    """Informações do prestador da NFS-e.
 
     Difere das demais pessoas por causa das informações de regimes de
-    tributação.
+    tributação
+    "
 
     :ivar cnpj: Número do CNPJ
     :ivar cpf: Número do CPF
@@ -2882,7 +3400,7 @@ class TcinfoPrestador:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "max_length": 14,
             "white_space": "preserve",
-            "pattern": r"[0-9]{14}",
+            "pattern": r"[0-9A-Z]{14}",
         },
     )
     cpf: None | str = field(
@@ -2980,6 +3498,7 @@ class TcinfoPrestador:
             "name": "regTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
@@ -2987,6 +3506,9 @@ class TcinfoPrestador:
 @dataclass(kw_only=True)
 class TcrtcinfoDest:
     """
+
+    "
+
     :ivar cnpj: Número da inscrição no Cadastro Nacional de Pessoa
         Jurídica (CNPJ) do Destinatário do serviço
     :ivar cpf: Número da inscrição no Cadastro de Pessoa Física (CPF) do
@@ -3017,7 +3539,7 @@ class TcrtcinfoDest:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "max_length": 14,
             "white_space": "preserve",
-            "pattern": r"[0-9]{14}",
+            "pattern": r"[0-9A-Z]{14}",
         },
     )
     cpf: None | str = field(
@@ -3055,10 +3577,11 @@ class TcrtcinfoDest:
             "name": "xNome",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 150,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
     end: None | Tcendereco = field(
@@ -3091,18 +3614,136 @@ class TcrtcinfoDest:
 
 
 @dataclass(kw_only=True)
-class TcrtcinfoImovel:
+class TcrtcinfoTribIbscbs:
     """
+
+    "
+
+    :ivar cst: Código de Situação Tributária do IBS e da CBS
+    :ivar c_class_trib: Código de Classificação Tributária do IBS e da
+        CBS
+    :ivar g_ibscbs: Grupo de informações relacionadas ao IBS e à CBS
+    """
+
+    class Meta:
+        name = "TCRTCInfoTribIBSCBS"
+
+    cst: str = field(
+        metadata={
+            "name": "CST",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"[0-9]{3}",
+        }
+    )
+    c_class_trib: str = field(
+        metadata={
+            "name": "cClassTrib",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"[0-9]{6}",
+        }
+    )
+    g_ibscbs: None | TcrtcinfoTributosSitClas = field(
+        default=None,
+        metadata={
+            "name": "gIBSCBS",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
+    )
+
+
+TcrtcinfoTributosIbscbs = TcrtcinfoTribIbscbs
+
+
+@dataclass(kw_only=True)
+class TcrtctotalCibs:
+    """
+
+    "
+
+    :ivar v_tot_nf: Valor Total da NF considerando os impostos por fora:
+        IBS e CBS O IBS e a CBS são por fora, por isso seus valores
+        devem ser adicionados ao valor total da NF vTotNF = vLiq (em
+        2026) vTotNF = vLiq + vCBS + vIBSTot (a partir de 2027)
+    :ivar g_ibs: Grupo de valores referentes ao IBS
+    :ivar g_cbs: Grupo de valores referentes à CBS
+    :ivar g_trib_regular: Grupo de informações de tributação regular
+    :ivar g_trib_compra_gov: Grupo de informações da composição do valor
+        do IBS e da CBS em compras governamentais
+    """
+
+    class Meta:
+        name = "TCRTCTotalCIBS"
+
+    v_tot_nf: str = field(
+        metadata={
+            "name": "vTotNF",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
+        }
+    )
+    g_ibs: None | TcrtctotalIbs = field(
+        default=None,
+        metadata={
+            "name": "gIBS",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
+    )
+    g_cbs: None | TcrtctotalCbs = field(
+        default=None,
+        metadata={
+            "name": "gCBS",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
+    )
+    g_trib_regular: None | TcrtctotalTribRegular = field(
+        default=None,
+        metadata={
+            "name": "gTribRegular",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
+    )
+    g_trib_compra_gov: None | TcrtctotalTribCompraGov = field(
+        default=None,
+        metadata={
+            "name": "gTribCompraGov",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
+    )
+
+
+@dataclass(kw_only=True)
+class TcrtcunidadesImobiliarias:
+    """
+
+    "
+
     :ivar insc_imob_fisc: Inscrição imobiliária fiscal (código fornecido
         pela Prefeitura Municipal para a identificação da obra ou para
         fins de recolhimento do IPTU)
     :ivar c_cib: Código do Cadastro Imobiliário Brasileiro - CIB
-    :ivar end: Grupo de informações do endereço da obra do serviço
-        prestado
+    :ivar end: Grupo de informações do endereço do imóvel.
+    :ivar g_ajuste_bcloc_imoveis: Grupo de informações relativas a
+        valores de ajuste (dedução/redução) da Base de Cálculo do IBS e
+        da CBS referentes às operações de locação, cessão onerosa ou
+        arrendamento de bens imóveis
     """
 
     class Meta:
-        name = "TCRTCInfoImovel"
+        name = "TCRTCUnidadesImobiliarias"
 
     insc_imob_fisc: None | str = field(
         default=None,
@@ -3125,218 +3766,20 @@ class TcrtcinfoImovel:
             "white_space": "preserve",
         },
     )
-    end: None | TcenderObraEvento = field(
+    end: None | TcenderImovel = field(
         default=None,
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
         },
     )
-
-
-@dataclass(kw_only=True)
-class TcrtcinfoTributosIbscbs:
-    """
-    :ivar cst: Código de Situação Tributária do IBS e da CBS
-    :ivar c_class_trib: Código de Classificação Tributária do IBS e da CBS
-    :ivar g_ibscbs: Grupo de informações relacionadas ao IBS e à CBS
-    """
-
-    class Meta:
-        name = "TCRTCInfoTributosIBSCBS"
-
-    cst: str = field(
+    g_ajuste_bcloc_imoveis: list[TcrtcvaloresBcimoveis] = field(
+        default_factory=list,
         metadata={
-            "name": "CST",
+            "name": "gAjusteBCLocImoveis",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"[0-9]{3}",
-        }
-    )
-    c_class_trib: str = field(
-        metadata={
-            "name": "cClassTrib",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"[0-9]{6}",
-        }
-    )
-    g_ibscbs: None | TcrtcinfoTributosSitClas = field(
-        default=None,
-        metadata={
-            "name": "gIBSCBS",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-
-
-@dataclass(kw_only=True)
-class TcrtclistaDoc:
-    """
-    :ivar d_fe_nacional: Grupo de informações de documentos fiscais
-        eletrônicos que se encontram no repositório nacional
-    :ivar doc_fiscal_outro: Grupo de informações de documento fiscais,
-        eletrônicos ou não, que não se encontram no repositório nacional
-    :ivar doc_outro: Grupo de informações de documento não fiscal.
-    :ivar fornec: Grupo de informações do fornecedor do documento
-        referenciado
-    :ivar dt_emi_doc: Data da emissão do documento dedutível Ano, mês e
-        dia (AAAA-MM-DD)
-    :ivar dt_comp_doc: Data da competência do documento dedutível Ano,
-        mês e dia (AAAA-MM-DD)
-    :ivar tp_ree_rep_res: Tipo de valor incluído neste documento,
-        recebido por motivo de estarem relacionadas a operações de
-        terceiros, objeto de reembolso, repasse ou ressarcimento pelo
-        recebedor, já tributados e aqui referenciados
-    :ivar x_tp_ree_rep_res: Descrição do reembolso ou ressarcimento
-        quando a opção é "99 – Outros reembolsos ou ressarcimentos
-        recebidos por valores pagos relativos a operações por conta e
-        ordem de terceiro"
-    :ivar vlr_ree_rep_res: Valor monetário (total ou parcial, conforme
-        documento informado) utilizado para não inclusão na base de
-        cálculo do ISS e do IBS e da CBS da NFS-e que está sendo emitida
-        (R$)
-    """
-
-    class Meta:
-        name = "TCRTCListaDoc"
-
-    d_fe_nacional: None | TcrtclistaDocDfe = field(
-        default=None,
-        metadata={
-            "name": "dFeNacional",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    doc_fiscal_outro: None | TcrtclistaDocFiscalOutro = field(
-        default=None,
-        metadata={
-            "name": "docFiscalOutro",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    doc_outro: None | TcrtclistaDocOutro = field(
-        default=None,
-        metadata={
-            "name": "docOutro",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    fornec: None | TcrtclistaDocFornec = field(
-        default=None,
-        metadata={
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    dt_emi_doc: str = field(
-        metadata={
-            "name": "dtEmiDoc",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
-        }
-    )
-    dt_comp_doc: str = field(
-        metadata={
-            "name": "dtCompDoc",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
-        }
-    )
-    tp_ree_rep_res: TsrtctpReeRepRes = field(
-        metadata={
-            "name": "tpReeRepRes",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        }
-    )
-    x_tp_ree_rep_res: None | str = field(
-        default=None,
-        metadata={
-            "name": "xTpReeRepRes",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "min_length": 1,
-            "max_length": 150,
-            "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
-        },
-    )
-    vlr_ree_rep_res: str = field(
-        metadata={
-            "name": "vlrReeRepRes",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
-        }
-    )
-
-
-@dataclass(kw_only=True)
-class TcrtctotalCibs:
-    """
-    :ivar v_tot_nf: Valor Total da NF considerando os impostos por fora:
-        IBS e CBS O IBS e a CBS são por fora, por isso seus valores
-        devem ser adicionados ao valor total da NF vTotNF = vLiq (em
-        2026) vTotNF = vLiq + vCBS + vIBSTot (a partir de 2027)
-    :ivar g_ibs: Grupo de valores referentes ao IBS
-    :ivar g_cbs: Grupo de valores referentes à CBS
-    :ivar g_trib_regular: Grupo de informações de tributação regular
-    :ivar g_trib_compra_gov: Grupo de informações da composição do valor
-        do IBS e da CBS em compras governamentais
-    """
-
-    class Meta:
-        name = "TCRTCTotalCIBS"
-
-    v_tot_nf: str = field(
-        metadata={
-            "name": "vTotNF",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
-        }
-    )
-    g_ibs: TcrtctotalIbs = field(
-        metadata={
-            "name": "gIBS",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        }
-    )
-    g_cbs: TcrtctotalCbs = field(
-        metadata={
-            "name": "gCBS",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        }
-    )
-    g_trib_regular: None | TcrtctotalTribRegular = field(
-        default=None,
-        metadata={
-            "name": "gTribRegular",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    g_trib_compra_gov: None | TcrtctotalTribCompraGov = field(
-        default=None,
-        metadata={
-            "name": "gTribCompraGov",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "max_occurs": 1000,
         },
     )
 
@@ -3344,6 +3787,9 @@ class TcrtctotalCibs:
 @dataclass(kw_only=True)
 class TctribFederal:
     """
+
+    "
+
     :ivar piscofins: Grupo de informações dos tributos PIS/COFINS
     :ivar v_ret_cp: Valor monetário do CP(R$).
     :ivar v_ret_irrf: Valor monetário do IRRF (R$).
@@ -3395,6 +3841,9 @@ class TctribFederal:
 @dataclass(kw_only=True)
 class TctribMunicipal:
     """
+
+    "
+
     :ivar trib_issqn: Tributação do ISSQN sobre o serviço prestado: 1 -
         Operação tributável; 2 - Imunidade; 3 - Exportação de serviço; 4
         - Não Incidência;
@@ -3442,6 +3891,7 @@ class TctribMunicipal:
             "name": "tribISSQN",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     c_pais_result: None | str = field(
@@ -3483,6 +3933,7 @@ class TctribMunicipal:
             "name": "tpRetISSQN",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     p_aliq: None | str = field(
@@ -3498,144 +3949,116 @@ class TctribMunicipal:
 
 
 @dataclass(kw_only=True)
-class TcdocDedRed:
+class TcdocAjusteBc:
     """
-    :ivar ch_nfse: Chave de Acesso da NFS-e (Padrão Nacional)
-    :ivar ch_nfe: Chave de Acesso da NF-e
-    :ivar nfse_mun: Grupo de informações de Outras NFS-e (Padrão
-        anterior de NFS-e)
-    :ivar nfnfs: Grupo de informações de NF ou NFS (Modelo não
-        eletrônico)
-    :ivar n_doc_fisc: Número de documento fiscal
-    :ivar n_doc: Número de documento não fiscal
-    :ivar tp_ded_red: Identificação da Dedução/Redução: 1 – Alimentação
-        e bebidas/frigobar; 2 – Materiais; 3 - Produção Externa; 4 -
-        Reembolso de despesas; 5 – Repasse consorciado; 6 – Repasse
-        plano de saúde; 7 – Serviços; 8 – Subempreitada de mão de obra;
-        9 - Profissional parceiro; 99 – Outras deduções;
-    :ivar x_desc_out_ded: Descrição da Dedução/Redução quando a opção é
-        "99 – Outras Deduções"
+
+    "
+
+    :ivar tp_ajuste_bc: Tipo de Ajuste
+    :ivar x_tp_ajuste_bc: Descrição do ajuste quando o tipo informado
+        exige detalhamento
+    :ivar v_tot_doc: Valor monetário total do documento informado (R$)
+    :ivar v_ajuste_aplic: Valor monetário efetivamente utilizado para
+        ajuste de base(s) de cálculo do valor do serviço da NFS-e que
+        está sendo emitida (R$)
     :ivar dt_emi_doc: Data da emissão do documento dedutível. Ano, mês e
         dia (AAAA-MM-DD)
-    :ivar v_dedutivel_redutivel: Valor monetário total
-        dedutível/redutível no documento informado (R$). Este é o valor
-        total no documento informado que é passível de dedução/redução.
-    :ivar v_deducao_reducao: Valor monetário utilizado para
-        dedução/redução do valor do serviço da NFS-e que está sendo
-        emitida (R$). Deve ser menor ou igual ao valor
-        deduzível/redutível (vDedutivelRedutivel).
-    :ivar fornec: Grupo de informações do Fornecedor em Deduções de
-        Serviços
+    :ivar dt_comp_doc: Data da competência do documento dedutível. Ano,
+        mês e dia (AAAA-MM-DD)
+    :ivar d_fe_nacional: Grupo de informações de documentos fiscais
+        eletrônicos que se encontram no repositório nacional
+    :ivar doc_fiscal_outro: Grupo de informações de documento fiscais,
+        eletrônicos ou não, que não se encontram no repositório nacional
+    :ivar doc_outro: Grupo de informações de documento não fiscal
+    :ivar fornec: Grupo de informações do fornecedor do serviço prestado
     """
 
     class Meta:
-        name = "TCDocDedRed"
+        name = "TCDocAjusteBC"
 
-    ch_nfse: None | str = field(
-        default=None,
+    tp_ajuste_bc: TsrtctpAjusteBc = field(
         metadata={
-            "name": "chNFSe",
+            "name": "tpAjusteBC",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "max_length": 50,
-            "white_space": "preserve",
-            "pattern": r"[0-9]{50}",
-        },
-    )
-    ch_nfe: None | str = field(
-        default=None,
-        metadata={
-            "name": "chNFe",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "max_length": 44,
-            "white_space": "preserve",
-            "pattern": r"[0-9]{44}",
-        },
-    )
-    nfse_mun: None | TcdocOutNfse = field(
-        default=None,
-        metadata={
-            "name": "NFSeMun",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    nfnfs: None | TcdocNfnfs = field(
-        default=None,
-        metadata={
-            "name": "NFNFS",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    n_doc_fisc: None | str = field(
-        default=None,
-        metadata={
-            "name": "nDocFisc",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "min_length": 1,
-            "max_length": 255,
-            "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
-        },
-    )
-    n_doc: None | str = field(
-        default=None,
-        metadata={
-            "name": "nDoc",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "min_length": 1,
-            "max_length": 255,
-            "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
-        },
-    )
-    tp_ded_red: TsideDedRed = field(
-        metadata={
-            "name": "tpDedRed",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
-    x_desc_out_ded: None | str = field(
+    x_tp_ajuste_bc: None | str = field(
         default=None,
         metadata={
-            "name": "xDescOutDed",
+            "name": "xTpAjusteBC",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "min_length": 1,
             "max_length": 150,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         },
     )
-    dt_emi_doc: XmlDate = field(
+    v_tot_doc: str = field(
+        metadata={
+            "name": "vTotDoc",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
+        }
+    )
+    v_ajuste_aplic: str = field(
+        metadata={
+            "name": "vAjusteAplic",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
+        }
+    )
+    dt_emi_doc: None | str = field(
+        default=None,
         metadata={
             "name": "dtEmiDoc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        }
+            "white_space": "preserve",
+            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
+        },
     )
-    v_dedutivel_redutivel: str = field(
+    dt_comp_doc: None | str = field(
+        default=None,
         metadata={
-            "name": "vDedutivelRedutivel",
+            "name": "dtCompDoc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "white_space": "preserve",
-            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
-        }
+            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
+        },
     )
-    v_deducao_reducao: str = field(
+    d_fe_nacional: None | TcrtclistaDocDfe = field(
+        default=None,
         metadata={
-            "name": "vDeducaoReducao",
+            "name": "dFeNacional",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
-        }
+        },
+    )
+    doc_fiscal_outro: None | TcrtclistaDocFiscalOutro = field(
+        default=None,
+        metadata={
+            "name": "docFiscalOutro",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
+    )
+    doc_outro: None | TcrtclistaDocOutro = field(
+        default=None,
+        metadata={
+            "name": "docOutro",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
     )
     fornec: None | TcinfoPessoa = field(
         default=None,
@@ -3649,6 +4072,9 @@ class TcdocDedRed:
 @dataclass(kw_only=True)
 class TcinfoTributacao:
     """
+
+    "
+
     :ivar trib_mun: Grupo de informações relacionados ao Imposto Sobre
         Serviços de Qualquer Natureza - ISSQN
     :ivar trib_fed: Grupo de informações de outros tributos relacionados
@@ -3665,6 +4091,7 @@ class TcinfoTributacao:
             "name": "tribMun",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     trib_fed: None | TctribFederal = field(
@@ -3680,6 +4107,7 @@ class TcinfoTributacao:
             "name": "totTrib",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
@@ -3687,6 +4115,9 @@ class TcinfoTributacao:
 @dataclass(kw_only=True)
 class Tcrtcibscbs:
     """
+
+    "
+
     :ivar c_localidade_incid: Código IBGE da localidade de incidência do
         IBS/CBS (local da operação)
     :ivar x_localidade_incid: Nome da localidade de incidência do
@@ -3700,16 +4131,18 @@ class Tcrtcibscbs:
     class Meta:
         name = "TCRTCIBSCBS"
 
-    c_localidade_incid: str = field(
+    c_localidade_incid: None | str = field(
+        default=None,
         metadata={
             "name": "cLocalidadeIncid",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "white_space": "preserve",
             "pattern": r"[0-9]{7}",
-        }
+        },
     )
-    x_localidade_incid: str = field(
+    x_localidade_incid: None | str = field(
+        default=None,
         metadata={
             "name": "xLocalidadeIncid",
             "type": "Element",
@@ -3717,8 +4150,8 @@ class Tcrtcibscbs:
             "min_length": 1,
             "max_length": 600,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
-        }
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
+        },
     )
     p_redutor: None | str = field(
         default=None,
@@ -3730,46 +4163,96 @@ class Tcrtcibscbs:
             "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,1}(\.[0-9]{2})?",
         },
     )
-    valores: TcrtcvaloresIbscbs = field(
+    valores: None | TcrtcvaloresIbscbs = field(
+        default=None,
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        }
+        },
     )
     tot_cibs: TcrtctotalCibs = field(
         metadata={
             "name": "totCIBS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
 
 @dataclass(kw_only=True)
-class TcrtcinfoReeRepRes:
+class TcrtcinfoImovel:
     """
-    :ivar documentos: Grupo relativo aos documentos referenciados nos
-        casos de reembolso, repasse e ressarcimento que serão
-        considerados na base de cálculo do ISSQN, do IBS e da CBS
+
+    "
+
+    :ivar c_mun: Código do município do endereço do imóvel (Tabela do
+        IBGE)
+    :ivar g_locacao: Grupo de informações relativas às operações de
+        locação, cessão onerosa ou arrendamento de bens imóveis
+    :ivar g_unid_imob: Grupo de informações relativas às unidades
+        imobiliárias objeto da operação
     """
 
     class Meta:
-        name = "TCRTCInfoReeRepRes"
+        name = "TCRTCInfoImovel"
 
-    documentos: list[TcrtclistaDoc] = field(
+    c_mun: str = field(
+        metadata={
+            "name": "cMun",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
+            "white_space": "preserve",
+            "pattern": r"[0-9]{7}",
+        }
+    )
+    g_locacao: None | TcrtclocacaoImovel = field(
+        default=None,
+        metadata={
+            "name": "gLocacao",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
+    )
+    g_unid_imob: list[TcrtcunidadesImobiliarias] = field(
         default_factory=list,
+        metadata={
+            "name": "gUnidImob",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "max_occurs": 99,
+        },
+    )
+
+
+@dataclass(kw_only=True)
+class TcrtcinfoValoresIbscbs:
+    """
+
+    "
+
+    :ivar trib: Grupo de informações de tributação do IBS e da CBS
+    """
+
+    class Meta:
+        name = "TCRTCInfoValoresIBSCBS"
+
+    trib: TcrtcinfoTribIbscbs = field(
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "min_occurs": 1,
-            "max_occurs": 1000,
-        },
+            "required": True,
+        }
     )
 
 
 @dataclass(kw_only=True)
 class Tcserv:
     """
+
+    "
+
     :ivar loc_prest: Grupo de informações relativas ao local da
         prestação do serviço
     :ivar c_serv: Grupo de informações relativas ao código do serviço
@@ -3790,6 +4273,7 @@ class Tcserv:
             "name": "locPrest",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     c_serv: Tccserv = field(
@@ -3797,6 +4281,7 @@ class Tcserv:
             "name": "cServ",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     com_ext: None | TccomExterior = field(
@@ -3833,19 +4318,22 @@ class Tcserv:
 
 
 @dataclass(kw_only=True)
-class TclistaDocDedRed:
+class TclistaDocAjusteBc:
     """
-    :ivar doc_ded_red: Grupo de informações de documento utilizado para
-        Dedução/Redução do valor do serviço
+
+    "
+
+    :ivar doc_ajuste_bc: Grupo de informações de documento utilizado
+        para ajuste dos valores de base de cálculo (ISSQN e/ou IBS/CBS)
     """
 
     class Meta:
-        name = "TCListaDocDedRed"
+        name = "TCListaDocAjusteBC"
 
-    doc_ded_red: list[TcdocDedRed] = field(
+    doc_ajuste_bc: list[TcdocAjusteBc] = field(
         default_factory=list,
         metadata={
-            "name": "docDedRed",
+            "name": "docAjusteBC",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "min_occurs": 1,
@@ -3855,82 +4343,11 @@ class TclistaDocDedRed:
 
 
 @dataclass(kw_only=True)
-class TcrtcinfoValoresIbscbs:
-    """
-    :ivar g_ree_rep_res: Grupo de informações relativas a valores
-        incluídos neste documento e recebidos por motivo de estarem
-        relacionadas a operações de terceiros, objeto de reembolso,
-        repasse ou ressarcimento pelo recebedor, já tributados e aqui
-        referenciados
-    :ivar trib: Grupo de informações relacionados aos tributos IBS e CBS
-    """
-
-    class Meta:
-        name = "TCRTCInfoValoresIBSCBS"
-
-    g_ree_rep_res: None | TcrtcinfoReeRepRes = field(
-        default=None,
-        metadata={
-            "name": "gReeRepRes",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    trib: TcrtcinfoTributosIbscbs = field(
-        metadata={
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        }
-    )
-
-
-@dataclass(kw_only=True)
-class TcinfoDedRed:
-    """
-    :ivar p_dr: Valor percentual padrão para dedução/redução do valor do
-        serviço
-    :ivar v_dr: Valor monetário padrão para dedução/redução do valor do
-        serviço
-    :ivar documentos: Grupo de informações de documento utilizado para
-        Dedução/Redução do valor do serviço
-    """
-
-    class Meta:
-        name = "TCInfoDedRed"
-
-    p_dr: None | str = field(
-        default=None,
-        metadata={
-            "name": "pDR",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
-        },
-    )
-    v_dr: None | str = field(
-        default=None,
-        metadata={
-            "name": "vDR",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "white_space": "preserve",
-            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
-        },
-    )
-    documentos: None | TclistaDocDedRed = field(
-        default=None,
-        metadata={
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-
-
-@dataclass(kw_only=True)
 class TcrtcinfoIbscbs:
     """
-    :ivar fin_nfse: Indicador da finalidade da emissão de NFS-e
+
+    "
+
     :ivar ind_final: Indica operação de uso ou consumo pessoal (art. 57)
     :ivar c_ind_op: Código indicador da operação de fornecimento,
         conforme tabela "código indicador de operação"
@@ -3942,6 +4359,8 @@ class TcrtcinfoIbscbs:
     :ivar dest: Grupo de informações relativas ao Destinatário
     :ivar imovel: Grupo de informações de operações relacionadas a bens
         imóveis, exceto obras
+    :ivar bens_moveis: Grupo de informações relativas aos bens móveis
+        objetos de locação
     :ivar valores: Grupo de informações relativas aos valores do serviço
         prestado para IBS e CBS
     """
@@ -3997,6 +4416,7 @@ class TcrtcinfoIbscbs:
             "name": "indDest",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         },
     )
     dest: None | TcrtcinfoDest = field(
@@ -4013,23 +4433,82 @@ class TcrtcinfoIbscbs:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
         },
     )
+    bens_moveis: list[TcrtcinfoBensMoveis] = field(
+        default_factory=list,
+        metadata={
+            "name": "bensMoveis",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "max_occurs": 1000,
+        },
+    )
     valores: TcrtcinfoValoresIbscbs = field(
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
+    )
+
+
+@dataclass(kw_only=True)
+class TcinfoAjusteBc:
+    """
+
+    "
+
+    :ivar p_ajuste_bcissqn: Valor percentual padrão para ajuste dos
+        valores de base de cálculo do ISSQN
+    :ivar v_ajuste_bcissqn: Valor monetário padrão para ajuste dos
+        valores de base de cálculo do ISSQN
+    :ivar documentos: Grupo de informações de documento utilizado para
+        ajuste dos valores de base de cálculo (ISSQN e/ou IBS/CBS)
+    """
+
+    class Meta:
+        name = "TCInfoAjusteBC"
+
+    p_ajuste_bcissqn: None | str = field(
+        default=None,
+        metadata={
+            "name": "pAjusteBCISSQN",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,2}(\.[0-9]{2})?",
+        },
+    )
+    v_ajuste_bcissqn: None | str = field(
+        default=None,
+        metadata={
+            "name": "vAjusteBCISSQN",
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "white_space": "preserve",
+            "pattern": r"0|0\.[0-9]{2}|[1-9]{1}[0-9]{0,14}(\.[0-9]{2})?",
+        },
+    )
+    documentos: None | TclistaDocAjusteBc = field(
+        default=None,
+        metadata={
+            "type": "Element",
+            "namespace": "http://www.sped.fazenda.gov.br/nfse",
+        },
     )
 
 
 @dataclass(kw_only=True)
 class TcinfoValores:
     """
+
+    "
+
     :ivar v_serv_prest: Grupo de informações relativas aos valores do
         serviço prestado
     :ivar v_desc_cond_incond: Grupo de informações relativas aos
         descontos condicionados e incondicionados
-    :ivar v_ded_red: Grupo de informações relativas ao valores para
-        dedução/redução do valor da base de cálculo (valor do serviço)
+    :ivar v_ajuste_bc: Grupo de informações relativas ao valores para
+        ajuste dos valores de base de cálculo
     :ivar trib: Grupo de informações relacionados aos tributos
         relacionados ao serviço prestado
     """
@@ -4042,6 +4521,7 @@ class TcinfoValores:
             "name": "vServPrest",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     v_desc_cond_incond: None | TcvdescCondIncond = field(
@@ -4052,10 +4532,10 @@ class TcinfoValores:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
         },
     )
-    v_ded_red: None | TcinfoDedRed = field(
+    v_ajuste_bc: None | TcinfoAjusteBc = field(
         default=None,
         metadata={
-            "name": "vDedRed",
+            "name": "vAjusteBC",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
         },
@@ -4064,6 +4544,7 @@ class TcinfoValores:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
 
@@ -4071,6 +4552,9 @@ class TcinfoValores:
 @dataclass(kw_only=True)
 class TcinfDps:
     """
+
+    "
+
     :ivar tp_amb: Identificação do Ambiente: 1 - Produção; 2 -
         Homologação
     :ivar dh_emi: Data e hora da emissão do DPS. Data e hora no formato
@@ -4088,6 +4572,7 @@ class TcinfDps:
         municipal; 3 - Tomador/Intermediário emitindo NFS-e por recusa
         de emissão pelo prestador; 4 - Tomador/Intermediário emitindo
         por rejeitar a NFS-e emitida pelo prestador;
+    :ivar fin_nfse: Indicador da finalidade da emissão de NFS-e
     :ivar ch_nfse_rej: Chave de Acesso da NFS-e rejeitada pelo
         Tomador/Intermediário.
     :ivar c_loc_emi: O código de município utilizado pelo Sistema
@@ -4128,6 +4613,7 @@ class TcinfDps:
             "name": "tpAmb",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     dh_emi: str = field(
@@ -4135,8 +4621,9 @@ class TcinfDps:
             "name": "dhEmi",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
-            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([\-,\+](0[0-9]|10|11):00|([\+](12):00))",
+            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[13-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([-+](0[0-9]|10|11):00|([\+](12):00))",
         }
     )
     ver_aplic: str = field(
@@ -4144,6 +4631,7 @@ class TcinfDps:
             "name": "verAplic",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 20,
             "white_space": "preserve",
@@ -4154,9 +4642,10 @@ class TcinfDps:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 5,
             "white_space": "preserve",
-            "pattern": r"^0{0,4}\d{1,5}$",
+            "pattern": r"[0-9]{1,4}|[0-8][0-9]{4}",
         }
     )
     n_dps: str = field(
@@ -4164,6 +4653,7 @@ class TcinfDps:
             "name": "nDPS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 15,
             "white_space": "preserve",
             "pattern": r"[1-9]{1}[0-9]{0,14}",
@@ -4174,6 +4664,7 @@ class TcinfDps:
             "name": "dCompet",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))",
         }
@@ -4183,6 +4674,7 @@ class TcinfDps:
             "name": "tpEmit",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     c_motivo_emis_ti: None | TsmotivoEmisTi = field(
@@ -4199,26 +4691,7 @@ class TcinfDps:
             "name": "finNFSe",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
-        },
-    )
-    tp_nfse_debito: None | str = field(
-        default=None,
-        metadata={
-            "name": "tpNFSeDebito",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "max_length": 2,
-            "white_space": "preserve",
-        },
-    )
-    tp_nfse_credito: None | str = field(
-        default=None,
-        metadata={
-            "name": "tpNFSeCredito",
-            "type": "Element",
-            "namespace": "http://www.sped.fazenda.gov.br/nfse",
-            "max_length": 2,
-            "white_space": "preserve",
+            "required": True,
         },
     )
     ch_nfse_rej: None | str = field(
@@ -4229,7 +4702,7 @@ class TcinfDps:
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
             "max_length": 50,
             "white_space": "preserve",
-            "pattern": r"[0-9]{50}",
+            "pattern": r"[0-9]{6}([0-9A-Z]{14})[0-9]{30}",
         },
     )
     c_loc_emi: str = field(
@@ -4237,6 +4710,7 @@ class TcinfDps:
             "name": "cLocEmi",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
             "pattern": r"[0-9]{7}",
         }
@@ -4252,6 +4726,7 @@ class TcinfDps:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     toma: None | TcinfoPessoa = field(
@@ -4272,12 +4747,14 @@ class TcinfDps:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     valores: TcinfoValores = field(
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     ibscbs: None | TcrtcinfoIbscbs = field(
@@ -4292,9 +4769,10 @@ class TcinfDps:
         metadata={
             "name": "Id",
             "type": "Attribute",
+            "required": True,
             "max_length": 45,
             "white_space": "preserve",
-            "pattern": r"DPS[0-9]{42}",
+            "pattern": r"DPS[0-9]{7}(1[0-9]{14}|2[0-9A-Z]{14})[0-9]{20}",
         }
     )
 
@@ -4309,6 +4787,7 @@ class Tcdps:
             "name": "infDPS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     signature: None | Signature = field(
@@ -4322,6 +4801,7 @@ class Tcdps:
     versao: str = field(
         metadata={
             "type": "Attribute",
+            "required": True,
             "max_length": 4,
             "white_space": "preserve",
             "pattern": r"1\.00|1\.01",
@@ -4332,6 +4812,9 @@ class Tcdps:
 @dataclass(kw_only=True)
 class TcinfNfse:
     """
+
+    "
+
     :ivar x_loc_emi: Descrição do código do IBGE do município emissor da
         NFS-e.
     :ivar x_loc_prestacao: Descrição do local da prestação do serviço.
@@ -4393,10 +4876,11 @@ class TcinfNfse:
             "name": "xLocEmi",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 150,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
     x_loc_prestacao: str = field(
@@ -4404,10 +4888,11 @@ class TcinfNfse:
             "name": "xLocPrestacao",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 150,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
     n_nfse: str = field(
@@ -4415,6 +4900,7 @@ class TcinfNfse:
             "name": "nNFSe",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 13,
             "white_space": "preserve",
             "pattern": r"[1-9]{1}[0-9]{0,12}",
@@ -4439,7 +4925,7 @@ class TcinfNfse:
             "min_length": 1,
             "max_length": 150,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         },
     )
     x_trib_nac: str = field(
@@ -4447,10 +4933,11 @@ class TcinfNfse:
             "name": "xTribNac",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 600,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         }
     )
     x_trib_mun: None | str = field(
@@ -4462,7 +4949,7 @@ class TcinfNfse:
             "min_length": 1,
             "max_length": 600,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         },
     )
     x_nbs: None | str = field(
@@ -4474,7 +4961,7 @@ class TcinfNfse:
             "min_length": 1,
             "max_length": 600,
             "white_space": "preserve",
-            "pattern": r"[!-ÿ]{1}[ -ÿ]{0,}[!-ÿ]{1}|[!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         },
     )
     ver_aplic: str = field(
@@ -4482,6 +4969,7 @@ class TcinfNfse:
             "name": "verAplic",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "min_length": 1,
             "max_length": 20,
             "white_space": "preserve",
@@ -4493,6 +4981,7 @@ class TcinfNfse:
             "name": "ambGer",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     tp_emis: TstipoEmissao = field(
@@ -4500,6 +4989,7 @@ class TcinfNfse:
             "name": "tpEmis",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     proc_emi: None | TsprocEmissao = field(
@@ -4515,6 +5005,7 @@ class TcinfNfse:
             "name": "cStat",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     dh_proc: str = field(
@@ -4522,8 +5013,9 @@ class TcinfNfse:
             "name": "dhProc",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "white_space": "preserve",
-            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[1,3-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([\-,\+](0[0-9]|10|11):00|([\+](12):00))",
+            "pattern": r"(((20(([02468][048])|([13579][26]))-02-29))|(20[0-9][0-9])-((((0[1-9])|(1[0-2]))-((0[1-9])|(1\d)|(2[0-8])))|((((0[13578])|(1[02]))-31)|(((0[13-9])|(1[0-2]))-(29|30)))))T(20|21|22|23|[0-1]\d):[0-5]\d:[0-5]\d([-+](0[0-9]|10|11):00|([\+](12):00))",
         }
     )
     n_dfse: str = field(
@@ -4531,6 +5023,7 @@ class TcinfNfse:
             "name": "nDFSe",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
             "max_length": 13,
             "white_space": "preserve",
             "pattern": r"[1-9]{1}[0-9]{0,12}",
@@ -4540,12 +5033,14 @@ class TcinfNfse:
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     valores: TcvaloresNfse = field(
         metadata={
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     x_out_inf: None | str = field(
@@ -4557,7 +5052,7 @@ class TcinfNfse:
             "min_length": 1,
             "max_length": 2000,
             "white_space": "preserve",
-            "pattern": r"[\s\S!-ÿ]{1}[\s\S -ÿ]{0,}[\s\S!-ÿ]{1}|[\s\S!-ÿ]{1}",
+            "pattern": r"[\s\S]*[^\s][\s\S]*",
         },
     )
     ibscbs: None | Tcrtcibscbs = field(
@@ -4573,15 +5068,17 @@ class TcinfNfse:
             "name": "DPS",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     id: str = field(
         metadata={
             "name": "Id",
             "type": "Attribute",
+            "required": True,
             "max_length": 53,
             "white_space": "preserve",
-            "pattern": r"NFS[0-9]{50}",
+            "pattern": r"NFS[0-9]{9}[0-9A-Z]{14}[0-9]{27}",
         }
     )
 
@@ -4596,6 +5093,7 @@ class Tcnfse:
             "name": "infNFSe",
             "type": "Element",
             "namespace": "http://www.sped.fazenda.gov.br/nfse",
+            "required": True,
         }
     )
     signature: Signature = field(
@@ -4603,11 +5101,13 @@ class Tcnfse:
             "name": "Signature",
             "type": "Element",
             "namespace": "http://www.w3.org/2000/09/xmldsig#",
+            "required": True,
         }
     )
     versao: str = field(
         metadata={
             "type": "Attribute",
+            "required": True,
             "max_length": 4,
             "white_space": "preserve",
             "pattern": r"1\.00|1\.01",
