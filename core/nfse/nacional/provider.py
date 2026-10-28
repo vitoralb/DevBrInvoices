@@ -432,8 +432,14 @@ class NacionalProvider(NFSeProvider):
             if client_obj.email and client_obj.email.strip()
             else None
         )
+        client_nif = (
+            client_obj.nif.strip()[:40]
+            if getattr(client_obj, "nif", None) and client_obj.nif.strip()
+            else None
+        )
         toma = TcinfoPessoa(
-            c_nao_nif=TscodNaoNif.VALUE_2,  # 2 = Não exigência do NIF
+            nif=client_nif,
+            c_nao_nif=None if client_nif else TscodNaoNif.VALUE_2,  # 2 = Não exigência do NIF
             x_nome=client_obj.name[:150],
             email=toma_email,
             end=Tcendereco(

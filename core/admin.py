@@ -64,8 +64,8 @@ class CompanySettingsAdmin(admin.ModelAdmin):
 @admin.register(Client)
 class ClientAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
-    list_display = ("name", "country", "email")
-    search_fields = ("name", "email")
+    list_display = ("name", "nif", "country", "email")
+    search_fields = ("name", "nif", "email")
 
 
 class InvoiceItemInline(admin.TabularInline):

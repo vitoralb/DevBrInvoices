@@ -128,7 +128,7 @@
                             </button>
                             {% endif %}
                         </div>
-                        <div class="mb-1"><strong>Cliente:</strong> {{ invoice.client.name }}</div>
+                        <div class="mb-1"><strong>Cliente:</strong> {{ invoice.client.name }}{% if invoice.client.nif %} <span class="text-body-secondary small">(NIF: {{ invoice.client.nif }})</span>{% endif %}</div>
                         <div class="mb-1"><strong>Data de Emissão:</strong> {{ invoice.issue_date|date:"d/m/Y" }}</div>
                         <div><strong>Moeda:</strong> <span class="font-monospace">{{ invoice.currency }}</span></div>
                     </div>

@@ -587,6 +587,7 @@ class ClientForm(forms.ModelForm):
         model = Client
         fields = [
             "name",
+            "nif",
             "email",
             "email_cc",
             "address_line1",
@@ -601,6 +602,7 @@ class ClientForm(forms.ModelForm):
         ]
         labels = {
             "name": "Nome / Razão Social",
+            "nif": "NIF (Número de Identificação Fiscal / Tax ID)",
             "email": "E-mail Principal",
             "email_cc": "E-mails em Cópia (separados por vírgula)",
             "address_line1": "Logradouro / Endereço",
@@ -615,6 +617,7 @@ class ClientForm(forms.ModelForm):
         }
         widgets = {
             "name": forms.TextInput(attrs={"class": "form-control", "placeholder": "Nome ou Razão Social"}),
+            "nif": forms.TextInput(attrs={"class": "form-control", "placeholder": "Ex: 123456789"}),
             "email": forms.EmailInput(attrs={"class": "form-control", "placeholder": "financeiro@cliente.com"}),
             "email_cc": forms.TextInput(attrs={"class": "form-control", "placeholder": "diretoria@cliente.com, contatofin@cliente.com"}),
             "address_line1": forms.TextInput(attrs={"class": "form-control", "placeholder": "Rua / Avenida"}),
@@ -631,6 +634,10 @@ class ClientForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields["address_neighborhood"].required = True
+
+    def clean_nif(self):
+        nif = self.cleaned_data.get("nif", "")
+        return nif.strip() if nif else ""
 
     def clean_address_country_code(self):
         code = self.cleaned_data.get("address_country_code", "")

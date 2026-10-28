@@ -35,6 +35,9 @@
                             <a href="{% url 'client_update' client.id %}" class="text-decoration-none">
                                 {{ client.name }}
                             </a>
+                            {% if client.nif %}
+                            <div class="small text-muted fw-normal">NIF: <span class="font-monospace">{{ client.nif }}</span></div>
+                            {% endif %}
                         </td>
                         <td>
                             {% if client.email %}
