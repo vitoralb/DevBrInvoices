@@ -50,11 +50,19 @@
                 </div>
                 <div class="card-body">
                     <div class="row g-3">
-                        <div class="col-12">
+                        <div class="col-md-8">
                             <label class="form-label fw-semibold" for="{{ form.name.id_for_label }}">{{ form.name.label }} <span class="text-danger">*</span></label>
                             {{ form.name }}
                             {% if form.name.errors %}
                             <div class="text-danger small mt-1">{{ form.name.errors|join:", " }}</div>
+                            {% endif %}
+                        </div>
+                        <div class="col-md-4">
+                            <label class="form-label fw-semibold" for="{{ form.nif.id_for_label }}">{{ form.nif.label }}</label>
+                            {{ form.nif }}
+                            <div class="form-text small">Opcional. Se em branco, usa não exigência de NIF.</div>
+                            {% if form.nif.errors %}
+                            <div class="text-danger small mt-1">{{ form.nif.errors|join:", " }}</div>
                             {% endif %}
                         </div>
                         <div class="col-md-6">

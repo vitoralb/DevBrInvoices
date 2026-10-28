@@ -402,6 +402,9 @@
                 <div class="mb-3">
                     <span class="text-muted small d-block">Tomador / Cliente</span>
                     <strong class="d-block">{{ nf.invoice.client.name }}</strong>
+                    {% if nf.invoice.client.nif %}
+                    <small class="text-body-secondary d-block">NIF: {{ nf.invoice.client.nif }}</small>
+                    {% endif %}
                     {% if nf.invoice.client.address_city and nf.invoice.client.country %}
                     <small class="text-muted">{{ nf.invoice.client.address_city }}, {{ nf.invoice.client.country }}</small>
                     {% elif nf.invoice.client.address_city %}

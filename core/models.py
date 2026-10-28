@@ -208,6 +208,13 @@ class CompanySettings(models.Model):
 class Client(models.Model):
     id = models.UUIDField(primary_key=True, default=uuid.uuid4, editable=False)
     name = models.CharField(max_length=255)
+    nif = models.CharField(
+        max_length=40,
+        blank=True,
+        default="",
+        verbose_name="NIF",
+        help_text="Número de Identificação Fiscal no exterior (NIF / Tax ID)",
+    )
 
     created_at = models.DateTimeField(default=timezone.now)
     updated_at = models.DateTimeField(auto_now=True)
@@ -236,6 +243,8 @@ class Client(models.Model):
     )
 
     def clean(self):
+        if self.nif:
+            self.nif = self.nif.strip()
         if not self.address_neighborhood:
             raise ValidationError(
                 {"address_neighborhood": "Bairro is mandatory for NFS-e Nacional."}

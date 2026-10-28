@@ -400,6 +400,30 @@ class NFSeProviderAbstractionTests(TestCase):
         with self.assertRaises(ValidationError):
             client.clean()
 
+    def test_client_nif_clean_and_whitespace_stripping(self):
+        client = Client(
+            name="NIF Test Client",
+            address_neighborhood="Downtown",
+            nif="  US123456789  ",
+        )
+        client.clean()
+        self.assertEqual(client.nif, "US123456789")
+
+    def test_client_form_nif(self):
+        from core.forms import ClientForm
+
+        form = ClientForm(
+            data={
+                "name": "Form Client",
+                "nif": "  TAX-998877  ",
+                "address_neighborhood": "Central",
+                "address_country_code": "ca",
+            }
+        )
+        self.assertTrue(form.is_valid(), form.errors)
+        self.assertEqual(form.cleaned_data["nif"], "TAX-998877")
+        self.assertEqual(form.cleaned_data["address_country_code"], "CA")
+
     def test_nacional_dps_generation_and_signing(self):
         from core.nfse.nacional.provider import NacionalProvider
 
@@ -444,6 +468,33 @@ class NFSeProviderAbstractionTests(TestCase):
         # Verify tomador email and prestador email are included
         self.assertIn(f"<email>{self.client_obj.email}</email>", signed_xml)
         self.assertIn(f"<email>{self.company.email}</email>", signed_xml)
+
+    def test_nacional_dps_with_client_nif(self):
+        from core.nfse.nacional.provider import NacionalProvider
+
+        self.client_obj.nif = "US987654321"
+        self.client_obj.save()
+
+        nacional_provider = NacionalProvider()
+        dps, signed_xml, id_dps = nacional_provider._build_and_sign_dps(
+            self.invoice, self.company, 1, "1"
+        )
+        self.assertIn("<NIF>US987654321</NIF>", signed_xml)
+        self.assertNotIn("<cNaoNIF>", signed_xml)
+
+    def test_nacional_dps_with_blank_or_whitespace_nif(self):
+        from core.nfse.nacional.provider import NacionalProvider
+
+        for empty_val in ["", "   "]:
+            self.client_obj.nif = empty_val
+            self.client_obj.save()
+
+            nacional_provider = NacionalProvider()
+            dps, signed_xml, id_dps = nacional_provider._build_and_sign_dps(
+                self.invoice, self.company, 1, "1"
+            )
+            self.assertIn("<cNaoNIF>2</cNaoNIF>", signed_xml)
+            self.assertNotIn("<NIF>", signed_xml)
 
     def test_nacional_dps_phone_sanitization(self):
         from core.nfse.nacional.provider import NacionalProvider
