@@ -599,6 +599,194 @@ class NFSeProviderAbstractionTests(TestCase):
         self.assertEqual(result.numero_nf, "88888")
         mock_post.assert_not_called()
 
+    @patch("core.utils.http.requests.post")
+    @patch("core.utils.http.requests.get")
+    def test_nacional_emitir_cnc_habilitado_includes_im(self, mock_get, mock_post):
+        import gzip
+        import base64
+        from core.nfse.nacional.provider import NacionalProvider
+
+        fake_nfse_xml = "<xml><nNFSe>99991</nNFSe></xml>"
+        fake_b64 = base64.b64encode(
+            gzip.compress(fake_nfse_xml.encode("utf-8"))
+        ).decode("utf-8")
+
+        def side_effect_get(url, *args, **kwargs):
+            class MockResp:
+                def __init__(self, sc, j):
+                    self.status_code = sc
+                    self._j = j
+
+                def json(self):
+                    return self._j
+
+                @property
+                def text(self):
+                    return "OK"
+
+            if "/cnc/consulta/cad" in url:
+                return MockResp(
+                    200,
+                    {
+                        "ListaCadastroMunicipal": [
+                            {
+                                "CodigoMunicipio": int(self.company.address_city_ibge),
+                                "InfCad": {
+                                    "Inscricao": self.company.cnpj_clean,
+                                    "InscricaoMunicipal": "000000072611693",
+                                    "SituacaoEmissaoNFSe": "HABILITADO",
+                                },
+                            }
+                        ],
+                        "StatusProcessamento": "DOCUMENTOS_LOCALIZADOS",
+                    },
+                )
+            elif "/dps/" in url:
+                return MockResp(404, {})
+            return MockResp(404, {})
+
+        mock_get.side_effect = side_effect_get
+
+        class MockPostResp:
+            status_code = 201
+
+            def json(self):
+                return {
+                    "tipoAmbiente": 2,
+                    "chaveAcesso": "35503082000000000001910000100000000000999911234567",
+                    "nfseXmlGZipB64": fake_b64,
+                }
+
+            @property
+            def text(self):
+                return "OK"
+
+        mock_post.return_value = MockPostResp()
+
+        provider = NacionalProvider()
+        result = provider.emitir_nfse(self.invoice)
+        self.assertTrue(result.sucesso)
+        self.assertEqual(result.numero_nf, "99991")
+
+        # Verify that mock_post received DPS XML containing <IM>000000072611693</IM>
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args[1]
+        payload = call_kwargs.get("json") or {}
+        compressed = base64.b64decode(payload["dpsXmlGZipB64"])
+        decompressed_xml = gzip.decompress(compressed).decode("utf-8")
+        self.assertIn("<IM>000000072611693</IM>", decompressed_xml)
+
+    @patch("core.utils.http.requests.post")
+    @patch("core.utils.http.requests.get")
+    def test_nacional_emitir_cnc_desabilitado_aborts_emission(self, mock_get, mock_post):
+        from core.nfse.nacional.provider import NacionalProvider
+
+        def side_effect_get(url, *args, **kwargs):
+            class MockResp:
+                def __init__(self, sc, j):
+                    self.status_code = sc
+                    self._j = j
+
+                def json(self):
+                    return self._j
+
+                @property
+                def text(self):
+                    return "OK"
+
+            if "/cnc/consulta/cad" in url:
+                return MockResp(
+                    200,
+                    {
+                        "ListaCadastroMunicipal": [
+                            {
+                                "CodigoMunicipio": int(self.company.address_city_ibge),
+                                "InfCad": {
+                                    "Inscricao": self.company.cnpj_clean,
+                                    "InscricaoMunicipal": "000000072611693",
+                                    "SituacaoEmissaoNFSe": "DESABILITADO",
+                                },
+                            }
+                        ],
+                        "StatusProcessamento": "DOCUMENTOS_LOCALIZADOS",
+                    },
+                )
+            return MockResp(404, {})
+
+        mock_get.side_effect = side_effect_get
+
+        provider = NacionalProvider()
+        result = provider.emitir_nfse(self.invoice)
+        self.assertFalse(result.sucesso)
+        self.assertTrue(any("não está habilitado para emissão" in err for err in result.erros))
+        self.assertTrue(any("DESABILITADO" in err for err in result.erros))
+        # Ensure Sefin Nacional was NEVER called
+        mock_post.assert_not_called()
+
+    @patch("core.utils.http.requests.post")
+    @patch("core.utils.http.requests.get")
+    def test_nacional_emitir_cnc_404_omits_im(self, mock_get, mock_post):
+        import gzip
+        import base64
+        from core.nfse.nacional.provider import NacionalProvider
+
+        fake_nfse_xml = "<xml><nNFSe>99992</nNFSe></xml>"
+        fake_b64 = base64.b64encode(
+            gzip.compress(fake_nfse_xml.encode("utf-8"))
+        ).decode("utf-8")
+
+        def side_effect_get(url, *args, **kwargs):
+            class MockResp:
+                def __init__(self, sc, j):
+                    self.status_code = sc
+                    self._j = j
+
+                def json(self):
+                    return self._j
+
+                @property
+                def text(self):
+                    return "OK"
+
+            if "/cnc/consulta/cad" in url:
+                return MockResp(
+                    404,
+                    {"StatusProcessamento": "NENHUM_DOCUMENTO_LOCALIZADO"},
+                )
+            elif "/dps/" in url:
+                return MockResp(404, {})
+            return MockResp(404, {})
+
+        mock_get.side_effect = side_effect_get
+
+        class MockPostResp:
+            status_code = 201
+
+            def json(self):
+                return {
+                    "tipoAmbiente": 2,
+                    "chaveAcesso": "35503082000000000001910000100000000000999921234567",
+                    "nfseXmlGZipB64": fake_b64,
+                }
+
+            @property
+            def text(self):
+                return "OK"
+
+        mock_post.return_value = MockPostResp()
+
+        provider = NacionalProvider()
+        result = provider.emitir_nfse(self.invoice)
+        self.assertTrue(result.sucesso)
+
+        # Verify that mock_post received DPS XML WITHOUT <IM>
+        mock_post.assert_called_once()
+        call_kwargs = mock_post.call_args[1]
+        payload = call_kwargs.get("json") or {}
+        compressed = base64.b64decode(payload["dpsXmlGZipB64"])
+        decompressed_xml = gzip.decompress(compressed).decode("utf-8")
+        self.assertNotIn("<IM>", decompressed_xml)
+
     def test_dual_error_structure_parsing(self):
         from core.nfse.nacional.provider import NacionalProvider
 
