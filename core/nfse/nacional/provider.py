@@ -8,7 +8,7 @@ import ssl  # noqa: F401 - reserved for future in-memory SSL adapter
 import tempfile
 from contextlib import contextmanager
 from decimal import Decimal
-from typing import Optional, Tuple, List, Union
+from typing import Any, Dict, List, Optional, Tuple, Union
 
 import requests
 
@@ -335,6 +335,189 @@ class NacionalProvider(NFSeProvider):
             "https://adn.nfse.gov.br/contribuintes",
         ).rstrip("/")
 
+    def _get_cnc_url(self, debug_mode: bool) -> str:
+        if debug_mode:
+            return getattr(
+                settings,
+                "NFSE_NACIONAL_CNC_DEBUG_URL",
+                "https://adn.producaorestrita.nfse.gov.br/cnc",
+            ).rstrip("/")
+        return getattr(
+            settings,
+            "NFSE_NACIONAL_CNC_PROD_URL",
+            "https://adn.nfse.gov.br/cnc",
+        ).rstrip("/")
+
+    def _consultar_cnc(
+        self, company: CompanySettings, temp_cert_path: str
+    ) -> Dict[str, Any]:
+        """Consulta o Cadastro Nacional de Contribuintes (CNC) no ADN para verificar
+        se o CNPJ possui cadastro no município emissor e se está habilitado para emissão de NFS-e,
+        além de obter a Inscrição Municipal a ser informada na DPS.
+
+        Regras:
+        - Se o CNC retornar documentos localizados para o CNPJ:
+          - Checa se SituacaoEmissaoNFSe == "HABILITADO" (case-insensitive).
+          - Se NÃO estiver HABILITADO: falha a emissão (habilitado=False).
+          - Se estiver HABILITADO: habilitado=True, IM obtida do CNC (ou da empresa).
+        - Se o CNC retornar 404 / NENHUM_DOCUMENTO_LOCALIZADO:
+          - Município não possui registros complementares no CNC para este CNPJ (ou não conveniado no CNC).
+          - habilitado=True, im=None (para evitar a rejeição E0120).
+        """
+        cnc_base_url = self._get_cnc_url(company.debug_mode)
+        endpoint = f"{cnc_base_url}/consulta/cad"
+        cnpj_prestador = company.cnpj_clean
+        cod_mun = company.address_city_ibge
+
+        params = {
+            "codMunicipio": cod_mun,
+            "inscricaoFederal": cnpj_prestador,
+        }
+        headers = {"Accept": "application/json"}
+
+        try:
+            logger.info(
+                "Consultando CNC no ADN (%s) para CNPJ %s e município %s",
+                endpoint,
+                cnpj_prestador,
+                cod_mun,
+            )
+            resp = _logged_get(
+                endpoint,
+                params=params,
+                headers=headers,
+                cert=temp_cert_path,
+                timeout=20,
+            )
+        except Exception as e:
+            logger.warning(
+                "Falha na requisição ao CNC no ADN para CNPJ %s (município %s): %s",
+                cnpj_prestador,
+                cod_mun,
+                e,
+            )
+            # Em caso de falha de conexão/timeout com o CNC, adota fallback seguro
+            fallback_im = (
+                None
+                if company.debug_mode
+                else (
+                    str(company.inscricao_municipal).strip()[:15]
+                    if company.inscricao_municipal
+                    else None
+                )
+            )
+            return {
+                "habilitado": True,
+                "im": fallback_im,
+                "motivo_inabilitado": None,
+                "raw_response": None,
+            }
+
+        # Status 404 indica que nenhum registro complementar foi localizado no CNC
+        if resp.status_code == 404:
+            logger.info(
+                "Nenhum registro complementar localizado no CNC para CNPJ %s no município %s. Campo IM será omitido da DPS (evita erro E0120).",
+                cnpj_prestador,
+                cod_mun,
+            )
+            return {
+                "habilitado": True,
+                "im": None,
+                "motivo_inabilitado": None,
+                "raw_response": getattr(resp, "json", lambda: None)(),
+            }
+
+        if resp.status_code == 200:
+            try:
+                data = resp.json()
+            except Exception:
+                data = {}
+
+            cadastro_list = data.get("ListaCadastroMunicipal") or []
+            if not cadastro_list:
+                logger.info(
+                    "CNC retornou ListaCadastroMunicipal vazia para CNPJ %s. Campo IM será omitido.",
+                    cnpj_prestador,
+                )
+                return {
+                    "habilitado": True,
+                    "im": None,
+                    "motivo_inabilitado": None,
+                    "raw_response": data,
+                }
+
+            # Localiza o registro correspondente ao município e CNPJ
+            matching_cad = None
+            for cad in cadastro_list:
+                inf_cad = cad.get("InfCad") or {}
+                insc = re.sub(r"\D", "", str(inf_cad.get("Inscricao") or ""))
+                cad_mun = str(cad.get("CodigoMunicipio") or "").strip()
+                if (not insc or insc == cnpj_prestador) and (
+                    not cad_mun or cad_mun == str(cod_mun)
+                ):
+                    matching_cad = cad
+                    break
+            if not matching_cad:
+                matching_cad = cadastro_list[0]
+
+            inf_cad = matching_cad.get("InfCad") or {}
+            situacao_emissao = str(inf_cad.get("SituacaoEmissaoNFSe") or "").strip()
+
+            # Se retornado o cadastro para o CNPJ e SituacaoEmissaoNFSe não estiver Habilitado, falhar a emissão
+            if situacao_emissao.upper() != "HABILITADO":
+                motivo = (
+                    f"Emissão de NFS-e rejeitada: o CNPJ {company.cnpj} não está habilitado para emissão "
+                    f"no CNC do município {cod_mun} (Situação no CNC: '{situacao_emissao or 'NÃO INFORMADA'}')."
+                )
+                logger.error(motivo)
+                return {
+                    "habilitado": False,
+                    "im": None,
+                    "motivo_inabilitado": motivo,
+                    "raw_response": data,
+                }
+
+            # Contribuinte habilitado: incluir IM na DPS (conforme informações complementares do CNC)
+            im_cad = str(inf_cad.get("InscricaoMunicipal") or "").strip()
+            if not im_cad and company.inscricao_municipal:
+                im_cad = str(company.inscricao_municipal).strip()
+
+            im_val = im_cad[:15] if im_cad else None
+            logger.info(
+                "Contribuinte habilitado no CNC para CNPJ %s no município %s. IM a ser informada na DPS: %s",
+                cnpj_prestador,
+                cod_mun,
+                im_val,
+            )
+            return {
+                "habilitado": True,
+                "im": im_val,
+                "motivo_inabilitado": None,
+                "raw_response": data,
+            }
+
+        # Demais status HTTP (ex: 400 ou 500)
+        logger.warning(
+            "Resposta inesperada do CNC (HTTP %s): %s",
+            resp.status_code,
+            getattr(resp, "text", "")[:300],
+        )
+        fallback_im = (
+            None
+            if company.debug_mode
+            else (
+                str(company.inscricao_municipal).strip()[:15]
+                if company.inscricao_municipal
+                else None
+            )
+        )
+        return {
+            "habilitado": True,
+            "im": fallback_im,
+            "motivo_inabilitado": None,
+            "raw_response": None,
+        }
+
     def _get_cert_pems(self) -> Tuple[bytes, bytes]:
 
         company = CompanySettings.load()
@@ -350,6 +533,7 @@ class NacionalProvider(NFSeProvider):
         company: CompanySettings,
         numero_dps: int,
         serie_dps: str,
+        im_prestador: Optional[str] = None,
     ) -> Tuple[Dps, str, str]:
         """Builds Dps dataclass and returns (dps_obj, signed_xml, id_dps)."""
         from core.services import _prepare_nf_data
@@ -513,7 +697,7 @@ class NacionalProvider(NFSeProvider):
                     cnpj=cnpj_prestador,
                     email=prest_email,
                     fone=prest_phone,
-                    im=None,  # IM is optional and rejected with E0120 when municipality has no CNC complementary records
+                    im=im_prestador,  # IM is populated when complementary records exist in CNC; omitted when absent to prevent E0120
                     x_nome=None,  # E0121: O nome ou razão social do prestador não deve ser informado quando tpEmit=1 (o próprio prestador)
                     reg_trib=TcregTrib(
                         op_simp_nac="3",  # 3 = Optante - ME/EPP (Simples Nacional)
@@ -783,19 +967,17 @@ class NacionalProvider(NFSeProvider):
         serie_dps = str(invoice.document_series or "1")
         numero_dps = invoice.document_number
 
-        try:
-            _, signed_xml, id_dps = self._build_and_sign_dps(
-                invoice, company, numero_dps, serie_dps
-            )
-        except Exception as e:
-            logger.error(
-                "Erro ao preparar/assinar DPS Nacional para invoice %s: %s",
-                invoice.invoice_number,
-                e,
-            )
+        # Validate fiscal code constraints early
+        c_trib_mun = str(
+            getattr(invoice, "codigo_servico_municipio", "") or ""
+        ).strip()
+        if c_trib_mun and (len(c_trib_mun) > 3 or not c_trib_mun.isdigit()):
             return EmitResult(
                 sucesso=False,
-                erros=[str(e)],
+                erros=[
+                    f"Código de Serviço do Município ('{c_trib_mun}') possui mais de 3 dígitos. "
+                    "Para emissão via DPS Nacional, o cTribMun deve ter no máximo 3 dígitos."
+                ],
             )
 
         base_url, _ = self._get_urls(company.debug_mode)
@@ -803,6 +985,40 @@ class NacionalProvider(NFSeProvider):
 
         key_pem, cert_pem = self._get_cert_pems()
         with _temp_cert_file(cert_pem, key_pem) as temp_cert_path:
+            # 1. Consultar CNC para checar habilitação do CNPJ e necessidade de inclusão da IM
+            cnc_info = self._consultar_cnc(company, temp_cert_path)
+            if not cnc_info.get("habilitado", True):
+                motivo = (
+                    cnc_info.get("motivo_inabilitado")
+                    or "CNPJ não habilitado para emissão de NFS-e no CNC."
+                )
+                logger.error(
+                    "Emissão abortada para invoice %s: %s",
+                    invoice.invoice_number,
+                    motivo,
+                )
+                return EmitResult(
+                    sucesso=False,
+                    erros=[motivo],
+                )
+
+            im_prestador = cnc_info.get("im")
+
+            try:
+                _, signed_xml, id_dps = self._build_and_sign_dps(
+                    invoice, company, numero_dps, serie_dps, im_prestador=im_prestador
+                )
+            except Exception as e:
+                logger.error(
+                    "Erro ao preparar/assinar DPS Nacional para invoice %s: %s",
+                    invoice.invoice_number,
+                    e,
+                )
+                return EmitResult(
+                    sucesso=False,
+                    erros=[str(e)],
+                )
+
             try:
 
                 # Idempotency pre-check: Was this DPS already issued?
